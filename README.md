@@ -67,6 +67,20 @@ The **Model Swarm** system enables multiple small models to work together, achie
 | **Fastest First** | Start fast, escalate if confidence low | Low latency |
 | **Confidence Fusion** | Weighted combination of outputs | High reliability |
 
+---
+
+## 🏗️ Architecture & Privacy
+
+**Farnsworth runs 100% locally on your machine.**
+
+- **No Server Costs:** You do not need to pay for hosting.
+- **Your Data:** All memories and files stay on your computer.
+- **How it connects:** The [Claude Desktop App](https://claude.ai/download) spawns Farnsworth as a background process using the Model Context Protocol (MCP).
+
+You (the developer) publish the *code*. The user downloads and runs it.
+
+---
+
 ### Supported Models (Jan 2025)
 
 | Model | Params | RAM | Strengths |
