@@ -58,6 +58,7 @@ from farnsworth.agents.filesystem_agent import (
     FileChange,
     SearchResult as FileSearchResult,
 )
+from farnsworth.agents.proactive_agent import ProactiveAgent, Suggestion
 
 # Q2 2025 - Agent Collaboration
 from farnsworth.agents.agent_debates import (
@@ -134,4 +135,7 @@ __all__ = [
     "AgentRole",
     "TeamStatus",
     "TaskAssignment",
+    # Q2 2025 - Proactive Intelligence
+    "ProactiveAgent",
+    "Suggestion",
 ]

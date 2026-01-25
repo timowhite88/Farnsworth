@@ -61,6 +61,8 @@ class FarnsworthMCPServer:
         # Lazy-loaded components
         self._memory_system = None
         self._swarm_orchestrator = None
+        self._planner_agent = None
+        self._proactive_agent = None
         self._fitness_tracker = None
         self._model_manager = None
 
@@ -82,12 +84,25 @@ class FarnsworthMCPServer:
             # Import here to avoid circular imports
             from farnsworth.memory.memory_system import MemorySystem
             from farnsworth.agents.swarm_orchestrator import SwarmOrchestrator
+            from farnsworth.agents.planner_agent import PlannerAgent
+            from farnsworth.agents.proactive_agent import ProactiveAgent
             from farnsworth.evolution.fitness_tracker import FitnessTracker
             from farnsworth.core.model_manager import ModelManager
 
             # Initialize memory system
             self._memory_system = MemorySystem(data_dir=str(self.data_dir))
             await self._memory_system.initialize()
+
+            # Initialize planner
+            self._planner_agent = PlannerAgent()
+
+            # Initialize proactive agent
+            self._proactive_agent = ProactiveAgent(
+                memory_system=self._memory_system,
+                planner_agent=self._planner_agent,
+                llm_fn=None, # Will be wired via ModelManager later
+            )
+            await self._proactive_agent.start()
 
             # Initialize swarm orchestrator
             self._swarm_orchestrator = SwarmOrchestrator()
@@ -98,6 +113,11 @@ class FarnsworthMCPServer:
             # Initialize model manager
             self._model_manager = ModelManager()
             await self._model_manager.initialize()
+
+            # Wire up LLM
+            if self._model_manager:
+                self._proactive_agent.llm_fn = self._model_manager.generate
+                self._planner_agent.llm_fn = self._model_manager.generate
 
             logger.info("Farnsworth components initialized")
 
@@ -352,6 +372,29 @@ class FarnsworthMCPServer:
         except Exception as e:
             return f"Error: {e}"
 
+    async def get_proactive_suggestions(self) -> str:
+        """Get proactive suggestions resource."""
+        await self._ensure_initialized()
+        self.stats["resource_reads"] += 1
+
+        try:
+            if self._proactive_agent:
+                suggestions = [
+                    {
+                        "id": s.id,
+                        "title": s.title,
+                        "description": s.description,
+                        "confidence": s.confidence,
+                        "action": s.action_type
+                    }
+                    for s in self._proactive_agent.suggestions
+                    if not s.is_dismissed
+                ]
+                return json.dumps(suggestions, indent=2)
+            return "[]"
+        except Exception as e:
+            return f"Error: {e}"
+
 
 def create_mcp_server() -> Server:
     """Create and configure the MCP server."""
@@ -508,6 +551,12 @@ def create_mcp_server() -> Server:
                 description="System performance and evolution metrics",
                 mimeType="application/json",
             ),
+            Resource(
+                uri="farnsworth://proactive/suggestions",
+                name="Proactive Suggestions",
+                description="Anticipatory suggestions from the proactive agent",
+                mimeType="application/json",
+            ),
         ]
 
     @server.read_resource()
@@ -520,6 +569,8 @@ def create_mcp_server() -> Server:
             content = await farnsworth.get_active_agents()
         elif uri == "farnsworth://evolution/fitness":
             content = await farnsworth.get_fitness_metrics()
+        elif uri == "farnsworth://proactive/suggestions":
+            content = await farnsworth.get_proactive_suggestions()
         else:
             content = f"Unknown resource: {uri}"
 
