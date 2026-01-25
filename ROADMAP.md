@@ -6,10 +6,11 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Current Version: 0.1.0 (Initial Release)
+## Current Version: 0.2.0 (Enhanced Memory Release)
 
 ### Completed Features ✅
 
+**v0.1.0 (Initial Release)**
 - [x] MemGPT-style hierarchical memory system
 - [x] Multi-backend LLM support (Ollama, llama.cpp, BitNet)
 - [x] Agent swarm with specialists (Code, Reasoning, Research, Creative)
@@ -18,43 +19,57 @@ This document outlines planned features and improvements for Farnsworth. Feature
 - [x] Streamlit dashboard
 - [x] Basic multimodal support (images, audio, documents)
 
+**v0.2.0 (Q1 2025) - COMPLETED**
+- [x] Episodic Memory Timeline (`farnsworth/memory/episodic_memory.py`)
+- [x] Semantic Memory Layers (`farnsworth/memory/semantic_layers.py`)
+- [x] Memory Sharing/Export/Import (`farnsworth/memory/memory_sharing.py`)
+- [x] Enhanced Knowledge Graph v2 (`farnsworth/memory/knowledge_graph_v2.py`)
+- [x] Hybrid Search v2 (`farnsworth/rag/hybrid_search_v2.py`)
+- [x] Context Compression (`farnsworth/rag/context_compression.py`)
+
 ---
 
-## Version 0.2.0 - Enhanced Memory (Q1 2025)
+## Version 0.2.0 - Enhanced Memory (Q1 2025) ✅ COMPLETED
 
 ### Memory Improvements 🧠
 
-- [ ] **Episodic Memory Timeline**
+- [x] **Episodic Memory Timeline**
   - Visual timeline of all interactions
   - "On this day" memory surfacing
   - Session replay capability
+  - Event-based memory organization
 
-- [ ] **Semantic Memory Layers**
+- [x] **Semantic Memory Layers**
   - Automatic concept hierarchy extraction
   - Abstract knowledge distillation
   - Cross-domain connection discovery
+  - Multi-level abstraction (Instance → Category → Concept → Principle → Domain)
 
-- [ ] **Memory Sharing**
-  - Export memory snapshots
+- [x] **Memory Sharing**
+  - Export memory snapshots (JSON, compressed, archive)
   - Import memories from other Farnsworth instances
   - Selective memory backup/restore
+  - Merge strategies (skip, overwrite, keep newer, keep both)
 
-- [ ] **Enhanced Knowledge Graph**
-  - 3D graph visualization
+- [x] **Enhanced Knowledge Graph**
+  - 3D graph visualization data support
   - Temporal edge tracking (relationships over time)
   - Automated entity resolution and merging
+  - Relationship stability scoring
 
 ### Better Retrieval 🔍
 
-- [ ] **Hybrid Search v2**
+- [x] **Hybrid Search v2**
   - Query understanding with intent classification
   - Multi-hop retrieval for complex questions
   - Source attribution and confidence scoring
+  - Query expansion and reformulation
 
-- [ ] **Context Compression**
+- [x] **Context Compression**
   - Intelligent summarization of retrieved context
   - Priority-based context allocation
   - Token-efficient memory injection
+  - Semantic deduplication
 
 ---
 
@@ -319,6 +334,7 @@ Have an idea not on this list? Open a GitHub issue with the `feature-request` la
 | Version | Release Date | Highlights |
 |---------|--------------|------------|
 | 0.1.0   | Jan 2025     | Initial release |
+| 0.2.0   | Jan 2025     | Enhanced Memory: Episodic timeline, semantic layers, memory sharing, knowledge graph v2, hybrid search v2, context compression |
 
 ---
 
