@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "farnsworth"
-version = "0.1.0"
+version = "0.5.0"
 description = "Self-evolving companion AI with MemGPT-style memory and LangGraph agent swarm"
 readme = "README.md"
 license = {text = "MIT"}

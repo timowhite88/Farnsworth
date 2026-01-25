@@ -37,6 +37,7 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 ## ✨ What's New in v0.5.0
 
 - 🐝 **Model Swarm** - PSO-based collaborative inference with multiple small models
+- 🔮 **Proactive Intelligence** - Anticipatory suggestions based on context and habits
 - 🚀 **12+ New Models** - Phi-4-mini, SmolLM2, Qwen3-4B, TinyLlama, BitNet 2B
 - ⚡ **Ultra-Efficient** - Run on <2GB RAM with TinyLlama, Qwen3-0.6B
 - 🎯 **Smart Routing** - Mixture-of-Experts automatically picks best model per task

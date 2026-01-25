@@ -6,7 +6,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Current Version: 0.4.0 (Multimodal & Collaboration Release)
+## Current Version: 0.5.0 (Proactive Intelligence & Model Swarm)
 
 ### Completed Features ✅
 
@@ -138,7 +138,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ### Proactive Features 💡
 
-- [ ] **Anticipatory Suggestions**
+- [x] **Anticipatory Suggestions**
   - Predict what you might need next
   - Proactive memory surfacing
   - "You might want to know..." notifications
