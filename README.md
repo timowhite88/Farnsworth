@@ -2,14 +2,15 @@
 
 <div align="center">
 
-**Give Claude superpowers: persistent memory, specialist agents, and self-evolution.**
+**Give Claude superpowers: persistent memory, specialist agents, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](docker/)
 
-[**Documentation**](docs/USER_GUIDE.md) • [**Roadmap**](ROADMAP.md) • [**Contributing**](CONTRIBUTING.md)
+[**Documentation**](docs/USER_GUIDE.md) • [**Roadmap**](ROADMAP.md) • [**Contributing**](CONTRIBUTING.md) • [**Docker**](docker/)
 
 </div>
 
@@ -22,32 +23,49 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 | Without Farnsworth | With Farnsworth |
 |:------------------:|:---------------:|
 | 🚫 Claude forgets everything between sessions | ✅ Claude remembers your preferences forever |
-| 🚫 Claude is a single model | ✅ Claude can delegate to specialist agents |
+| 🚫 Claude is a single model | ✅ Claude can delegate to 8+ specialist agents |
+| 🚫 Claude can't see images or hear audio | ✅ Multimodal: vision (CLIP/BLIP) + voice (Whisper) |
 | 🚫 Claude never learns from feedback | ✅ Claude evolves and adapts to you |
+| 🚫 Single user only | ✅ Team collaboration with shared memory |
 | 🚫 You can't see what Claude "knows" | ✅ Visual dashboard shows everything |
 
 **All processing happens locally on your machine.** Your data never leaves your computer.
 
 ---
 
+## ✨ What's New in v0.4.0
+
+- 🖼️ **Vision Module** - CLIP/BLIP image understanding, VQA, OCR
+- 🎤 **Voice Module** - Whisper transcription, speaker diarization, TTS
+- 📦 **Docker Support** - One-command deployment with GPU support
+- 👥 **Team Collaboration** - Shared memory pools, multi-user sessions
+- 🔐 **Enterprise Security** - Role-based access, audit logging
+- 🤖 **7 New Agents** - Planner, Critic, Web, FileSystem + collaboration
+
+---
+
 ## ⚡ Quick Start
 
-### 1. Install
+### Option 1: Docker (Recommended)
+
+```bash
+git clone https://github.com/timowhite88/Farnsworth.git
+cd Farnsworth
+docker-compose -f docker/docker-compose.yml up -d
+```
+
+### Option 2: Local Install
 
 ```bash
 git clone https://github.com/timowhite88/Farnsworth.git
 cd Farnsworth
 pip install -r requirements.txt
-```
 
-### 2. Download a Local LLM
-
-```bash
 # Install Ollama from https://ollama.ai, then:
 ollama pull deepseek-r1:1.5b
 ```
 
-### 3. Configure Claude Code
+### Configure Claude Code
 
 Add to your Claude Code MCP settings:
 
@@ -63,7 +81,7 @@ Add to your Claude Code MCP settings:
 }
 ```
 
-### 4. Start Using!
+### Start Using!
 
 ```
 You: "Remember that I prefer TypeScript over JavaScript"
@@ -81,25 +99,72 @@ Claude: "Based on your preference for TypeScript..."
 
 ## 🌟 Key Features
 
-### 🧠 Persistent Memory
+### 🧠 Advanced Memory System
 
-Claude finally remembers! Farnsworth gives Claude a hierarchical memory system:
+Claude finally remembers! Multi-tier hierarchical memory:
 
-- **Working Memory** - Current conversation context
-- **Archival Memory** - Permanent storage of facts and preferences
-- **Knowledge Graph** - Entities and relationships
-- **Memory Dreaming** - Background consolidation during idle time
+| Memory Type | Description |
+|-------------|-------------|
+| **Working Memory** | Current conversation context |
+| **Episodic Memory** | Timeline of interactions, "on this day" recall |
+| **Semantic Layers** | 5-level abstraction hierarchy |
+| **Knowledge Graph** | Entities, relationships, temporal edges |
+| **Archival Memory** | Permanent vector-indexed storage |
+| **Memory Dreaming** | Background consolidation during idle time |
 
-### 🤖 Agent Swarm
+### 🤖 Agent Swarm (11 Specialists)
 
-Claude can delegate tasks to specialist AI agents:
+Claude can delegate tasks to AI agents:
 
-| Agent | Specialty |
-|-------|-----------|
+| Core Agents | Description |
+|-------------|-------------|
 | **Code Agent** | Programming, debugging, code review |
 | **Reasoning Agent** | Logic, math, step-by-step analysis |
 | **Research Agent** | Information gathering, summarization |
 | **Creative Agent** | Writing, brainstorming, ideation |
+
+| Advanced Agents (v0.3+) | Description |
+|-------------------------|-------------|
+| **Planner Agent** | Task decomposition, dependency tracking |
+| **Critic Agent** | Quality scoring, iterative refinement |
+| **Web Agent** | Intelligent browsing, form filling |
+| **FileSystem Agent** | Project understanding, smart search |
+
+| Collaboration (v0.3+) | Description |
+|-----------------------|-------------|
+| **Agent Debates** | Multi-perspective synthesis |
+| **Specialization Learning** | Skill development, task routing |
+| **Hierarchical Teams** | Manager coordination, load balancing |
+
+### 🖼️ Vision Understanding (v0.4+)
+
+See and understand images:
+
+- **CLIP Integration** - Zero-shot classification, image embeddings
+- **BLIP Integration** - Captioning, visual question answering
+- **OCR** - Extract text from images (EasyOCR)
+- **Scene Graphs** - Extract objects and relationships
+- **Image Similarity** - Compare and search images
+
+### 🎤 Voice Interaction (v0.4+)
+
+Hear and speak:
+
+- **Whisper Transcription** - Real-time and batch processing
+- **Speaker Diarization** - Identify different speakers
+- **Text-to-Speech** - Multiple voice options
+- **Voice Commands** - Natural language control
+- **Continuous Listening** - Hands-free mode
+
+### 👥 Team Collaboration (v0.4+)
+
+Work together with shared AI:
+
+- **Shared Memory Pools** - Team knowledge bases
+- **Multi-User Support** - Individual profiles and preferences
+- **Permission System** - Role-based access control
+- **Collaborative Sessions** - Real-time multi-user interaction
+- **Audit Logging** - Compliance-ready access trails
 
 ### 📈 Self-Evolution
 
@@ -108,14 +173,17 @@ Farnsworth learns from your feedback and improves automatically:
 - **Fitness Tracking** - Monitors task success, efficiency, satisfaction
 - **Genetic Optimization** - Evolves better configurations over time
 - **User Avatar** - Builds a model of your preferences
+- **LoRA Evolution** - Adapts model weights to your usage
 
-### 🔍 Smart Retrieval
+### 🔍 Smart Retrieval (RAG 2.0)
 
-Self-refining RAG that gets better at finding relevant information:
+Self-refining retrieval that gets better at finding relevant information:
 
-- Hybrid semantic + keyword search
-- Genetic evolution of retrieval strategies
-- Automatic query expansion
+- **Hybrid Search** - Semantic + BM25 keyword search
+- **Query Understanding** - Intent classification, expansion
+- **Multi-hop Retrieval** - Complex question answering
+- **Context Compression** - Token-efficient memory injection
+- **Source Attribution** - Confidence scoring
 
 ---
 
@@ -131,22 +199,34 @@ Self-refining RAG that gets better at finding relevant information:
 ┌─────────────────────────────────────────────────────────────┐
 │                  Farnsworth MCP Server                       │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │ Memory   │ │ Agent    │ │Evolution │ │Resources │       │
-│  │ Tools    │ │ Tools    │ │ Tools    │ │(streams) │       │
+│  │ Memory   │ │ Agent    │ │Evolution │ │Multimodal│       │
+│  │ Tools    │ │ Tools    │ │ Tools    │ │ Tools    │       │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
 └─────────────────────────────────────────────────────────────┘
           │                │                │
           ▼                ▼                ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   Memory     │  │    Agent     │  │  Evolution   │
+│   Memory     │  │    Agent     │  │  Multimodal  │
 │   System     │  │    Swarm     │  │   Engine     │
 │              │  │              │  │              │
-│ • Virtual    │  │ • Code       │  │ • Genetic    │
-│   Context    │  │ • Reasoning  │  │   Optimizer  │
-│ • Archival   │  │ • Research   │  │ • Fitness    │
-│ • Knowledge  │  │ • Creative   │  │   Tracker    │
-│   Graph      │  │ • User       │  │ • Behavior   │
-│ • Dreaming   │  │   Avatar     │  │   Mutation   │
+│ • Episodic   │  │ • Planner    │  │ • Vision     │
+│ • Semantic   │  │ • Critic     │  │   (CLIP/BLIP)│
+│ • Knowledge  │  │ • Web        │  │ • Voice      │
+│   Graph v2   │  │ • FileSystem │  │   (Whisper)  │
+│ • Archival   │  │ • Debates    │  │ • OCR        │
+│ • Sharing    │  │ • Teams      │  │ • TTS        │
+└──────────────┘  └──────────────┘  └──────────────┘
+          │                │                │
+          ▼                ▼                ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  Evolution   │  │Collaboration │  │   Storage    │
+│   Engine     │  │   System     │  │   Backends   │
+│              │  │              │  │              │
+│ • Genetic    │  │ • Multi-User │  │ • FAISS      │
+│   Optimizer  │  │ • Shared     │  │ • ChromaDB   │
+│ • Fitness    │  │   Memory     │  │ • Redis      │
+│   Tracker    │  │ • Sessions   │  │ • SQLite     │
+│ • LoRA       │  │ • Permissions│  │              │
 └──────────────┘  └──────────────┘  └──────────────┘
           │                │                │
           └────────────────┴────────────────┘
@@ -174,6 +254,31 @@ Once connected, Claude has access to these tools:
 | `farnsworth_delegate(task, agent_type)` | Delegate to specialist agent |
 | `farnsworth_evolve(feedback)` | Provide feedback for system improvement |
 | `farnsworth_status()` | Get system health and statistics |
+| `farnsworth_vision(image, task)` | Analyze images (caption, VQA, OCR) |
+| `farnsworth_voice(audio, task)` | Process audio (transcribe, diarize) |
+| `farnsworth_collaborate(action, ...)` | Team collaboration operations |
+
+---
+
+## 📦 Docker Deployment
+
+Multiple deployment profiles available:
+
+```bash
+# Basic deployment
+docker-compose -f docker/docker-compose.yml up -d
+
+# With GPU support
+docker-compose -f docker/docker-compose.yml --profile gpu up -d
+
+# With Ollama + ChromaDB
+docker-compose -f docker/docker-compose.yml --profile ollama --profile chromadb up -d
+
+# Development mode (hot reload + debugger)
+docker-compose -f docker/docker-compose.yml --profile dev up -d
+```
+
+See [docker/docker-compose.yml](docker/docker-compose.yml) for all options.
 
 ---
 
@@ -183,15 +288,19 @@ Farnsworth includes a Streamlit dashboard for visualization:
 
 ```bash
 python main.py --ui
+# Or with Docker:
+docker-compose -f docker/docker-compose.yml --profile ui-only up -d
 ```
 
 <details>
-<summary>📸 Dashboard Screenshots</summary>
+<summary>📸 Dashboard Features</summary>
 
 - **Memory Browser** - Search and explore all stored memories
-- **Knowledge Graph** - Visual entity relationships
+- **Episodic Timeline** - Visual history of interactions
+- **Knowledge Graph** - 3D entity relationships
 - **Agent Monitor** - Active agents and task history
 - **Evolution Dashboard** - Fitness metrics and improvement trends
+- **Team Collaboration** - Shared pools and active sessions
 
 </details>
 
@@ -199,14 +308,19 @@ python main.py --ui
 
 ## 🚀 Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features:
+See [ROADMAP.md](ROADMAP.md) for detailed plans.
 
-**Coming Soon:**
-- 🖼️ Image understanding (CLIP/BLIP integration)
-- 🎤 Voice interaction (Whisper real-time)
-- 🌐 Web browsing agent
-- 📦 Docker deployment
-- 👥 Team collaboration features
+### Completed ✅
+- v0.1.0 - Core memory, agents, evolution
+- v0.2.0 - Enhanced memory (episodic, semantic, sharing)
+- v0.3.0 - Advanced agents (planner, critic, web, filesystem, debates, teams)
+- v0.4.0 - Multimodal (vision, voice) + collaboration + Docker
+
+### Coming Next
+- 🎬 Video understanding and summarization
+- 🔐 Encryption at rest (AES-256)
+- ☁️ Cloud deployment templates (AWS, Azure, GCP)
+- 📊 Performance optimization (<100ms recall)
 
 ---
 
@@ -228,6 +342,13 @@ Named after Professor Hubert J. Farnsworth from *Futurama* - a brilliant invento
 
 **Supported Platforms:** Windows 10+, macOS 11+, Linux
 
+**Optional Dependencies:**
+- `ollama` - Local LLM inference
+- `torch` - GPU acceleration
+- `transformers` - Vision/Voice models
+- `playwright` - Web browsing agent
+- `whisper` - Voice transcription
+
 ---
 
 ## 📄 License
@@ -247,10 +368,11 @@ See [LICENSE](LICENSE) for details. For commercial licensing, contact via GitHub
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-**Good First Issues:**
-- Adding tests
+**Priority Areas:**
+- Video understanding module
+- Cloud deployment templates
+- Performance benchmarks
 - Documentation improvements
-- Bug fixes
 
 ---
 
@@ -260,6 +382,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - 🗺️ [Roadmap](ROADMAP.md) - Future plans and features
 - 🤝 [Contributing](CONTRIBUTING.md) - How to contribute
 - 📜 [License](LICENSE) - License terms
+- 🐳 [Docker Guide](docker/) - Container deployment
 
 ---
 
