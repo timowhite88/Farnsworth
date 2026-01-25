@@ -1,0 +1,231 @@
+# Farnsworth Docker Compose Configuration
+# Supports multiple deployment profiles
+
+version: '3.8'
+
+services:
+  # ============ Main Farnsworth Service ============
+  farnsworth:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    image: farnsworth:latest
+    container_name: farnsworth
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"  # MCP Server
+      - "8501:8501"  # Streamlit UI
+
+    volumes:
+      - farnsworth-data:/data
+      - farnsworth-config:/config
+      - farnsworth-models:/models
+
+    environment:
+      - FARNSWORTH_LOG_LEVEL=INFO
+      - FARNSWORTH_DATA_DIR=/data
+      - FARNSWORTH_CONFIG_DIR=/config
+      - FARNSWORTH_MODELS_DIR=/models
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import farnsworth; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    networks:
+      - farnsworth-network
+
+  # ============ GPU-Enabled Service ============
+  farnsworth-gpu:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: gpu-runtime
+    image: farnsworth:gpu
+    container_name: farnsworth-gpu
+    restart: unless-stopped
+    profiles:
+      - gpu
+
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+
+    volumes:
+      - farnsworth-data:/data
+      - farnsworth-config:/config
+      - farnsworth-models:/models
+
+    environment:
+      - FARNSWORTH_LOG_LEVEL=INFO
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    networks:
+      - farnsworth-network
+
+  # ============ Ollama Service (Local LLM) ============
+  ollama:
+    image: ollama/ollama:latest
+    container_name: farnsworth-ollama
+    restart: unless-stopped
+    profiles:
+      - ollama
+
+    ports:
+      - "11434:11434"
+
+    volumes:
+      - ollama-data:/root/.ollama
+
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+    networks:
+      - farnsworth-network
+
+  # ============ ChromaDB Service (Vector Store) ============
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: farnsworth-chromadb
+    restart: unless-stopped
+    profiles:
+      - chromadb
+
+    ports:
+      - "8080:8000"
+
+    volumes:
+      - chromadb-data:/chroma/chroma
+
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
+    networks:
+      - farnsworth-network
+
+  # ============ Redis Service (Caching) ============
+  redis:
+    image: redis:7-alpine
+    container_name: farnsworth-redis
+    restart: unless-stopped
+    profiles:
+      - redis
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis-data:/data
+
+    command: redis-server --appendonly yes
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+    networks:
+      - farnsworth-network
+
+  # ============ Streamlit UI Only ============
+  ui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    image: farnsworth:latest
+    container_name: farnsworth-ui
+    restart: unless-stopped
+    profiles:
+      - ui-only
+
+    ports:
+      - "8501:8501"
+
+    volumes:
+      - farnsworth-data:/data
+      - farnsworth-config:/config
+
+    environment:
+      - FARNSWORTH_LOG_LEVEL=INFO
+
+    command: ["python", "-m", "streamlit", "run", "farnsworth/ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+    networks:
+      - farnsworth-network
+
+  # ============ Development Service ============
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    image: farnsworth:dev
+    container_name: farnsworth-dev
+    profiles:
+      - dev
+
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+      - "5678:5678"  # debugpy
+
+    volumes:
+      - ../farnsworth:/app/farnsworth:rw
+      - ../tests:/app/tests:rw
+      - ../configs:/app/configs:rw
+      - farnsworth-data:/data
+      - farnsworth-models:/models
+
+    environment:
+      - FARNSWORTH_LOG_LEVEL=DEBUG
+      - PYTHONDONTWRITEBYTECODE=0
+
+    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "farnsworth.mcp_server"]
+
+    networks:
+      - farnsworth-network
+
+# ============ Volumes ============
+volumes:
+  farnsworth-data:
+    driver: local
+  farnsworth-config:
+    driver: local
+  farnsworth-models:
+    driver: local
+  ollama-data:
+    driver: local
+  chromadb-data:
+    driver: local
+  redis-data:
+    driver: local
+
+# ============ Networks ============
+networks:
+  farnsworth-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
