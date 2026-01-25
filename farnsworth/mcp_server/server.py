@@ -69,6 +69,7 @@ class FarnsworthMCPServer:
         self._health_monitor = None
         self._vision_module = None
         self._web_agent = None
+        self._conversation_exporter = None
 
         # Server instance
         self.server = None
@@ -127,12 +128,25 @@ class FarnsworthMCPServer:
             
             # Initialize swarm orchestrator
             self._swarm_orchestrator = SwarmOrchestrator()
-            
+
             # Register web agent factory
             self._swarm_orchestrator.register_agent_factory(
-                "web", 
+                "web",
                 lambda: self._web_agent # In a real swarm, this would return a new instance or pool
             )
+
+            # Initialize conversation exporter
+            from farnsworth.memory.conversation_export import ConversationExporter
+            self._conversation_exporter = ConversationExporter(
+                output_dir=str(self.data_dir / "exports"),
+                instance_id="farnsworth",
+            )
+            # Wire up data access callbacks
+            self._conversation_exporter.get_memories_fn = self._get_all_memories
+            self._conversation_exporter.get_conversations_fn = self._get_all_conversations
+            self._conversation_exporter.get_entities_fn = self._get_all_entities
+            self._conversation_exporter.get_relationships_fn = self._get_all_relationships
+            self._conversation_exporter.get_statistics_fn = self._get_memory_statistics
 
             # Initialize fitness tracker
             self._fitness_tracker = FitnessTracker()
@@ -391,7 +405,7 @@ class FarnsworthMCPServer:
                 return {"error": "Web agent not initialized"}
 
             session = await self._web_agent.browse(goal=goal, start_url=url)
-            
+
             return {
                 "session_id": session.id,
                 "goal": session.goal,
@@ -401,6 +415,173 @@ class FarnsworthMCPServer:
 
         except Exception as e:
             return {"error": str(e)}
+
+    async def export_conversation(
+        self,
+        format: str = "markdown",
+        include_memories: bool = True,
+        include_conversations: bool = True,
+        include_knowledge_graph: bool = True,
+        include_statistics: bool = True,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        output_path: Optional[str] = None,
+    ) -> dict:
+        """Export conversation, memories, and context to a shareable format."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._conversation_exporter:
+                return {"success": False, "error": "Conversation exporter not initialized"}
+
+            from farnsworth.memory.conversation_export import (
+                ConversationExportFormat,
+                ExportOptions,
+            )
+
+            # Map format string to enum
+            format_map = {
+                "json": ConversationExportFormat.JSON,
+                "markdown": ConversationExportFormat.MARKDOWN,
+                "md": ConversationExportFormat.MARKDOWN,
+                "html": ConversationExportFormat.HTML,
+                "text": ConversationExportFormat.TEXT,
+                "txt": ConversationExportFormat.TEXT,
+            }
+
+            export_format = format_map.get(format.lower(), ConversationExportFormat.MARKDOWN)
+
+            # Parse dates if provided
+            parsed_start = None
+            parsed_end = None
+            if start_date:
+                from datetime import datetime
+                parsed_start = datetime.fromisoformat(start_date)
+            if end_date:
+                from datetime import datetime
+                parsed_end = datetime.fromisoformat(end_date)
+
+            options = ExportOptions(
+                format=export_format,
+                include_memories=include_memories,
+                include_conversations=include_conversations,
+                include_knowledge_graph=include_knowledge_graph,
+                include_statistics=include_statistics,
+                start_date=parsed_start,
+                end_date=parsed_end,
+                tags_filter=tags,
+            )
+
+            result = await self._conversation_exporter.export(
+                options=options,
+                output_path=output_path,
+            )
+
+            return result.to_dict()
+
+        except Exception as e:
+            logger.error(f"Export failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def list_exports(self) -> dict:
+        """List all available exports."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._conversation_exporter:
+                return {"success": False, "error": "Conversation exporter not initialized"}
+
+            exports = self._conversation_exporter.list_exports()
+            return {"success": True, "exports": exports}
+
+        except Exception as e:
+            logger.error(f"List exports failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    # Data access helpers for exporter
+    async def _get_all_memories(self) -> list:
+        """Get all memories for export."""
+        if not self._memory_system:
+            return []
+        try:
+            # Get from archival memory
+            memories = []
+            if hasattr(self._memory_system, 'archival_memory') and self._memory_system.archival_memory:
+                archival = self._memory_system.archival_memory
+                if hasattr(archival, 'get_all'):
+                    memories = await archival.get_all()
+                elif hasattr(archival, 'memories'):
+                    memories = [m.to_dict() if hasattr(m, 'to_dict') else m for m in archival.memories]
+            return memories
+        except Exception as e:
+            logger.warning(f"Failed to get memories: {e}")
+            return []
+
+    async def _get_all_conversations(self) -> list:
+        """Get all conversations for export."""
+        if not self._memory_system:
+            return []
+        try:
+            conversations = []
+            if hasattr(self._memory_system, 'recall_memory') and self._memory_system.recall_memory:
+                recall = self._memory_system.recall_memory
+                if hasattr(recall, 'all_turns'):
+                    conversations = [t.to_dict() if hasattr(t, 'to_dict') else t for t in recall.all_turns.values()]
+            return conversations
+        except Exception as e:
+            logger.warning(f"Failed to get conversations: {e}")
+            return []
+
+    async def _get_all_entities(self) -> list:
+        """Get all entities from knowledge graph."""
+        if not self._memory_system:
+            return []
+        try:
+            entities = []
+            if hasattr(self._memory_system, 'knowledge_graph') and self._memory_system.knowledge_graph:
+                kg = self._memory_system.knowledge_graph
+                if hasattr(kg, 'entities'):
+                    entities = [
+                        {"name": e.name, "type": e.entity_type, "mentions": getattr(e, 'mention_count', 0)}
+                        if hasattr(e, 'name') else e
+                        for e in kg.entities.values()
+                    ]
+            return entities
+        except Exception as e:
+            logger.warning(f"Failed to get entities: {e}")
+            return []
+
+    async def _get_all_relationships(self) -> list:
+        """Get all relationships from knowledge graph."""
+        if not self._memory_system:
+            return []
+        try:
+            relationships = []
+            if hasattr(self._memory_system, 'knowledge_graph') and self._memory_system.knowledge_graph:
+                kg = self._memory_system.knowledge_graph
+                if hasattr(kg, 'relationships'):
+                    relationships = [
+                        {"source": r.source_id, "target": r.target_id, "type": r.relation_type}
+                        if hasattr(r, 'source_id') else r
+                        for r in kg.relationships
+                    ]
+            return relationships
+        except Exception as e:
+            logger.warning(f"Failed to get relationships: {e}")
+            return []
+
+    async def _get_memory_statistics(self) -> dict:
+        """Get memory statistics for export."""
+        if not self._memory_system:
+            return {}
+        try:
+            return self._memory_system.get_stats()
+        except Exception as e:
+            logger.warning(f"Failed to get statistics: {e}")
+            return {}
 
     # Resource Implementations
 
@@ -631,6 +812,66 @@ def create_mcp_server() -> Server:
                     "required": ["goal"],
                 },
             ),
+            Tool(
+                name="farnsworth_export",
+                description="Export conversation history, memories, and context to a shareable format (JSON, Markdown, HTML, or plain text). Use this to create backups or share your AI companion's knowledge.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "format": {
+                            "type": "string",
+                            "description": "Export format: 'json', 'markdown'/'md', 'html', or 'text'/'txt' (default: markdown)",
+                            "enum": ["json", "markdown", "md", "html", "text", "txt"],
+                            "default": "markdown",
+                        },
+                        "include_memories": {
+                            "type": "boolean",
+                            "description": "Include stored memories (default: true)",
+                            "default": True,
+                        },
+                        "include_conversations": {
+                            "type": "boolean",
+                            "description": "Include conversation history (default: true)",
+                            "default": True,
+                        },
+                        "include_knowledge_graph": {
+                            "type": "boolean",
+                            "description": "Include knowledge graph entities and relationships (default: true)",
+                            "default": True,
+                        },
+                        "include_statistics": {
+                            "type": "boolean",
+                            "description": "Include memory statistics (default: true)",
+                            "default": True,
+                        },
+                        "start_date": {
+                            "type": "string",
+                            "description": "Only include items after this date (ISO format: YYYY-MM-DD)",
+                        },
+                        "end_date": {
+                            "type": "string",
+                            "description": "Only include items before this date (ISO format: YYYY-MM-DD)",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Only include items with these tags",
+                        },
+                        "output_path": {
+                            "type": "string",
+                            "description": "Custom output file path (optional, auto-generated if not provided)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="farnsworth_list_exports",
+                description="List all available conversation exports.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -667,6 +908,20 @@ def create_mcp_server() -> Server:
                 goal=arguments["goal"],
                 url=arguments.get("url")
             )
+        elif name == "farnsworth_export":
+            result = await farnsworth.export_conversation(
+                format=arguments.get("format", "markdown"),
+                include_memories=arguments.get("include_memories", True),
+                include_conversations=arguments.get("include_conversations", True),
+                include_knowledge_graph=arguments.get("include_knowledge_graph", True),
+                include_statistics=arguments.get("include_statistics", True),
+                start_date=arguments.get("start_date"),
+                end_date=arguments.get("end_date"),
+                tags=arguments.get("tags"),
+                output_path=arguments.get("output_path"),
+            )
+        elif name == "farnsworth_list_exports":
+            result = await farnsworth.list_exports()
         else:
             result = {"error": f"Unknown tool: {name}"}
 
@@ -712,6 +967,12 @@ def create_mcp_server() -> Server:
                 description="Real-time health status and metrics",
                 mimeType="application/json",
             ),
+            Resource(
+                uri="farnsworth://exports/list",
+                name="Export List",
+                description="List of all available conversation exports",
+                mimeType="application/json",
+            ),
         ]
 
     @server.read_resource()
@@ -728,6 +989,9 @@ def create_mcp_server() -> Server:
             content = await farnsworth.get_proactive_suggestions()
         elif uri == "farnsworth://system/health":
             content = await farnsworth.get_system_health()
+        elif uri == "farnsworth://exports/list":
+            result = await farnsworth.list_exports()
+            content = json.dumps(result, indent=2)
         else:
             content = f"Unknown resource: {uri}"
 
