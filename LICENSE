@@ -1,0 +1,92 @@
+Farnsworth Dual License
+
+Copyright (c) 2025 Timothy White (timowhite88)
+All Rights Reserved.
+
+================================================================================
+                        NON-COMMERCIAL LICENSE
+================================================================================
+
+This software is licensed for FREE for:
+- Personal use
+- Educational use
+- Non-commercial research
+- Open-source projects (non-commercial)
+- Evaluation and testing
+
+Under these conditions:
+1. You may use, copy, and modify the software for non-commercial purposes
+2. You must include this license in any distribution
+3. You may not use the software for commercial purposes without a commercial license
+4. Attribution is required: "Powered by Farnsworth by Timothy White"
+
+================================================================================
+                         COMMERCIAL LICENSE
+================================================================================
+
+Commercial use requires a paid license. Commercial use includes:
+- Using Farnsworth in a product or service you sell
+- Using Farnsworth in a business setting (even internal tools)
+- Integrating Farnsworth into commercial software
+- Offering Farnsworth as a service (SaaS)
+- Using Farnsworth at a company with revenue > $1M USD/year
+
+To obtain a commercial license, contact:
+- Email: [Your email here]
+- GitHub: https://github.com/timowhite88
+
+Commercial licenses include:
+- Priority support
+- Custom feature development
+- Enterprise deployment assistance
+- SLA guarantees
+
+================================================================================
+                              DISCLAIMER
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+                          THIRD-PARTY NOTICES
+================================================================================
+
+This software integrates with Claude Code by Anthropic via the Model Context
+Protocol (MCP). Claude and Claude Code are trademarks of Anthropic, PBC.
+
+This software may use the following open-source components:
+- Ollama (MIT License)
+- llama.cpp (MIT License)
+- Sentence Transformers (Apache 2.0)
+- FAISS (MIT License)
+- LangGraph (MIT License)
+- Streamlit (Apache 2.0)
+- NetworkX (BSD License)
+
+Model weights used with this software (e.g., DeepSeek-R1, Qwen, Phi-3) are
+subject to their respective licenses.
+
+================================================================================
+                               SUMMARY
+================================================================================
+
++------------------+-------------+------------------+
+|     Use Case     |    Free?    |  License Needed  |
++------------------+-------------+------------------+
+| Personal project |     YES     |       No         |
+| Learning/School  |     YES     |       No         |
+| Hobby project    |     YES     |       No         |
+| Open source      |     YES     |       No         |
+| Startup < $1M    |     YES     |       No         |
+| Startup > $1M    |     NO      |    Commercial    |
+| Enterprise       |     NO      |    Commercial    |
+| SaaS product     |     NO      |    Commercial    |
++------------------+-------------+------------------+
+
+Questions? Open an issue on GitHub or email [Your email].
