@@ -52,6 +52,12 @@ from farnsworth.memory.knowledge_graph_v2 import (
     EntityCluster,
     EntityResolutionCandidate,
 )
+from farnsworth.memory.conversation_export import (
+    ConversationExporter,
+    ConversationExportFormat,
+    ExportOptions,
+    ExportResult,
+)
 
 __all__ = [
     # Core memory components
@@ -89,4 +95,9 @@ __all__ = [
     "TemporalEdge",
     "EntityCluster",
     "EntityResolutionCandidate",
+    # Conversation Export
+    "ConversationExporter",
+    "ConversationExportFormat",
+    "ExportOptions",
+    "ExportResult",
 ]

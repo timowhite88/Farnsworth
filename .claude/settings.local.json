@@ -25,7 +25,9 @@
       "Bash(for f in farnsworth/evolution/__init__.py farnsworth/evolution/genetic_optimizer.py farnsworth/evolution/fitness_tracker.py farnsworth/evolution/lora_evolver.py farnsworth/evolution/behavior_mutation.py)",
       "Bash(for:*)",
       "Bash(dir C:Farnsworth /s /b)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(wc:*)",
+      "Bash(python -c:*)"
     ]
   }
 }

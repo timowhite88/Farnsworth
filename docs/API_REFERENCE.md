@@ -31,11 +31,92 @@ Dispatches a task to the Agent Swarm. The system automatically selects the best 
 
 ## MCP Protocol
 
-For integration with Claude Code or other MCP-compatible IDEs, Farnsworth exposes the following resources:
+For integration with Claude Code or other MCP-compatible IDEs, Farnsworth exposes the following tools and resources.
 
-- `farnsworth://memory/recent`: View active context
-- `farnsworth://proactive/suggestions`: Get anticipatory help
-- `farnsworth://system/health`: Check system status
+### Tools
+
+#### `farnsworth_remember`
+Store information in long-term memory.
+
+**Parameters:**
+- `content` (string, required): The information to remember
+- `tags` (array[string], optional): Tags for categorization
+- `importance` (number, optional): Importance score 0-1 (default: 0.5)
+
+#### `farnsworth_recall`
+Search and retrieve relevant memories.
+
+**Parameters:**
+- `query` (string, required): Search query
+- `limit` (integer, optional): Maximum results (default: 5)
+
+#### `farnsworth_delegate`
+Delegate a task to a specialist agent.
+
+**Parameters:**
+- `task` (string, required): The task to delegate
+- `agent_type` (string, optional): Type of specialist: 'code', 'reasoning', 'research', 'creative', or 'auto' (default: auto)
+
+#### `farnsworth_evolve`
+Provide feedback for system improvement.
+
+**Parameters:**
+- `feedback` (string, required): Your feedback on the system's performance
+
+#### `farnsworth_status`
+Get the current system status including memory statistics, active agents, and evolution metrics.
+
+#### `farnsworth_vision`
+Analyze an image using the vision module.
+
+**Parameters:**
+- `image` (string, required): Image path, URL, or base64 string
+- `task` (string, optional): Task type: 'caption', 'vqa', 'ocr', 'classify' (default: caption)
+
+#### `farnsworth_browse`
+Use the intelligent web agent to browse the internet.
+
+**Parameters:**
+- `goal` (string, required): What to accomplish or find
+- `url` (string, optional): Starting URL
+
+#### `farnsworth_export`
+Export conversation history, memories, and context to a shareable format.
+
+**Parameters:**
+- `format` (string, optional): Export format - 'json', 'markdown'/'md', 'html', or 'text'/'txt' (default: markdown)
+- `include_memories` (boolean, optional): Include stored memories (default: true)
+- `include_conversations` (boolean, optional): Include conversation history (default: true)
+- `include_knowledge_graph` (boolean, optional): Include entities and relationships (default: true)
+- `include_statistics` (boolean, optional): Include memory statistics (default: true)
+- `start_date` (string, optional): Only include items after this date (ISO format: YYYY-MM-DD)
+- `end_date` (string, optional): Only include items before this date (ISO format: YYYY-MM-DD)
+- `tags` (array[string], optional): Only include items with these tags
+- `output_path` (string, optional): Custom output file path
+
+**Example:**
+```json
+{
+  "format": "html",
+  "include_memories": true,
+  "include_conversations": true,
+  "tags": ["project", "important"],
+  "start_date": "2025-01-01"
+}
+```
+
+#### `farnsworth_list_exports`
+List all available conversation exports.
+
+### Resources
+
+- `farnsworth://memory/recent`: View active context and recent memories
+- `farnsworth://memory/graph`: Knowledge graph entities and relationships
+- `farnsworth://agents/active`: Currently running specialist agents
+- `farnsworth://evolution/fitness`: System performance and evolution metrics
+- `farnsworth://proactive/suggestions`: Anticipatory suggestions from the proactive agent
+- `farnsworth://system/health`: Real-time health status and metrics
+- `farnsworth://exports/list`: List of all available conversation exports
 
 ## Best Practices
 
