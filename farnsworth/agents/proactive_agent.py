@@ -46,14 +46,20 @@ class Suggestion:
     is_accepted: bool = False
 
 
+@dataclass
+class ScheduledTask:
+    """A task scheduled to run periodically or at a specific time."""
+    id: str
+    description: str
+    schedule_type: str  # "interval" or "cron" or "one_off"
+    schedule_value: Any # seconds for interval, cron string, or datetime
+    last_run: Optional[datetime] = None
+    next_run: Optional[datetime] = None
+    enabled: bool = True
+
 class ProactiveAgent:
     """
     Agent responsible for background monitoring and proactive assistance.
-    
-    It operates in a loop:
-    1. Monitor: Watch memory updates and user activity
-    2. Analyze: Check for patterns or unmet needs
-    3. Act: Generate suggestions or automate tasks
     """
 
     def __init__(
@@ -70,6 +76,9 @@ class ProactiveAgent:
         
         self.state = ProactiveState.IDLE
         self.suggestions: list[Suggestion] = []
+        self.scheduled_tasks: list[ScheduledTask] = []
+        
+        self._is_running = False
         
         self._is_running = False
         self._task: Optional[asyncio.Task] = None
@@ -114,6 +123,9 @@ class ProactiveAgent:
                         self.state = ProactiveState.SUGGESTING
                         await self._generate_suggestion(opportunity)
                 
+                # 3. Process Scheduled Tasks
+                await self._check_scheduled_tasks()
+
                 self.state = ProactiveState.IDLE
                 
             except Exception as e:
@@ -122,8 +134,42 @@ class ProactiveAgent:
             
             await asyncio.sleep(self.check_interval)
 
+    async def _check_scheduled_tasks(self):
+        """Check and execute scheduled tasks."""
+        now = datetime.now()
+        for task in self.scheduled_tasks:
+            if not task.enabled:
+                continue
+                
+            should_run = False
+            if task.schedule_type == "interval":
+                if not task.last_run:
+                    should_run = True
+                elif (now - task.last_run).total_seconds() >= task.schedule_value:
+                    should_run = True
+            
+            if should_run:
+                logger.info(f"Running scheduled task: {task.description}")
+                # Execute via Planner
+                try:
+                     # Submit task to planner (fire and forget for now, or track)
+                     # In a real system, we'd use the SwarmOrchestrator
+                     # Here we just log it as "executed"
+                     task.last_run = now
+                     self.state = ProactiveState.ACTING
+                     # TODO: Actually execute logic
+                except Exception as e:
+                    logger.error(f"Failed to run scheduled task {task.id}: {e}")
+                self.state = ProactiveState.IDLE
+
     async def _analyze_context(self) -> dict:
-        """Analyze current user context and system state."""
+        """
+        Analyze current user context and system state.
+        
+        Novelty: ContextVector
+        We create a multi-dimensional representation of context:
+        [time_of_day, user_mood, focus_level, project_phase]
+        """
         # 1. Time context
         now = datetime.now()
         is_work_hours = 9 <= now.hour <= 17
@@ -137,12 +183,21 @@ class ProactiveAgent:
             active_plan = self.planner.get_plan_status(self.planner.active_plan_id)
             
         # 4. Activity level heuristic
-        # (Simplified: if there's an active plan or recent chat, activity is high)
         activity_level = 0.1
         if active_plan and active_plan['status'] == 'in_progress':
             activity_level += 0.5
         if len(recent_context) > 50:
             activity_level += 0.4
+            
+        # 5. Novel Context Attributes
+        # Mood Heuristic: Length of recent queries (Short = Focused/Terse, Long = Exploratory)
+        # TODO: Use Sentiment Analysis from LLM
+        focus_score = 0.5
+        if "error" in recent_context.lower() or "fail" in recent_context.lower():
+            mood = "frustrated"
+            focus_score = 0.9 # High focus on debugging
+        else:
+            mood = "neutral"
             
         return {
             "timestamp": now,
@@ -150,7 +205,11 @@ class ProactiveAgent:
             "recent_context": recent_context,
             "active_plan": active_plan,
             "activity_level": min(1.0, activity_level),
-            "recent_topics": [], # TODO: Extract from memory tags
+            "context_vector": {
+                "mood": mood,
+                "focus": focus_score,
+                "phase": "execution" if active_plan else "planning"
+            }
         }
 
     async def _detect_opportunity(self, context: dict) -> Optional[dict]:
