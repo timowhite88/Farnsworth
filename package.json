@@ -6,6 +6,6 @@
     "type": "git",
     "url": "https://github.com/timowhite88/Farnsworth.git"
   },
-  "module": "index.js",
+  "module": "bridge/index.ts",
   "private": true
 }
