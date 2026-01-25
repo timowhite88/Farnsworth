@@ -1,0 +1,10 @@
+{
+  "name": "farnsworth-ai",
+  "version": "1.0.0",
+  "description": "Self-evolving companion AI",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timowhite88/Farnsworth.git"
+  },
+  "private": true
+}
