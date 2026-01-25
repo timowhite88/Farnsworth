@@ -16,8 +16,14 @@ pip install farnsworth-ai
 
 ### 1. Install Build Tools
 
+**Windows:**
 ```bash
-pip install build twine
+py -m pip install build twine
+```
+
+**Mac/Linux:**
+```bash
+python3 -m pip install build twine
 ```
 
 ### 2. Build the Package
