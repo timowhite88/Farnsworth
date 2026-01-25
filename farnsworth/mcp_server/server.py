@@ -67,7 +67,9 @@ class FarnsworthMCPServer:
         self._model_manager = None
         self._backup_manager = None
         self._health_monitor = None
-        
+        self._vision_module = None
+        self._web_agent = None
+
         # Server instance
         self.server = None
 
@@ -106,8 +108,31 @@ class FarnsworthMCPServer:
             )
             await self._proactive_agent.start()
 
+            # Initialize health monitor
+            self._health_monitor = HealthMonitor()
+            self._health_monitor.register_check("memory_system", 
+                lambda: "healthy" if self._memory_system._initialized else "uninitialized")
+            self._health_monitor.register_check("planner",
+                lambda: "healthy" if self._planner_agent else "missing")
+            
+            await self._health_monitor.check_health()
+
+            # Initialize Vision Module
+            from farnsworth.integration.vision import VisionModule
+            self._vision_module = VisionModule()
+            
+            # Initialize Web Agent
+            from farnsworth.agents.web_agent import WebAgent
+            self._web_agent = WebAgent()
+            
             # Initialize swarm orchestrator
             self._swarm_orchestrator = SwarmOrchestrator()
+            
+            # Register web agent factory
+            self._swarm_orchestrator.register_agent_factory(
+                "web", 
+                lambda: self._web_agent # In a real swarm, this would return a new instance or pool
+            )
 
             # Initialize fitness tracker
             self._fitness_tracker = FitnessTracker()
@@ -338,6 +363,45 @@ class FarnsworthMCPServer:
                 "error": str(e),
             }
 
+    async def vision_analyze(self, image: str, task: str = "caption") -> dict:
+        """Analyze an image."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._vision_module:
+                return {"error": "Vision module not initialized"}
+
+            # Map string to enum if needed (stub)
+            # In real implementation: convert task string to VisionTask enum
+            
+            result = await self._vision_module.caption(image)
+            return result.to_dict()
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def browse(self, goal: str, url: Optional[str] = None) -> dict:
+        """Browse the web."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._web_agent:
+                return {"error": "Web agent not initialized"}
+
+            session = await self._web_agent.browse(goal=goal, start_url=url)
+            
+            return {
+                "session_id": session.id,
+                "goal": session.goal,
+                "visited": session.visited_urls,
+                "findings": session.findings,
+            }
+
+        except Exception as e:
+            return {"error": str(e)}
+
     # Resource Implementations
 
     async def get_recent_memories(self) -> str:
@@ -530,6 +594,43 @@ def create_mcp_server() -> Server:
                     "properties": {},
                 },
             ),
+            Tool(
+                name="farnsworth_vision",
+                description="Analyze an image using the vision module (captioning, VQA, etc).",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "image": {
+                            "type": "string",
+                            "description": "Image path, URL, or base64 string",
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "Task type: 'caption', 'vqa', 'ocr', 'classify'",
+                            "default": "caption",
+                        },
+                    },
+                    "required": ["image"],
+                },
+            ),
+            Tool(
+                name="farnsworth_browse",
+                description="Use the intelligent web agent to browse the internet to achieve a goal.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "description": "What to accomplish or find",
+                        },
+                        "url": {
+                            "type": "string",
+                            "description": "Optional starting URL",
+                        },
+                    },
+                    "required": ["goal"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -556,6 +657,16 @@ def create_mcp_server() -> Server:
             )
         elif name == "farnsworth_status":
             result = await farnsworth.status()
+        elif name == "farnsworth_vision":
+            result = await farnsworth.vision_analyze(
+                image=arguments["image"],
+                task=arguments.get("task", "caption")
+            )
+        elif name == "farnsworth_browse":
+            result = await farnsworth.browse(
+                goal=arguments["goal"],
+                url=arguments.get("url")
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
 

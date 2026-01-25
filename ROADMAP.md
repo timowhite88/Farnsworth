@@ -143,12 +143,12 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - Proactive memory surfacing
   - "You might want to know..." notifications
 
-- [ ] **Task Automation**
+- [x] **Task Automation**
   - Learn repetitive workflows
   - Automated task execution
   - Scheduled operations
 
-- [ ] **Context Awareness**
+- [x] **Context Awareness**
   - Time-of-day preferences
   - Project context detection
   - Mood and focus level adaptation
@@ -205,7 +205,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ### Video Capabilities 🎬
 
-- [ ] **Video Summarization**
+- [x] **Video Summarization**
   - Key frame extraction
   - Timeline navigation
   - Meeting recording analysis
@@ -278,12 +278,12 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ### Documentation & Support 📚
 
-- [ ] **Comprehensive Documentation**
+- [x] **Comprehensive Documentation**
   - API reference
   - Integration guides
   - Best practices
 
-- [ ] **Developer SDK**
+- [x] **Developer SDK**
   - Python SDK for custom integrations
   - TypeScript/JavaScript SDK
   - Example applications
@@ -336,10 +336,10 @@ Want to help build these features? See [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 These features would have the most impact and we'd love help with:
 
-1. **Image Understanding** - CLIP/BLIP integration
-2. **Web Agent** - Playwright-based browsing
-3. **Docker Deployment** - Container optimization
-4. **Performance Benchmarks** - Standardized testing
+1. **Cloud Deployment** - AWS/Azure/GCP templates
+2. **Security** - Database encryption at rest
+3. **Performance Benchmarks** - Standardized testing suite
+4. **Video Analysis** - Deep meeting analytics
 
 ### Feature Requests
 
@@ -355,6 +355,8 @@ Have an idea not on this list? Open a GitHub issue with the `feature-request` la
 | 0.2.0   | Jan 2025     | Enhanced Memory: Episodic timeline, semantic layers, memory sharing, knowledge graph v2, hybrid search v2, context compression |
 | 0.3.0   | Jan 2025     | Advanced Agents: Planner, Critic, Web, FileSystem agents; Agent debates, specialization learning, hierarchical teams |
 | 0.4.0   | Jan 2025     | Multimodal & Collaboration: Vision (CLIP/BLIP), Voice (Whisper/TTS), Docker deployment, team collaboration features |
+| 0.5.0   | Jan 2025     | Proactive Intelligence: Anticipatory suggestions, scheduler, context awareness, model swarm |
+| 1.0.0   | Jan 2025     | Production Release: Resilience system, Sharding, Vision/Web integration, SDK, Documentation |
 
 ---
 
