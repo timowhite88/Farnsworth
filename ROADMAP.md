@@ -6,7 +6,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Current Version: 0.3.0 (Advanced Agents Release)
+## Current Version: 0.4.0 (Multimodal & Collaboration Release)
 
 ### Completed Features ✅
 
@@ -35,6 +35,15 @@ This document outlines planned features and improvements for Farnsworth. Feature
 - [x] Agent Debates (`farnsworth/agents/agent_debates.py`)
 - [x] Specialization Learning (`farnsworth/agents/specialization_learning.py`)
 - [x] Hierarchical Teams (`farnsworth/agents/hierarchical_teams.py`)
+
+**v0.4.0 (Multimodal & Collaboration) - COMPLETED**
+- [x] Vision Module - CLIP/BLIP (`farnsworth/integration/vision.py`)
+- [x] Voice Module - Whisper/TTS (`farnsworth/integration/voice.py`)
+- [x] Docker Deployment (`docker/Dockerfile`, `docker/docker-compose.yml`)
+- [x] Shared Memory Pools (`farnsworth/collaboration/shared_memory.py`)
+- [x] Multi-User Support (`farnsworth/collaboration/multi_user.py`)
+- [x] Permission System (`farnsworth/collaboration/permissions.py`)
+- [x] Collaborative Sessions (`farnsworth/collaboration/sessions.py`)
 
 ---
 
@@ -163,11 +172,11 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Version 0.5.0 - Multimodal Mastery (Q3 2025)
+## Version 0.5.0 - Multimodal Mastery (Q3 2025) ✅ PARTIAL
 
 ### Vision Capabilities 👁️
 
-- [ ] **Image Understanding**
+- [x] **Image Understanding** (`farnsworth/integration/vision.py`)
   - CLIP/BLIP integration for image description
   - Visual question answering
   - Image-to-text memory storage
@@ -184,12 +193,12 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ### Audio Capabilities 🎤
 
-- [ ] **Real-time Transcription**
+- [x] **Real-time Transcription** (`farnsworth/integration/voice.py`)
   - Streaming Whisper integration
   - Speaker diarization
   - Conversation memory from audio
 
-- [ ] **Voice Interaction**
+- [x] **Voice Interaction** (`farnsworth/integration/voice.py`)
   - Voice input for queries
   - Text-to-speech responses
   - Hands-free operation mode
@@ -203,16 +212,16 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Version 0.6.0 - Enterprise Features (Q3 2025)
+## Version 0.6.0 - Enterprise Features (Q3 2025) ✅ PARTIAL
 
 ### Team Collaboration 👥
 
-- [ ] **Shared Memory Pools**
+- [x] **Shared Memory Pools** (`farnsworth/collaboration/shared_memory.py`)
   - Team knowledge bases
   - Permission-based access control
   - Memory merge and conflict resolution
 
-- [ ] **Multi-User Support**
+- [x] **Multi-User Support** (`farnsworth/collaboration/multi_user.py`)
   - Individual user profiles
   - Personalized responses per user
   - Shared organizational context
@@ -224,19 +233,19 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - Secure key management
   - Optional hardware security module support
 
-- [ ] **Audit Logging**
+- [x] **Audit Logging** (`farnsworth/collaboration/permissions.py`)
   - Complete interaction history
   - Compliance-ready exports
   - Data retention policies
 
-- [ ] **Access Control**
+- [x] **Access Control** (`farnsworth/collaboration/permissions.py`)
   - Role-based permissions
   - API key management
   - OAuth integration
 
 ### Deployment Options 🚀
 
-- [ ] **Docker Deployment**
+- [x] **Docker Deployment** (`docker/Dockerfile`, `docker/docker-compose.yml`)
   - Pre-configured containers
   - Docker Compose orchestration
   - Kubernetes manifests
@@ -345,6 +354,7 @@ Have an idea not on this list? Open a GitHub issue with the `feature-request` la
 | 0.1.0   | Jan 2025     | Initial release |
 | 0.2.0   | Jan 2025     | Enhanced Memory: Episodic timeline, semantic layers, memory sharing, knowledge graph v2, hybrid search v2, context compression |
 | 0.3.0   | Jan 2025     | Advanced Agents: Planner, Critic, Web, FileSystem agents; Agent debates, specialization learning, hierarchical teams |
+| 0.4.0   | Jan 2025     | Multimodal & Collaboration: Vision (CLIP/BLIP), Voice (Whisper/TTS), Docker deployment, team collaboration features |
 
 ---
 
