@@ -1,0 +1,206 @@
+# Farnsworth Model Configurations
+
+models:
+  # Primary recommendation for general use
+  deepseek-r1-1.5b:
+    name: "DeepSeek-R1-Distill-Qwen-1.5B"
+    backend: "ollama"
+    ollama_name: "deepseek-r1:1.5b"
+    llama_cpp_repo: "bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF"
+    llama_cpp_file: "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf"
+    params: 1.5e9
+    vram_gb: 2.0
+    ram_gb: 4.0
+    quantization: "Q4_K_M"
+    context_length: 32768
+    strengths:
+      - "reasoning"
+      - "math"
+      - "code"
+    license: "MIT"
+    recommended_for:
+      - "default"
+      - "reasoning"
+      - "code"
+
+  # Speed-optimized for CPU
+  bitnet-2b:
+    name: "Microsoft BitNet b1.58-2B-4T"
+    backend: "bitnet"
+    bitnet_repo: "microsoft/BitNet-b1.58-2B-4T"
+    params: 2.0e9
+    vram_gb: 1.0
+    ram_gb: 2.0
+    quantization: "1-bit"
+    context_length: 4096
+    strengths:
+      - "speed"
+      - "efficiency"
+      - "cpu-optimized"
+    license: "MIT"
+    recommended_for:
+      - "speed"
+      - "cpu-only"
+
+  # Ultra-lightweight
+  qwen3-0.6b:
+    name: "Qwen3-0.6B"
+    backend: "ollama"
+    ollama_name: "qwen3:0.6b"
+    llama_cpp_repo: "Qwen/Qwen3-0.6B-GGUF"
+    llama_cpp_file: "qwen3-0.6b-q4_k_m.gguf"
+    params: 0.6e9
+    vram_gb: 1.0
+    ram_gb: 2.0
+    quantization: "Q4_K_M"
+    context_length: 32768
+    strengths:
+      - "multilingual"
+      - "lightweight"
+      - "fast"
+    license: "Apache-2.0"
+    recommended_for:
+      - "lightweight"
+      - "multilingual"
+
+  # High quality reasoning
+  phi-3-mini:
+    name: "Phi-3-mini"
+    backend: "ollama"
+    ollama_name: "phi3:mini"
+    llama_cpp_repo: "microsoft/Phi-3-mini-4k-instruct-gguf"
+    llama_cpp_file: "Phi-3-mini-4k-instruct-q4.gguf"
+    params: 3.8e9
+    vram_gb: 3.0
+    ram_gb: 6.0
+    quantization: "Q4_K_M"
+    context_length: 4096
+    strengths:
+      - "reasoning"
+      - "instruction-following"
+      - "gpt3.5-class"
+    license: "MIT"
+    recommended_for:
+      - "quality"
+      - "reasoning"
+
+  # Multimodal capability
+  gemma-3n-e2b:
+    name: "Gemma-3n-E2B"
+    backend: "ollama"
+    ollama_name: "gemma3:2b"
+    llama_cpp_repo: "google/gemma-3n-E2B-it-GGUF"
+    llama_cpp_file: "gemma-3n-E2B-it-Q4_K_M.gguf"
+    params: 5.0e9
+    effective_params: 2.0e9
+    vram_gb: 2.0
+    ram_gb: 4.0
+    quantization: "Q4_K_M"
+    context_length: 8192
+    multimodal: true
+    modalities:
+      - "text"
+      - "image"
+      - "audio"
+      - "video"
+    strengths:
+      - "multimodal"
+      - "vision"
+      - "audio"
+    license: "Apache-2.0"
+    recommended_for:
+      - "multimodal"
+      - "vision"
+
+# Embedding models
+embeddings:
+  all-minilm-l6-v2:
+    name: "all-MiniLM-L6-v2"
+    provider: "sentence-transformers"
+    dimensions: 384
+    max_sequence_length: 256
+    recommended_for:
+      - "default"
+      - "speed"
+
+  bge-small-en:
+    name: "BAAI/bge-small-en-v1.5"
+    provider: "sentence-transformers"
+    dimensions: 384
+    max_sequence_length: 512
+    recommended_for:
+      - "accuracy"
+
+  nomic-embed-text:
+    name: "nomic-embed-text"
+    provider: "ollama"
+    dimensions: 768
+    max_sequence_length: 8192
+    recommended_for:
+      - "long-context"
+
+# Hardware profiles
+hardware_profiles:
+  cpu_only:
+    models:
+      - "bitnet-2b"
+      - "qwen3-0.6b"
+    embedding: "all-minilm-l6-v2"
+
+  low_vram:  # 2-4 GB VRAM
+    models:
+      - "deepseek-r1-1.5b"
+      - "qwen3-0.6b"
+      - "gemma-3n-e2b"
+    embedding: "all-minilm-l6-v2"
+
+  medium_vram:  # 4-8 GB VRAM
+    models:
+      - "deepseek-r1-1.5b"
+      - "phi-3-mini"
+      - "gemma-3n-e2b"
+    embedding: "bge-small-en"
+
+  high_vram:  # 8+ GB VRAM
+    models:
+      - "phi-3-mini"
+      - "deepseek-r1-1.5b"
+      - "gemma-3n-e2b"
+    embedding: "nomic-embed-text"
+
+# Task-based model selection
+task_routing:
+  code:
+    primary: "deepseek-r1-1.5b"
+    fallback: "phi-3-mini"
+
+  reasoning:
+    primary: "deepseek-r1-1.5b"
+    fallback: "phi-3-mini"
+
+  creative:
+    primary: "qwen3-0.6b"
+    fallback: "phi-3-mini"
+
+  research:
+    primary: "phi-3-mini"
+    fallback: "deepseek-r1-1.5b"
+
+  multimodal:
+    primary: "gemma-3n-e2b"
+    fallback: null
+
+  speed:
+    primary: "bitnet-2b"
+    fallback: "qwen3-0.6b"
+
+# Speculative decoding pairs
+speculative_decoding:
+  pairs:
+    - draft: "bitnet-2b"
+      target: "phi-3-mini"
+      speedup: 2.0
+
+    - draft: "qwen3-0.6b"
+      target: "deepseek-r1-1.5b"
+      speedup: 1.5

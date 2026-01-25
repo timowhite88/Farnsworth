@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
