@@ -65,7 +65,9 @@ class FarnsworthMCPServer:
         self._proactive_agent = None
         self._fitness_tracker = None
         self._model_manager = None
-
+        self._backup_manager = None
+        self._health_monitor = None
+        
         # Server instance
         self.server = None
 
@@ -114,6 +116,24 @@ class FarnsworthMCPServer:
             self._model_manager = ModelManager()
             await self._model_manager.initialize()
 
+            # Initialize resilience components
+            from farnsworth.core.resilience import BackupManager, HealthMonitor
+            
+            self._backup_manager = BackupManager(
+                data_dir=str(self.data_dir),
+                backup_dir=str(self.data_dir.parent / "backups")
+            )
+            await self._backup_manager.start()
+            
+            self._health_monitor = HealthMonitor()
+            # Register checks
+            self._health_monitor.register_check("memory_system", 
+                lambda: "healthy" if self._memory_system._initialized else "uninitialized")
+            self._health_monitor.register_check("planner",
+                lambda: "healthy" if self._planner_agent else "missing")
+            
+            await self._health_monitor.check_health()
+            
             # Wire up LLM
             if self._model_manager:
                 self._proactive_agent.llm_fn = self._model_manager.generate
@@ -395,6 +415,24 @@ class FarnsworthMCPServer:
         except Exception as e:
             return f"Error: {e}"
 
+    async def get_system_health(self) -> str:
+        """Get system health resource."""
+        await self._ensure_initialized()
+        self.stats["resource_reads"] += 1
+
+        try:
+            if self._health_monitor:
+                status = await self._health_monitor.check_health()
+                return json.dumps({
+                    "status": status.status,
+                    "components": status.components,
+                    "metrics": status.system_metrics,
+                    "timestamp": status.timestamp
+                }, indent=2)
+            return "{}"
+        except Exception as e:
+            return f"Error: {e}"
+
 
 def create_mcp_server() -> Server:
     """Create and configure the MCP server."""
@@ -557,6 +595,12 @@ def create_mcp_server() -> Server:
                 description="Anticipatory suggestions from the proactive agent",
                 mimeType="application/json",
             ),
+            Resource(
+                uri="farnsworth://system/health",
+                name="System Health",
+                description="Real-time health status and metrics",
+                mimeType="application/json",
+            ),
         ]
 
     @server.read_resource()
@@ -571,6 +615,8 @@ def create_mcp_server() -> Server:
             content = await farnsworth.get_fitness_metrics()
         elif uri == "farnsworth://proactive/suggestions":
             content = await farnsworth.get_proactive_suggestions()
+        elif uri == "farnsworth://system/health":
+            content = await farnsworth.get_system_health()
         else:
             content = f"Unknown resource: {uri}"
 
