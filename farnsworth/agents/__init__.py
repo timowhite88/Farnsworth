@@ -6,6 +6,15 @@ LangGraph-based agent swarm with:
 - Emergent behavior through genetic optimization
 - User avatar sub-agent for preference modeling
 - Meta-cognitive reflection loops
+
+Q2 2025 Additions:
+- Planner Agent for task decomposition
+- Critic Agent for quality assurance
+- Web Agent for intelligent browsing
+- File System Agent for codebase navigation
+- Agent Debates for multi-perspective synthesis
+- Specialization Learning for skill development
+- Hierarchical Teams for coordinated execution
 """
 
 from farnsworth.agents.base_agent import BaseAgent, AgentState, AgentCapability
@@ -19,7 +28,63 @@ from farnsworth.agents.specialist_agents import (
 from farnsworth.agents.user_avatar import UserAvatar
 from farnsworth.agents.meta_cognition import MetaCognitionAgent
 
+# Q2 2025 - Advanced Agents
+from farnsworth.agents.planner_agent import (
+    PlannerAgent,
+    Plan,
+    SubTask,
+    TaskStatus,
+    TaskPriority,
+)
+from farnsworth.agents.critic_agent import (
+    CriticAgent,
+    Review,
+    QualityScore,
+    QualityDimension,
+    ReviewType,
+    RefinementResult,
+)
+from farnsworth.agents.web_agent import (
+    WebAgent,
+    BrowsingSession,
+    PageState,
+    WebAction,
+    ActionType,
+)
+from farnsworth.agents.filesystem_agent import (
+    FileSystemAgent,
+    FileInfo,
+    ProjectStructure,
+    FileChange,
+    SearchResult as FileSearchResult,
+)
+
+# Q2 2025 - Agent Collaboration
+from farnsworth.agents.agent_debates import (
+    AgentDebates,
+    Debate,
+    Argument,
+    DebateRole,
+    ArgumentType,
+)
+from farnsworth.agents.specialization_learning import (
+    SpecializationLearning,
+    AgentProfile,
+    Skill,
+    SkillLevel,
+    TaskOutcome,
+)
+from farnsworth.agents.hierarchical_teams import (
+    HierarchicalTeams,
+    Team,
+    AgentNode,
+    AgentRole,
+    TeamStatus,
+    TaskAssignment,
+)
+
 __all__ = [
+    # Core agents
     "BaseAgent",
     "AgentState",
     "AgentCapability",
@@ -30,4 +95,43 @@ __all__ = [
     "CreativeAgent",
     "UserAvatar",
     "MetaCognitionAgent",
+    # Q2 2025 - New Agent Types
+    "PlannerAgent",
+    "Plan",
+    "SubTask",
+    "TaskStatus",
+    "TaskPriority",
+    "CriticAgent",
+    "Review",
+    "QualityScore",
+    "QualityDimension",
+    "ReviewType",
+    "RefinementResult",
+    "WebAgent",
+    "BrowsingSession",
+    "PageState",
+    "WebAction",
+    "ActionType",
+    "FileSystemAgent",
+    "FileInfo",
+    "ProjectStructure",
+    "FileChange",
+    "FileSearchResult",
+    # Q2 2025 - Agent Collaboration
+    "AgentDebates",
+    "Debate",
+    "Argument",
+    "DebateRole",
+    "ArgumentType",
+    "SpecializationLearning",
+    "AgentProfile",
+    "Skill",
+    "SkillLevel",
+    "TaskOutcome",
+    "HierarchicalTeams",
+    "Team",
+    "AgentNode",
+    "AgentRole",
+    "TeamStatus",
+    "TaskAssignment",
 ]

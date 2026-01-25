@@ -6,7 +6,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Current Version: 0.2.0 (Enhanced Memory Release)
+## Current Version: 0.3.0 (Advanced Agents Release)
 
 ### Completed Features ✅
 
@@ -26,6 +26,15 @@ This document outlines planned features and improvements for Farnsworth. Feature
 - [x] Enhanced Knowledge Graph v2 (`farnsworth/memory/knowledge_graph_v2.py`)
 - [x] Hybrid Search v2 (`farnsworth/rag/hybrid_search_v2.py`)
 - [x] Context Compression (`farnsworth/rag/context_compression.py`)
+
+**v0.3.0 (Q2 2025) - COMPLETED**
+- [x] Planner Agent (`farnsworth/agents/planner_agent.py`)
+- [x] Critic Agent (`farnsworth/agents/critic_agent.py`)
+- [x] Web Agent (`farnsworth/agents/web_agent.py`)
+- [x] File System Agent (`farnsworth/agents/filesystem_agent.py`)
+- [x] Agent Debates (`farnsworth/agents/agent_debates.py`)
+- [x] Specialization Learning (`farnsworth/agents/specialization_learning.py`)
+- [x] Hierarchical Teams (`farnsworth/agents/hierarchical_teams.py`)
 
 ---
 
@@ -73,43 +82,43 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Version 0.3.0 - Advanced Agents (Q2 2025)
+## Version 0.3.0 - Advanced Agents (Q2 2025) ✅ COMPLETED
 
 ### New Agent Types 🤖
 
-- [ ] **Planner Agent**
+- [x] **Planner Agent** (`farnsworth/agents/planner_agent.py`)
   - Break complex tasks into sub-tasks
   - Dependency tracking between tasks
   - Progress monitoring and replanning
 
-- [ ] **Critic Agent**
+- [x] **Critic Agent** (`farnsworth/agents/critic_agent.py`)
   - Review other agents' outputs
   - Quality scoring and feedback
   - Iterative refinement loops
 
-- [ ] **Web Agent**
+- [x] **Web Agent** (`farnsworth/agents/web_agent.py`)
   - Real-time web browsing capability
   - Page understanding and extraction
   - Form filling and interaction
 
-- [ ] **File System Agent**
+- [x] **File System Agent** (`farnsworth/agents/filesystem_agent.py`)
   - Advanced file operations
   - Project structure understanding
   - Codebase navigation and modification
 
 ### Agent Collaboration 🤝
 
-- [ ] **Agent Debates**
+- [x] **Agent Debates** (`farnsworth/agents/agent_debates.py`)
   - Multiple agents debate solutions
   - Synthesis of diverse perspectives
   - Confidence-weighted voting
 
-- [ ] **Agent Specialization Learning**
+- [x] **Agent Specialization Learning** (`farnsworth/agents/specialization_learning.py`)
   - Agents learn from their successes/failures
   - Automatic skill development
   - Capability discovery and broadcasting
 
-- [ ] **Hierarchical Agent Teams**
+- [x] **Hierarchical Agent Teams** (`farnsworth/agents/hierarchical_teams.py`)
   - Manager agents coordinate specialists
   - Dynamic team formation for tasks
   - Load balancing across agents
@@ -335,6 +344,7 @@ Have an idea not on this list? Open a GitHub issue with the `feature-request` la
 |---------|--------------|------------|
 | 0.1.0   | Jan 2025     | Initial release |
 | 0.2.0   | Jan 2025     | Enhanced Memory: Episodic timeline, semantic layers, memory sharing, knowledge graph v2, hybrid search v2, context compression |
+| 0.3.0   | Jan 2025     | Advanced Agents: Planner, Critic, Web, FileSystem agents; Agent debates, specialization learning, hierarchical teams |
 
 ---
 
