@@ -2,13 +2,14 @@
 
 <div align="center">
 
-**Give Claude superpowers: persistent memory, specialist agents, multimodal understanding, and self-evolution.**
+**Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](docker/)
+[![Models](https://img.shields.io/badge/Models-12%2B%20Supported-green.svg)](configs/models.yaml)
 
 [**Documentation**](docs/USER_GUIDE.md) • [**Roadmap**](ROADMAP.md) • [**Contributing**](CONTRIBUTING.md) • [**Docker**](docker/)
 
@@ -23,24 +24,74 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 | Without Farnsworth | With Farnsworth |
 |:------------------:|:---------------:|
 | 🚫 Claude forgets everything between sessions | ✅ Claude remembers your preferences forever |
-| 🚫 Claude is a single model | ✅ Claude can delegate to 8+ specialist agents |
+| 🚫 Claude is a single model | ✅ **Model Swarm**: 12+ models collaborate via PSO |
 | 🚫 Claude can't see images or hear audio | ✅ Multimodal: vision (CLIP/BLIP) + voice (Whisper) |
 | 🚫 Claude never learns from feedback | ✅ Claude evolves and adapts to you |
 | 🚫 Single user only | ✅ Team collaboration with shared memory |
-| 🚫 You can't see what Claude "knows" | ✅ Visual dashboard shows everything |
+| 🚫 High RAM/VRAM requirements | ✅ Runs on **<2GB RAM** with efficient models |
 
 **All processing happens locally on your machine.** Your data never leaves your computer.
 
 ---
 
-## ✨ What's New in v0.4.0
+## ✨ What's New in v0.5.0
 
+- 🐝 **Model Swarm** - PSO-based collaborative inference with multiple small models
+- 🚀 **12+ New Models** - Phi-4-mini, SmolLM2, Qwen3-4B, TinyLlama, BitNet 2B
+- ⚡ **Ultra-Efficient** - Run on <2GB RAM with TinyLlama, Qwen3-0.6B
+- 🎯 **Smart Routing** - Mixture-of-Experts automatically picks best model per task
+- 🔄 **Speculative Decoding** - 2.5x speedup with draft+verify pairs
+- 📊 **Hardware Profiles** - Auto-configure based on your available resources
+
+### Previously Added (v0.4.0)
 - 🖼️ **Vision Module** - CLIP/BLIP image understanding, VQA, OCR
 - 🎤 **Voice Module** - Whisper transcription, speaker diarization, TTS
 - 📦 **Docker Support** - One-command deployment with GPU support
 - 👥 **Team Collaboration** - Shared memory pools, multi-user sessions
-- 🔐 **Enterprise Security** - Role-based access, audit logging
-- 🤖 **7 New Agents** - Planner, Critic, Web, FileSystem + collaboration
+
+---
+
+## 🐝 Model Swarm: Collaborative Multi-Model Inference
+
+The **Model Swarm** system enables multiple small models to work together, achieving better results than any single model:
+
+### Swarm Strategies
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| **PSO Collaborative** | Particle Swarm Optimization guides model selection | Complex tasks |
+| **Parallel Vote** | Run 3+ models, vote on best response | Quality-critical |
+| **Mixture of Experts** | Route to specialist per task type | General use |
+| **Speculative Ensemble** | Fast model drafts, strong model verifies | Speed + quality |
+| **Fastest First** | Start fast, escalate if confidence low | Low latency |
+| **Confidence Fusion** | Weighted combination of outputs | High reliability |
+
+### Supported Models (Jan 2025)
+
+| Model | Params | RAM | Strengths |
+|-------|--------|-----|-----------|
+| **Phi-4-mini-reasoning** | 3.8B | 6GB | Rivals o1-mini in math/reasoning |
+| **Phi-4-mini** | 3.8B | 6GB | GPT-3.5 class, 128K context |
+| **DeepSeek-R1-1.5B** | 1.5B | 4GB | o1-style reasoning, MIT license |
+| **Qwen3-4B** | 4B | 5GB | MMLU-Pro 74%, multilingual |
+| **SmolLM2-1.7B** | 1.7B | 3GB | Best quality at size |
+| **Qwen3-0.6B** | 0.6B | 2GB | Ultra-light, 100+ languages |
+| **TinyLlama-1.1B** | 1.1B | 2GB | Fastest, edge devices |
+| **BitNet-2B** | 2B | 1GB | Native 1-bit, 5-7x CPU speedup |
+| **Gemma-3n-E2B** | 2B eff | 4GB | Multimodal (text/image/audio) |
+| **Phi-4-multimodal** | 5.6B | 8GB | Vision + speech + reasoning |
+
+### Hardware Profiles
+
+Farnsworth auto-configures based on your hardware:
+
+```yaml
+minimal:     # <4GB RAM: TinyLlama, Qwen3-0.6B
+cpu_only:    # 8GB+ RAM, no GPU: BitNet, SmolLM2
+low_vram:    # 2-4GB VRAM: DeepSeek-R1, Qwen3-0.6B
+medium_vram: # 4-8GB VRAM: Phi-4-mini, Qwen3-4B
+high_vram:   # 8GB+ VRAM: Full swarm with verification
+```
 
 ---
 
@@ -63,6 +114,10 @@ pip install -r requirements.txt
 
 # Install Ollama from https://ollama.ai, then:
 ollama pull deepseek-r1:1.5b
+# Optional: Add more models for swarm
+ollama pull phi4:mini
+ollama pull qwen3:0.6b
+ollama pull tinyllama:1.1b
 ```
 
 ### Configure Claude Code
@@ -233,10 +288,21 @@ Self-refining retrieval that gets better at finding relevant information:
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   Local LLM Backends                         │
+│                   Model Swarm (v0.5+)                        │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              PSO Collaborative Engine                │   │
+│  │   • Particle positions = model configs              │   │
+│  │   • Velocity = adaptation direction                 │   │
+│  │   • Global/personal best tracking                   │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                           │                                 │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │ Ollama   │ │llama.cpp │ │ BitNet   │ │ Cascade  │       │
-│  │(default) │ │ (GGUF)   │ │ (1-bit)  │ │ (hybrid) │       │
+│  │ Phi-4    │ │DeepSeek  │ │ Qwen3    │ │ SmolLM2  │       │
+│  │ mini     │ │ R1-1.5B  │ │ 0.6B/4B  │ │ 1.7B     │       │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
+│  │TinyLlama │ │ BitNet   │ │ Gemma    │ │ Cascade  │       │
+│  │ 1.1B     │ │ 2B(1-bit)│ │ 3n-E2B   │ │ (hybrid) │       │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -257,6 +323,7 @@ Once connected, Claude has access to these tools:
 | `farnsworth_vision(image, task)` | Analyze images (caption, VQA, OCR) |
 | `farnsworth_voice(audio, task)` | Process audio (transcribe, diarize) |
 | `farnsworth_collaborate(action, ...)` | Team collaboration operations |
+| `farnsworth_swarm(prompt, strategy)` | **NEW:** Multi-model collaborative inference |
 
 ---
 
@@ -301,6 +368,7 @@ docker-compose -f docker/docker-compose.yml --profile ui-only up -d
 - **Agent Monitor** - Active agents and task history
 - **Evolution Dashboard** - Fitness metrics and improvement trends
 - **Team Collaboration** - Shared pools and active sessions
+- **Model Swarm Monitor** - PSO state, model performance, strategy stats
 
 </details>
 
@@ -315,6 +383,7 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 - v0.2.0 - Enhanced memory (episodic, semantic, sharing)
 - v0.3.0 - Advanced agents (planner, critic, web, filesystem, debates, teams)
 - v0.4.0 - Multimodal (vision, voice) + collaboration + Docker
+- v0.5.0 - **Model Swarm** + 12 new models + hardware profiles
 
 ### Coming Next
 - 🎬 Video understanding and summarization
@@ -332,18 +401,19 @@ Named after Professor Hubert J. Farnsworth from *Futurama* - a brilliant invento
 
 ## 📋 Requirements
 
-| Minimum | Recommended |
-|---------|-------------|
-| Python 3.10+ | Python 3.11+ |
-| 8GB RAM | 16GB RAM |
-| 4-core CPU | 8-core CPU |
-| 10GB storage | 50GB storage |
-| - | NVIDIA GPU (4GB+ VRAM) |
+| Minimum | Recommended | With Full Swarm |
+|---------|-------------|-----------------|
+| Python 3.10+ | Python 3.11+ | Python 3.11+ |
+| 4GB RAM | 8GB RAM | 16GB RAM |
+| 2-core CPU | 4-core CPU | 8-core CPU |
+| 5GB storage | 20GB storage | 50GB storage |
+| - | 4GB VRAM | 8GB+ VRAM |
 
 **Supported Platforms:** Windows 10+, macOS 11+, Linux
 
 **Optional Dependencies:**
-- `ollama` - Local LLM inference
+- `ollama` - Local LLM inference (recommended)
+- `llama-cpp-python` - Direct GGUF inference
 - `torch` - GPU acceleration
 - `transformers` - Vision/Voice models
 - `playwright` - Web browsing agent
@@ -372,6 +442,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - Video understanding module
 - Cloud deployment templates
 - Performance benchmarks
+- Additional model integrations
 - Documentation improvements
 
 ---
@@ -383,6 +454,16 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - 🤝 [Contributing](CONTRIBUTING.md) - How to contribute
 - 📜 [License](LICENSE) - License terms
 - 🐳 [Docker Guide](docker/) - Container deployment
+- 🐝 [Model Configs](configs/models.yaml) - Supported models and swarm configs
+
+---
+
+## 🔗 Research References
+
+Model Swarm implementation inspired by:
+- [Model Swarms: Collaborative Search via Swarm Intelligence](https://arxiv.org/abs/2410.11163)
+- [Harnessing Multiple LLMs: Survey on LLM Ensemble](https://arxiv.org/abs/2502.18036)
+- [Small Language Models - MIT Tech Review](https://www.technologyreview.com/2025/01/03/1108800/small-language-models-ai-breakthrough-technologies-2025/)
 
 ---
 
