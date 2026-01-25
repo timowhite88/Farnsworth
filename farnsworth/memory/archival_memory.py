@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 import numpy as np
 
 from loguru import logger
@@ -104,7 +104,7 @@ class ArchivalMemory:
         self._corpus_tokens: list[list[str]] = []
 
         # Embedding function (set externally)
-        self.embed_fn: Optional[callable] = None
+        self.embed_fn: Optional[Callable] = None
 
         self._lock = asyncio.Lock()
         self._initialized = False

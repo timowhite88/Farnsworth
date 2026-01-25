@@ -496,11 +496,14 @@ Return 2-3 sub-questions, one per line, that when answered together address the 
         if self.graph_search_fn:
             try:
                 graph_results = await self.graph_search_fn(query, max_entities=max_results)
+                default_score = graph_results.get("score", 0.5)
                 for entity in graph_results.get("entities", []):
+                    # Use per-entity score if available, otherwise use default
+                    entity_score = entity.get("score", entity.get("relevance", default_score))
                     results.append(AttributedResult(
                         content=f"{entity.get('name', '')} ({entity.get('type', '')}): {entity.get('description', '')}",
-                        score=graph_results.get("score", 0.5),
-                        confidence=self._calculate_confidence(graph_results.get("score", 0.5), "graph"),
+                        score=entity_score,
+                        confidence=self._calculate_confidence(entity_score, "graph"),
                         source_id=entity.get("id", ""),
                         source_type="graph",
                         metadata=entity,

@@ -339,9 +339,11 @@ class ContextCompressor:
         # Find duplicates
         unique_blocks = []
         unique_indices = []
+        index_to_position: dict[int, int] = {}  # Maps original index to position in unique_blocks
 
         for i, block in enumerate(blocks):
             if embeddings[i] is None:
+                index_to_position[i] = len(unique_blocks)
                 unique_blocks.append(block)
                 unique_indices.append(i)
                 continue
@@ -360,10 +362,13 @@ class ContextCompressor:
                     is_duplicate = True
                     # Keep the one with higher score
                     if block.effective_score > blocks[j].effective_score:
-                        unique_blocks[unique_indices.index(j)] = block
+                        position = index_to_position.get(j)
+                        if position is not None:
+                            unique_blocks[position] = block
                     break
 
             if not is_duplicate:
+                index_to_position[i] = len(unique_blocks)
                 unique_blocks.append(block)
                 unique_indices.append(i)
 
@@ -536,14 +541,19 @@ Return only the key points, one per line."""
 
                 # Update relevance scores
                 for block in blocks:
-                    if asyncio.iscoroutinefunction(self.embed_fn):
-                        block_emb = await self.embed_fn(block.content[:500])
-                    else:
-                        block_emb = self.embed_fn(block.content[:500])
+                    try:
+                        if asyncio.iscoroutinefunction(self.embed_fn):
+                            block_emb = await self.embed_fn(block.content[:500])
+                        else:
+                            block_emb = self.embed_fn(block.content[:500])
 
-                    block.relevance_score = self._cosine_similarity(
-                        query_vec, np.array(block_emb)
-                    )
+                        if block_emb is not None:
+                            block.relevance_score = self._cosine_similarity(
+                                query_vec, np.array(block_emb)
+                            )
+                    except Exception as block_err:
+                        logger.debug(f"Failed to embed block {block.id}: {block_err}")
+                        # Keep default relevance_score
             except Exception as e:
                 logger.error(f"Query optimization failed: {e}")
 

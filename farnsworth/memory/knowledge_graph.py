@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from collections import defaultdict
 
 from loguru import logger
@@ -133,7 +133,7 @@ class KnowledgeGraph:
         self.entities_by_type: dict[str, set[str]] = defaultdict(set)
 
         # Embedding function (set externally)
-        self.embed_fn: Optional[callable] = None
+        self.embed_fn: Optional[Callable] = None
 
         self._lock = asyncio.Lock()
 

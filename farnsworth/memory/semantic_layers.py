@@ -14,7 +14,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from collections import defaultdict
 from enum import Enum
 import numpy as np
@@ -181,10 +181,10 @@ class SemanticLayerSystem:
         self.concepts_by_parent: dict[str, set[str]] = defaultdict(set)
 
         # Embedding function
-        self.embed_fn: Optional[callable] = None
+        self.embed_fn: Optional[Callable] = None
 
         # LLM function for distillation (set externally)
-        self.llm_fn: Optional[callable] = None
+        self.llm_fn: Optional[Callable] = None
 
         self._lock = asyncio.Lock()
         self._initialized = False
@@ -389,7 +389,6 @@ Return JSON: {{"name": "...", "description": "..."}}"""
         try:
             result = await self.llm_fn(prompt)
             if isinstance(result, str):
-                import json
                 return json.loads(result)
             return result
         except Exception as e:

@@ -12,6 +12,7 @@ import asyncio
 import json
 import hashlib
 import gzip
+import io
 import shutil
 import tarfile
 from dataclasses import dataclass, field
@@ -316,13 +317,13 @@ class MemorySharing:
                     manifest_data = json.dumps(manifest.to_dict(), indent=2).encode()
                     manifest_info = tarfile.TarInfo(name="manifest.json")
                     manifest_info.size = len(manifest_data)
-                    tar.addfile(manifest_info, fileobj=asyncio.BytesIO(manifest_data) if hasattr(asyncio, 'BytesIO') else __import__('io').BytesIO(manifest_data))
+                    tar.addfile(manifest_info, fileobj=io.BytesIO(manifest_data))
 
                     # Add data
                     data_content = json.dumps(export_data, indent=2).encode()
                     data_info = tarfile.TarInfo(name="data.json")
                     data_info.size = len(data_content)
-                    tar.addfile(data_info, fileobj=__import__('io').BytesIO(data_content))
+                    tar.addfile(data_info, fileobj=io.BytesIO(data_content))
 
             logger.info(f"Exported {manifest.total_memories} memories to {output_path}")
             return manifest
@@ -367,6 +368,8 @@ class MemorySharing:
                         with tarfile.open(input_path, "r:gz") as tar:
                             manifest_file = tar.extractfile("manifest.json")
                             data_file = tar.extractfile("data.json")
+                            if manifest_file is None or data_file is None:
+                                raise ValueError("Invalid archive: missing manifest.json or data.json")
                             manifest_data = json.loads(manifest_file.read().decode())
                             export_data = json.loads(data_file.read().decode())
                     else:

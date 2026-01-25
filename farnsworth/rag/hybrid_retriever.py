@@ -10,7 +10,7 @@ Novel Approaches:
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from collections import defaultdict
 
 from loguru import logger
@@ -188,7 +188,7 @@ class HybridRetriever:
         query: str,
         top_k: int = 10,
         semantic_weight: Optional[float] = None,
-        filter_fn: Optional[callable] = None,
+        filter_fn: Optional[Callable] = None,
         expand_query: bool = True,
     ) -> list[RetrievalResult]:
         """

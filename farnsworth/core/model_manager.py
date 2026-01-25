@@ -18,7 +18,7 @@ import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 from datetime import datetime
 
 import yaml
@@ -507,7 +507,7 @@ class ModelManager:
     async def download_model(
         self,
         model_key: str,
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> bool:
         """
         Download a model with progress tracking.
