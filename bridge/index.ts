@@ -3,31 +3,39 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+function createServer() {
+    const server = new McpServer({
+        name: "farnsworth-proxy",
+        version: "1.0.0",
+    });
 
-// Create a proxy server
-const server = new McpServer({
-    name: "farnsworth-proxy",
-    version: "1.0.0",
-});
+    server.tool(
+        "farnsworth_remember",
+        "Store information in memory",
+        {
+            content: z.string().describe("Information to remember"),
+            tags: z.string().describe("Comma-separated tags")
+        },
+        async ({ content, tags }) => {
+            return { content: [{ type: "text", text: "Proxied" }] };
+        }
+    );
 
-// Define tools that mirror the Python server
-// This allows Smithery to scan the capabilities
-server.tool(
-    "farnsworth_remember",
-    "Store information in memory",
-    {
-        content: z.string().describe("Information to remember"),
-        tags: z.string().describe("Comma-separated tags")
-    },
-    async ({ content, tags }) => {
-        // In a real proxy, we'd forward this to the Python process
-        return { content: [{ type: "text", text: "Proxied to Python" }] };
-    }
-);
+    return server;
+}
+
+// Hook for Smithery scanner
+export function createSandboxServer() {
+    return createServer();
+}
 
 async function main() {
+    const server = createServer();
     const transport = new StdioServerTransport();
     await server.connect(transport);
 }
 
+// Run main
 main().catch(console.error);
+
+
