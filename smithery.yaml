@@ -1,0 +1,15 @@
+startCommand:
+  type: stdio
+  command: python
+  args:
+    - -m
+    - farnsworth.mcp_server
+installCommand:
+  command: pip
+  args:
+    - install
+    - -r
+    - requirements.txt
+build:
+  dockerfile: docker/Dockerfile
+  context: .
