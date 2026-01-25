@@ -5,7 +5,8 @@
       "Bash(git remote add:*)",
       "Bash(git add:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial release: Farnsworth - Your Claude Companion AI\n\nA self-evolving AI companion that integrates with Claude Code via MCP to provide:\n\n- Persistent Memory: MemGPT-style virtual context with archival, conversational, and knowledge graph storage\n- Memory Dreaming: Background consolidation that discovers patterns during idle time\n- Agent Swarm: Specialist agents \\(Code, Reasoning, Research, Creative\\) for task delegation\n- Self-Evolution: NSGA-II genetic optimization that improves based on interactions\n- User Avatar: Learns preferences for personalized responses\n\nKey Features:\n- Multi-backend LLM support \\(Ollama, llama.cpp, BitNet\\)\n- Cascade inference with confidence-based model escalation\n- Hybrid RAG with semantic + keyword search\n- Streamlit dashboard for visualization\n- Comprehensive test suite\n- Cross-platform \\(Windows, macOS, Linux\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\ndocs: add comprehensive documentation, licensing, and roadmap\n\n- Add dual license \\(free for personal, commercial license required for enterprise\\)\n- Add USER_GUIDE.md with complete usage documentation\n- Add ROADMAP.md with planned features through 2026\n- Add CONTRIBUTING.md with contribution guidelines\n- Update README.md with better branding and structure\n- Link all documentation together\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }
