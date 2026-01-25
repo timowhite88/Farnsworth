@@ -77,7 +77,7 @@ The **Model Swarm** system enables multiple small models to work together, achie
 - **Your Data:** All memories and files stay on your computer.
 - **How it connects:** The [Claude Desktop App](https://claude.ai/download) spawns Farnsworth as a background process using the Model Context Protocol (MCP).
 
-You (the developer) publish the *code*. The user downloads and runs it.
+
 
 ---
 
@@ -112,7 +112,24 @@ high_vram:   # 8GB+ VRAM: Full swarm with verification
 
 ## ⚡ Quick Start
 
-### Option 1: Docker (Recommended)
+### 📦 Option 1: One-Line Install (Recommended)
+
+Farnsworth is available on PyPI. This is the easiest way to get started.
+
+```bash
+pip install farnsworth-ai
+```
+
+**Running the Server:**
+```bash
+# Start the MCP server
+farnsworth-server
+
+# Or customize configuration
+farnsworth-server --debug --port 8000
+```
+
+### 🐳 Option 2: Docker
 
 ```bash
 git clone https://github.com/timowhite88/Farnsworth.git
@@ -120,50 +137,34 @@ cd Farnsworth
 docker-compose -f docker/docker-compose.yml up -d
 ```
 
-### Option 2: Local Install
+### 🛠️ Option 3: Source (For Developers)
 
 ```bash
 git clone https://github.com/timowhite88/Farnsworth.git
 cd Farnsworth
 pip install -r requirements.txt
-
-# Install Ollama from https://ollama.ai, then:
-ollama pull deepseek-r1:1.5b
-# Optional: Add more models for swarm
-ollama pull phi4:mini
-ollama pull qwen3:0.6b
-ollama pull tinyllama:1.1b
 ```
 
-### Configure Claude Code
+### 🔌 Configure Claude Code
 
-Add to your Claude Code MCP settings:
+Add to your Claude Code MCP settings (usually found in `claude_desktop_config.json`):
 
+**For PyPI Install:**
 ```json
 {
   "mcpServers": {
     "farnsworth": {
-      "command": "python",
-      "args": ["-m", "farnsworth.mcp_server"],
-      "cwd": "/path/to/Farnsworth"
+      "command": "farnsworth-server",
+      "args": [],
+      "env": {
+        "FARNSWORTH_LOG_LEVEL": "INFO"
+      }
     }
   }
 }
 ```
 
-### Start Using!
-
-```
-You: "Remember that I prefer TypeScript over JavaScript"
-Claude: ✓ I'll remember that preference.
-
-[Next week, new session]
-
-You: "What language should I use for this project?"
-Claude: "Based on your preference for TypeScript..."
-```
-
-📖 **[Full Installation Guide →](docs/USER_GUIDE.md#installation)**
+### 📖 [Full Installation Guide →](docs/USER_GUIDE.md#installation)
 
 ---
 
