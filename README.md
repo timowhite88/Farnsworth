@@ -84,19 +84,7 @@ Most AI tools are ephemeral; they forget you the moment you close the window.
 
 ---
 
-## 🧪 The "Agentic" Development Process
 
-This project practices what it preaches. **Farnsworth was built by Agents, for Agents.**
-Our development philosophy follows the **Cognitive Cycle**:
-
-1.  **Draft**: High-level architecture is designed by humans (or Architect Agents).
-2.  **Scaffold**: The `PlannerAgent` decomposes the feature into file structures.
-3.  **Implement**: `CoderAgents` write the initial implementation.
-4.  **Critique**: The `CriticAgent` reviews code for logical fallacies, security risks, and optimization.
-5.  **Refine**: `Swarm Debates` resolve architectural disagreements.
-6.  **Evolve**: The `GeneticOptimizer` tunes the system based on test results.
-
-This approach ensures that Farnsworth is not just "written," but **evolved**.
 
 ---
 
