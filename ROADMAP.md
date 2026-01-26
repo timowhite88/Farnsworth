@@ -191,6 +191,12 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 - [x] **IDE Integrations** (`farnsworth/integration/ide/`)
   - [x] **VS Code** (LSP Bridge for diagnostics and code actions)
+  - [x] **Cursor** (Auto-generation of `.cursorrules` from memory)
+
+- [x] **Agent Interoperability**
+  - [x] **Agent Interface** (Standardized API for Antigravity/External Agents)
+  - [x] **MCP Server** (Full Claude/Agent protocol support)
+
 
 ### Research Directions 🎓
 
