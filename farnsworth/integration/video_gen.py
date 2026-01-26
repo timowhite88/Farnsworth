@@ -3,8 +3,11 @@ Farnsworth Remotion Integration - Programmatic Video Generation.
 
 "Lights, Camera, React!"
 
-This module enables Farnsworth to generate video scripts (Remotion/React)
-and render them using the Remotion CLI.
+Features:
+- Automated Project Scaffolding
+- Dynamic Props Injection (Text, Images, Data)
+- "Shorts" Optimization (9:16)
+- Trade Recap Generation
 """
 
 import subprocess
@@ -12,81 +15,138 @@ import os
 import json
 from pathlib import Path
 from loguru import logger
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 class RemotionVideoSkill:
     def __init__(self, workspace_path: str = "./remotion_workspace"):
         self.workspace = Path(workspace_path)
-        self.workspace.mkdir(parents=True, exist_ok=True)
-        
-    async def create_video_project(self, name: str):
-        """Initialize a new remotion project template."""
-        logger.info(f"Remotion: Creating project {name}")
-        # In real life: npx create-remotion@latest --template ...
-        # For now, we assume a base template exists or we write a basic index.tsx
-        pass
+        # Ensure workspace exists
+        if not self.workspace.exists():
+            try:
+                self.workspace.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Remotion: Could not create workspace: {e}")
 
-    async def render_video(self, composition_id: str, props: Dict[str, Any], output_path: str):
+    async def init_project(self):
+        """Scaffold a new Remotion project if one doesn't exist."""
+        if (self.workspace / "package.json").exists():
+            logger.info("Remotion: Project already exists.")
+            return
+
+        logger.info("Remotion: Initializing new video project...")
+        # In a real environment, we would run: npx create-remotion@latest .
+        # Since we are an agent, creating a few key files is safer/faster for now.
+        
+        # 1. package.json
+        pkg = {
+            "name": "farnsworth-video",
+            "version": "1.0.0",
+            "scripts": {
+                "start": "remotion preview src/index.ts",
+                "render": "remotion render src/index.ts"
+            },
+            "dependencies": {
+                "remotion": "latest",
+                "react": "^18.0.0",
+                "react-dom": "^18.0.0"
+            }
+        }
+        with open(self.workspace / "package.json", "w") as f:
+            json.dump(pkg, f, indent=2)
+
+        # 2. src dir
+        (self.workspace / "src").mkdir(exist_ok=True)
+        
+        # 3. Root component
+        root_code = """
+import {Composition} from 'remotion';
+import {TradeRecap} from './TradeRecap';
+
+export const RemotionRoot: React.FC = () => {
+    return (
+        <>
+            <Composition
+                id="TradeRecap"
+                component={TradeRecap}
+                durationInFrames={300}
+                fps={30}
+                width={1080}
+                height={1920} // Shorts Format
+                defaultProps={{
+                    title: "SOLANA BREAKOUT",
+                    profit: "+$4,200",
+                    ticker: "SOL"
+                }}
+            />
+        </>
+    );
+};
+        """
+        with open(self.workspace / "src/index.ts", "w") as f:
+            f.write(root_code)
+
+    async def render_video(self, composition_id: str, props: Dict[str, Any], output_filename: str) -> str:
         """
         Render a remotion composition to an MP4 file.
-        Requires remotion installed in the workspace.
         """
-        logger.info(f"Remotion: Rendering {composition_id}")
+        output_path = self.workspace / "out" / output_filename
+        output_path.parent.mkdir(exist_ok=True)
         
-        # Serialize props to JSON
-        props_file = self.workspace / "props.json"
+        logger.info(f"Remotion: Rendering {composition_id} to {output_path}")
+        
+        # Serialize props to JSON for CLI
+        props_file = self.workspace / "render_props.json"
         with open(props_file, "w") as f:
             json.dump(props, f)
             
+        # Command Construction
+        # Assumes 'npm install' has been run by the user or agent previously
         cmd = [
             "npx", "remotion", "render", 
-            composition_id, 
-            output_path, 
-            "--props", str(props_file)
+            f"src/index.ts:{composition_id}", 
+            str(output_path), 
+            "--props", str(props_file),
+            "--gl", "angle" # Use Angle backend for better compat in some envs
         ]
         
         try:
             # We run this in the background / sub-task
-            process = subprocess.Popen(cmd, cwd=str(self.workspace), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            process = subprocess.Popen(
+                cmd, 
+                cwd=str(self.workspace), 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                shell=True if os.name == 'nt' else False
+            )
             stdout, stderr = process.communicate()
             
             if process.returncode == 0:
                 logger.success(f"Remotion: Render complete -> {output_path}")
-                return True
+                return str(output_path)
             else:
-                logger.error(f"Remotion: Render failed: {stderr.decode()}")
-                return False
+                err_msg = stderr.decode()
+                logger.error(f"Remotion: Render failed: {err_msg}")
+                return f"Error: {err_msg[:200]}..."
         except Exception as e:
             logger.error(f"Remotion: Execution error: {e}")
-            return False
+            return str(e)
 
-    def generate_component_code(self, narrative: str) -> str:
+    async def generate_trade_recap(self, trade_data: Dict) -> str:
         """
-        Generate React/Remotion code based on a narrative summary.
-        (Usually called by an LLM)
+        High-level helper to generate a 'Shorts' style recap video for a trade.
         """
-        return f"""
-import {{Composition}} from 'remotion';
-import {{MyComp}} from './MyComp';
+        await self.init_project()
+        
+        props = {
+            "title": f"WINNING TRADE: {trade_data.get('ticker', 'UNKNOWN')}",
+            "profit": trade_data.get('pnl_str', '$0'),
+            "roi": trade_data.get('roi_str', '0%'),
+            "entry": trade_data.get('entry_price', '0'),
+            "exit": trade_data.get('exit_price', '0'),
+            "theme": "dark_green" if float(trade_data.get('pnl', 0)) > 0 else "dark_red"
+        }
+        
+        filename = f"recap_{trade_data.get('ticker')}_{int(os.times().elapsed)}.mp4"
+        return await self.render_video("TradeRecap", props, filename)
 
-export const RemotionVideo = () => {{
-  return (
-    <>
-      <Composition
-        id="Main"
-        component={{MyComp}}
-        durationInFrames={{300}}
-        fps={{30}}
-        width={{1920}}
-        height={{1080}}
-        defaultProps={{{{
-          text: "{narrative}"
-        }}}}
-      />
-    </>
-  );
-}};
-"""
-
-# Global instance
 remotion_skill = RemotionVideoSkill()

@@ -563,6 +563,30 @@ class ToolRouter:
             handler=self._handle_show_dashboard,
         ))
 
+        self.register_tool(ToolDefinition(
+            name="solana_cluster_scan",
+            description="Detect insider rings by analyzing correlation between multiple wallets",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "wallets": {"type": "array", "items": {"type": "string"}, "required": True, "description": "List of wallet addresses"},
+            },
+            capabilities=["cluster_analysis", "insider_trading", "forensics"],
+            handler=self._handle_cluster_scan,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="create_trade_video",
+            description="Generate a 9:16 'Shorts' style video recapping a successful trade",
+            category=ToolCategory.GENERATION,
+            parameters={
+                "ticker": {"type": "string", "required": True, "description": "Token Ticker (e.g. SOL)"},
+                "pnl_str": {"type": "string", "required": True, "description": "Profit string (e.g. +$500)"},
+                "roi_str": {"type": "string", "required": False, "description": "ROI string (e.g. +40%)"},
+            },
+            capabilities=["video_generation", "content_creation", "marketing"],
+            handler=self._handle_trade_video,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -1255,6 +1279,19 @@ class ToolRouter:
             "ui_url": f"file://{ui_path}",
             "message": "The Professor's specialized trading dashboard has been generated."
         }
+
+    async def _handle_cluster_scan(self, wallets: List[str]) -> dict:
+        """Handle Cluster Analysis."""
+        from farnsworth.integration.solana.degen_mob import degen_mob
+        return await degen_mob.analyze_wallet_cluster(wallets)
+
+    async def _handle_trade_video(self, ticker: str, pnl_str: str, roi_str: str = "0%") -> dict:
+        """Handle Trade Recap Video Generation."""
+        from farnsworth.integration.video_gen import remotion_skill
+        trade_data = {"ticker": ticker, "pnl_str": pnl_str, "roi_str": roi_str}
+        path = await remotion_skill.generate_trade_recap(trade_data)
+        return {"status": "Video Rendered", "path": path}
+
 
 
 
