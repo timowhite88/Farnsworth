@@ -1,0 +1,11 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Fawnsworth
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+tests\integration\test_financial_scanners.py ...                         [100%]
+
+============================== 3 passed in 1.42s ==============================
