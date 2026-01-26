@@ -67,6 +67,16 @@ class SetupWizard:
         self.config["ENABLE_TOM"] = "true" if self._ask_bool("Enable Theory of Mind (User simulation)?") else "false"
         self.config["ENABLE_CAUSAL"] = "true" if self._ask_bool("Enable Causal Reasoning?") else "false"
         self.config["ENABLE_VIDEO_FLOW"] = "true" if self._ask_bool("Enable Advanced Video Flow Analysis?") else "false"
+        
+        # New Cognitive Features (Experimental)
+        print("\n🧪 EXPERIMENTAL FEATURES")
+        if self._ask_bool("Enable Quantum-Inspired Search (Schrodinger's Query)?", default=False):
+            self.config["ENABLE_QUANTUM_SEARCH"] = "true"
+            
+        if self._ask_bool("Enable Planetary Memory (Akashic Record)?", default=False):
+            self.config["ENABLE_PLANETARY_MEMORY"] = "true"
+            use_p2p = self._ask_bool("  - Allow P2P Skill Sharing (Anonymized)?", default=False)
+            self.config["PLANETARY_USE_P2P"] = "true" if use_p2p else "false"
 
         # 4. External Integrations
         print("\n🔗 EXTERNAL INTEGRATIONS")
