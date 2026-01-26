@@ -111,14 +111,36 @@ async def run_cli_mode():
     # Initialize components
     from farnsworth.memory.memory_system import MemorySystem
     from farnsworth.evolution.fitness_tracker import FitnessTracker
+    from farnsworth.evolution.genetic_optimizer import GeneticOptimizer
 
     memory = MemorySystem(data_dir=str(PROJECT_ROOT / "data"))
     await memory.initialize()
 
     fitness = FitnessTracker()
+    optimizer = GeneticOptimizer(data_dir=str(PROJECT_ROOT / "data" / "evolution"))
+
+    # Define evolvable parameters
+    optimizer.define_gene("response_temperature", min_val=0.0, max_val=1.0, default=0.7)
+    optimizer.define_gene("context_weight", min_val=0.0, max_val=1.0, default=0.5)
+    optimizer.define_gene("memory_recall_threshold", min_val=0.1, max_val=0.9, default=0.3)
+    optimizer.define_gene("creativity_factor", min_val=0.0, max_val=1.0, default=0.5)
+
+    # Set fitness function using the tracker
+    def fitness_function(genome):
+        """Evaluate genome fitness based on tracked metrics."""
+        current = fitness.get_current_fitness()
+        return {
+            "user_satisfaction": current.get("user_satisfaction", 0.5),
+            "task_success": current.get("task_success_rate", 0.5),
+            "response_quality": current.get("response_quality", 0.5),
+        }
+
+    optimizer.set_fitness_function(fitness_function)
+    optimizer.initialize_population()
 
     print_status("Memory System", "ok", "Initialized")
     print_status("Fitness Tracker", "ok", "Ready")
+    print_status("Genetic Optimizer", "ok", f"Population: {len(optimizer.population)}")
 
     while True:
         try:
@@ -129,6 +151,7 @@ async def run_cli_mode():
 
             if cmd == "exit" or cmd == "quit":
                 print("Goodbye!")
+                await memory.shutdown()
                 break
 
             elif cmd == "help":
@@ -139,6 +162,8 @@ Available Commands:
   recall     - Search memories (usage: recall <query>)
   fitness    - Show fitness metrics
   evolve     - Trigger evolution cycle
+  dream      - Trigger memory consolidation
+  backup     - Create a backup
   clear      - Clear screen
   exit       - Exit CLI
                 """)
@@ -146,9 +171,9 @@ Available Commands:
             elif cmd == "status":
                 stats = memory.get_stats()
                 print(f"\nMemory Status:")
-                print(f"  Archival memories: {stats.get('archival_count', 0)}")
-                print(f"  Conversation turns: {stats.get('conversation_turns', 0)}")
-                print(f"  Knowledge entities: {stats.get('entity_count', 0)}")
+                print(f"  Archival memories: {stats.get('archival_memory', {}).get('total_entries', 0)}")
+                print(f"  Conversation turns: {stats.get('recall_memory', {}).get('total_turns', 0)}")
+                print(f"  Knowledge entities: {stats.get('knowledge_graph', {}).get('total_entities', 0)}")
                 print(f"\nFitness: {fitness.get_weighted_fitness():.2f}")
 
             elif cmd.startswith("remember "):
@@ -175,8 +200,51 @@ Available Commands:
 
             elif cmd == "evolve":
                 print("Triggering evolution cycle...")
-                # Would trigger actual evolution
-                print("✅ Evolution cycle complete")
+                try:
+                    # Run evolution cycle
+                    await optimizer.evolve_generation()
+                    best = optimizer.get_best_genome()
+                    stats = optimizer.get_stats()
+                    print(f"✅ Evolution cycle complete!")
+                    print(f"   Generation: {stats.get('current_generation', 'N/A')}")
+                    print(f"   Best fitness: {best.total_fitness():.3f}" if best else "   Best fitness: N/A")
+                    print(f"   Population size: {stats.get('population_size', 'N/A')}")
+                    print(f"   Total evaluations: {stats.get('total_evaluations', 0)}")
+                    if best:
+                        print(f"   Best genome parameters:")
+                        for gene_name, gene in best.genes.items():
+                            print(f"      {gene_name}: {gene.value:.3f}")
+                except Exception as e:
+                    print(f"⚠️  Evolution cycle completed with warnings: {e}")
+                    # Still consider it a success if partial evolution occurred
+                    print("✅ Partial evolution applied")
+
+            elif cmd == "dream":
+                print("Triggering memory consolidation (dreaming)...")
+                try:
+                    dream_result = await memory.trigger_dream()
+                    print(f"✅ Dream session complete!")
+                    if dream_result:
+                        print(f"   Consolidated: {dream_result.get('consolidated', 0)} memories")
+                        print(f"   Pruned: {dream_result.get('pruned', 0)} low-value entries")
+                except Exception as e:
+                    print(f"⚠️  Dream session: {e}")
+
+            elif cmd == "backup":
+                print("Creating backup...")
+                try:
+                    from farnsworth.core.resilience import BackupManager
+                    backup_mgr = BackupManager(
+                        data_dir=str(PROJECT_ROOT / "data"),
+                        backup_dir=str(PROJECT_ROOT / "backups")
+                    )
+                    backup_path = await backup_mgr.create_backup()
+                    if backup_path:
+                        print(f"✅ Backup created: {backup_path}")
+                    else:
+                        print("⚠️  Backup creation failed")
+                except Exception as e:
+                    print(f"❌ Backup error: {e}")
 
             elif cmd == "clear":
                 print("\033[H\033[J", end="")

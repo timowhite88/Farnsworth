@@ -87,6 +87,9 @@ class FarnsworthMCPServer:
         logger.info("Initializing Farnsworth components...")
 
         try:
+            # Import resilience components first (needed early)
+            from farnsworth.core.resilience import BackupManager, HealthMonitor
+
             # Import here to avoid circular imports
             from farnsworth.memory.memory_system import MemorySystem
             from farnsworth.agents.swarm_orchestrator import SwarmOrchestrator
@@ -102,39 +105,39 @@ class FarnsworthMCPServer:
             # Initialize planner
             self._planner_agent = PlannerAgent()
 
-            # Initialize proactive agent
+            # Initialize proactive agent (LLM wired later)
             self._proactive_agent = ProactiveAgent(
                 memory_system=self._memory_system,
                 planner_agent=self._planner_agent,
-                llm_fn=None, # Will be wired via ModelManager later
+                llm_fn=None,
             )
             await self._proactive_agent.start()
 
-            # Initialize health monitor
-            self._health_monitor = HealthMonitor()
-            self._health_monitor.register_check("memory_system", 
-                lambda: "healthy" if self._memory_system._initialized else "uninitialized")
-            self._health_monitor.register_check("planner",
-                lambda: "healthy" if self._planner_agent else "missing")
-            
-            await self._health_monitor.check_health()
-
             # Initialize Vision Module
-            from farnsworth.integration.vision import VisionModule
-            self._vision_module = VisionModule()
-            
+            try:
+                from farnsworth.integration.vision import VisionModule
+                self._vision_module = VisionModule()
+            except ImportError as e:
+                logger.warning(f"Vision module not available: {e}")
+                self._vision_module = None
+
             # Initialize Web Agent
-            from farnsworth.agents.web_agent import WebAgent
-            self._web_agent = WebAgent()
-            
+            try:
+                from farnsworth.agents.web_agent import WebAgent
+                self._web_agent = WebAgent()
+            except ImportError as e:
+                logger.warning(f"Web agent not available: {e}")
+                self._web_agent = None
+
             # Initialize swarm orchestrator
             self._swarm_orchestrator = SwarmOrchestrator()
 
-            # Register web agent factory
-            self._swarm_orchestrator.register_agent_factory(
-                "web",
-                lambda: self._web_agent # In a real swarm, this would return a new instance or pool
-            )
+            # Register web agent factory if available
+            if self._web_agent:
+                self._swarm_orchestrator.register_agent_factory(
+                    "web",
+                    lambda: self._web_agent
+                )
 
             # Initialize conversation exporter
             from farnsworth.memory.conversation_export import ConversationExporter
@@ -162,22 +165,26 @@ class FarnsworthMCPServer:
             self._model_manager = ModelManager()
             await self._model_manager.initialize()
 
-            # Initialize resilience components
-            from farnsworth.core.resilience import BackupManager, HealthMonitor
-            
+            # Initialize backup manager
             self._backup_manager = BackupManager(
                 data_dir=str(self.data_dir),
                 backup_dir=str(self.data_dir.parent / "backups")
             )
             await self._backup_manager.start()
-            
+
+            # Initialize health monitor (single instance)
             self._health_monitor = HealthMonitor()
-            # Register checks
-            self._health_monitor.register_check("memory_system", 
-                lambda: "healthy" if self._memory_system._initialized else "uninitialized")
+            self._health_monitor.register_check("memory_system",
+                lambda: "healthy" if self._memory_system and self._memory_system._initialized else "uninitialized")
             self._health_monitor.register_check("planner",
                 lambda: "healthy" if self._planner_agent else "missing")
-            
+            self._health_monitor.register_check("model_manager",
+                lambda: "healthy" if self._model_manager else "missing")
+            self._health_monitor.register_check("backup_manager",
+                lambda: "healthy" if self._backup_manager and self._backup_manager._is_running else "stopped")
+            self._health_monitor.register_check("proactive_agent",
+                lambda: "healthy" if self._proactive_agent and self._proactive_agent._is_running else "stopped")
+
             await self._health_monitor.check_health()
             
             # Wire up LLM

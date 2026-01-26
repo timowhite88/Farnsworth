@@ -278,7 +278,8 @@ class WebAgent:
                 else:
                     keywords = self.llm_fn(prompt)
                 keywords = keywords.strip()
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Keyword extraction failed, using raw goal: {e}")
                 keywords = goal
         else:
             keywords = goal

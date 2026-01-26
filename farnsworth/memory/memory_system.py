@@ -11,12 +11,86 @@ Integrates all memory components:
 """
 
 import asyncio
+import hashlib
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Callable
 
 from loguru import logger
+
+
+class QueryCache:
+    """
+    Simple LRU cache for memory queries with TTL support.
+
+    Features:
+    - LRU eviction when max size reached
+    - TTL-based expiration
+    - Cache key normalization
+    """
+
+    def __init__(self, max_size: int = 100, ttl_seconds: float = 60.0):
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self._cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
+        self._hits = 0
+        self._misses = 0
+
+    def _make_key(self, query: str, **kwargs) -> str:
+        """Create normalized cache key."""
+        key_parts = [query.lower().strip()]
+        for k, v in sorted(kwargs.items()):
+            key_parts.append(f"{k}={v}")
+        key_str = "|".join(key_parts)
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    def get(self, query: str, **kwargs) -> Optional[Any]:
+        """Get cached result if valid."""
+        key = self._make_key(query, **kwargs)
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+            if time.time() - timestamp < self.ttl_seconds:
+                # Move to end (most recently used)
+                self._cache.move_to_end(key)
+                self._hits += 1
+                return value
+            else:
+                # Expired
+                del self._cache[key]
+        self._misses += 1
+        return None
+
+    def set(self, query: str, value: Any, **kwargs):
+        """Cache a result."""
+        key = self._make_key(query, **kwargs)
+        self._cache[key] = (value, time.time())
+        self._cache.move_to_end(key)
+
+        # Evict oldest if over size
+        while len(self._cache) > self.max_size:
+            self._cache.popitem(last=False)
+
+    def invalidate(self, query: Optional[str] = None):
+        """Invalidate cache entries."""
+        if query is None:
+            self._cache.clear()
+        else:
+            key = self._make_key(query)
+            self._cache.pop(key, None)
+
+    def get_stats(self) -> dict:
+        """Get cache statistics."""
+        total = self._hits + self._misses
+        return {
+            "size": len(self._cache),
+            "max_size": self.max_size,
+            "hits": self._hits,
+            "misses": self._misses,
+            "hit_rate": self._hits / total if total > 0 else 0,
+        }
 
 from farnsworth.memory.virtual_context import VirtualContext, MemoryBlock
 from farnsworth.memory.working_memory import WorkingMemory, SlotType
@@ -83,6 +157,9 @@ class MemorySystem:
             idle_threshold_minutes=5,
             consolidation_interval_hours=1.0,
         )
+
+        # Query cache for fast repeated lookups
+        self._query_cache = QueryCache(max_size=100, ttl_seconds=60.0)
 
         # Embedding function (set by user)
         self._embed_fn: Optional[Callable] = None
@@ -182,6 +259,9 @@ class MemorySystem:
             )
             self.virtual_context.context_window.add_block(block)
 
+        # Invalidate query cache since memory has changed
+        self._query_cache.invalidate()
+
         logger.debug(f"Remembered: {content[:50]}... (id={memory_id})")
         return memory_id
 
@@ -196,32 +276,47 @@ class MemorySystem:
     ) -> list[MemorySearchResult]:
         """
         Recall memories relevant to a query with parallel execution.
-        
+
         Optimized for <100ms latency on hot queries.
         """
         self.dreamer.record_activity()
-        
-        # Check cache (TODO: Implement robust query cache)
-        
+
+        # Check cache for hot queries
+        cache_key_params = {
+            "top_k": top_k,
+            "archival": search_archival,
+            "conv": search_conversation,
+            "graph": search_graph,
+            "min_score": min_score,
+        }
+        cached = self._query_cache.get(query, **cache_key_params)
+        if cached is not None:
+            logger.debug(f"Cache hit for query: {query[:30]}...")
+            return cached
+
         tasks = []
-        
+
+        # Helper coroutine for empty results
+        async def _empty_result():
+            return []
+
         # 1. Archival Search Task
         if search_archival:
             tasks.append(self._search_archival_wrapped(query, top_k, min_score))
         else:
-            tasks.append(asyncio.sleep(0, result=[]))
-            
+            tasks.append(_empty_result())
+
         # 2. Conversation Search Task
         if search_conversation:
             tasks.append(self._search_conversation_wrapped(query, top_k))
         else:
-             tasks.append(asyncio.sleep(0, result=[]))
-             
+            tasks.append(_empty_result())
+
         # 3. Graph Search Task
         if search_graph:
             tasks.append(self._search_graph_wrapped(query, top_k))
         else:
-            tasks.append(asyncio.sleep(0, result=[]))
+            tasks.append(_empty_result())
             
         # Execute in parallel
         results_archival, results_conv, results_graph = await asyncio.gather(*tasks)
@@ -240,8 +335,13 @@ class MemorySystem:
             if content_key not in seen_content:
                 seen_content.add(content_key)
                 unique_results.append(r)
-                
-        return unique_results[:top_k]
+
+        final_results = unique_results[:top_k]
+
+        # Cache results for fast repeated queries
+        self._query_cache.set(query, final_results, **cache_key_params)
+
+        return final_results
 
     async def _search_archival_wrapped(self, query: str, top_k: int, min_score: float) -> list[MemorySearchResult]:
         try:
@@ -405,6 +505,7 @@ class MemorySystem:
             "recall_memory": self.recall_memory.get_stats(),
             "knowledge_graph": self.knowledge_graph.get_stats(),
             "dreamer": self.dreamer.get_stats(),
+            "query_cache": self._query_cache.get_stats(),
         }
 
     async def get_memory_summary(self) -> str:

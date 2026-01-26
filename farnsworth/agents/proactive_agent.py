@@ -140,27 +140,94 @@ class ProactiveAgent:
         for task in self.scheduled_tasks:
             if not task.enabled:
                 continue
-                
+
             should_run = False
             if task.schedule_type == "interval":
                 if not task.last_run:
                     should_run = True
                 elif (now - task.last_run).total_seconds() >= task.schedule_value:
                     should_run = True
-            
+            elif task.schedule_type == "one_off":
+                if task.next_run and now >= task.next_run and not task.last_run:
+                    should_run = True
+
             if should_run:
                 logger.info(f"Running scheduled task: {task.description}")
-                # Execute via Planner
+                self.state = ProactiveState.ACTING
                 try:
-                     # Submit task to planner (fire and forget for now, or track)
-                     # In a real system, we'd use the SwarmOrchestrator
-                     # Here we just log it as "executed"
-                     task.last_run = now
-                     self.state = ProactiveState.ACTING
-                     # TODO: Actually execute logic
+                    # Execute the task via planner
+                    result = await self._execute_scheduled_task(task)
+                    task.last_run = now
+
+                    # Disable one-off tasks after execution
+                    if task.schedule_type == "one_off":
+                        task.enabled = False
+
+                    logger.info(f"Scheduled task completed: {task.id} - Success: {result.get('success', False)}")
+
                 except Exception as e:
                     logger.error(f"Failed to run scheduled task {task.id}: {e}")
+                    # Still mark as run to prevent infinite retries
+                    task.last_run = now
+
                 self.state = ProactiveState.IDLE
+
+    async def _execute_scheduled_task(self, task: ScheduledTask) -> dict:
+        """
+        Execute a scheduled task using the planner or LLM.
+
+        Args:
+            task: The scheduled task to execute
+
+        Returns:
+            Result dictionary with success status and output
+        """
+        try:
+            # If we have an LLM function, use it to determine the best action
+            if self.llm_fn:
+                prompt = f"""Execute the following scheduled task and provide a result:
+
+Task: {task.description}
+Task ID: {task.id}
+Schedule Type: {task.schedule_type}
+
+Determine what action to take and execute it. Return a JSON response with:
+- success: true/false
+- action_taken: description of what was done
+- output: any relevant output or result
+"""
+                if asyncio.iscoroutinefunction(self.llm_fn):
+                    response = await self.llm_fn(prompt)
+                else:
+                    response = self.llm_fn(prompt)
+
+                # Parse JSON response
+                try:
+                    start = response.find('{')
+                    end = response.rfind('}') + 1
+                    if start >= 0 and end > start:
+                        result = json.loads(response[start:end])
+                        return result
+                except json.JSONDecodeError:
+                    pass
+
+                return {"success": True, "action_taken": "processed", "output": response}
+
+            # Fallback: Use planner if available
+            if self.planner and hasattr(self.planner, 'create_plan'):
+                plan_id = await self.planner.create_plan(
+                    goal=task.description,
+                    context={"scheduled_task_id": task.id}
+                )
+                return {"success": True, "action_taken": "plan_created", "plan_id": plan_id}
+
+            # No execution method available
+            logger.warning(f"No execution method available for task {task.id}")
+            return {"success": False, "error": "No execution method available"}
+
+        except Exception as e:
+            logger.error(f"Task execution error: {e}")
+            return {"success": False, "error": str(e)}
 
     async def _analyze_context(self) -> dict:
         """
@@ -189,15 +256,8 @@ class ProactiveAgent:
         if len(recent_context) > 50:
             activity_level += 0.4
             
-        # 5. Novel Context Attributes
-        # Mood Heuristic: Length of recent queries (Short = Focused/Terse, Long = Exploratory)
-        # TODO: Use Sentiment Analysis from LLM
-        focus_score = 0.5
-        if "error" in recent_context.lower() or "fail" in recent_context.lower():
-            mood = "frustrated"
-            focus_score = 0.9 # High focus on debugging
-        else:
-            mood = "neutral"
+        # 5. Novel Context Attributes - Mood and Focus Analysis
+        mood, focus_score = await self._analyze_sentiment(recent_context)
             
         return {
             "timestamp": now,
@@ -267,9 +327,143 @@ If yes, return a JSON object with:
         self.suggestions.append(suggestion)
         logger.info(f"Generated proactive suggestion: {suggestion.title}")
 
+    async def _analyze_sentiment(self, context: str) -> tuple[str, float]:
+        """
+        Analyze sentiment and focus level from context.
+
+        Args:
+            context: Recent conversation context
+
+        Returns:
+            Tuple of (mood, focus_score)
+        """
+        context_lower = context.lower()
+
+        # Use LLM for sentiment analysis if available
+        if self.llm_fn and len(context) > 50:
+            try:
+                prompt = f"""Analyze the sentiment and focus level of this conversation context.
+
+Context:
+{context[:1000]}
+
+Return a JSON object with:
+- mood: one of "frustrated", "focused", "exploratory", "confused", "satisfied", "neutral"
+- focus_score: 0.0 to 1.0 (how focused/intense the user seems)
+- reasoning: brief explanation
+
+Return ONLY the JSON object."""
+
+                if asyncio.iscoroutinefunction(self.llm_fn):
+                    response = await self.llm_fn(prompt)
+                else:
+                    response = self.llm_fn(prompt)
+
+                # Parse JSON response
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start >= 0 and end > start:
+                    data = json.loads(response[start:end])
+                    return data.get("mood", "neutral"), data.get("focus_score", 0.5)
+
+            except Exception as e:
+                logger.debug(f"LLM sentiment analysis failed, using heuristics: {e}")
+
+        # Fallback to heuristic analysis
+        focus_score = 0.5
+        mood = "neutral"
+
+        # Frustration indicators
+        frustration_words = ["error", "fail", "broken", "bug", "issue", "problem", "wrong", "crash", "exception"]
+        if any(word in context_lower for word in frustration_words):
+            mood = "frustrated"
+            focus_score = 0.9
+
+        # Confusion indicators
+        confusion_words = ["confused", "don't understand", "what does", "how do", "why is", "unclear"]
+        if any(word in context_lower for word in confusion_words):
+            mood = "confused"
+            focus_score = 0.7
+
+        # Satisfaction indicators
+        satisfaction_words = ["thanks", "perfect", "great", "awesome", "works", "solved", "fixed"]
+        if any(word in context_lower for word in satisfaction_words):
+            mood = "satisfied"
+            focus_score = 0.3
+
+        # Exploration indicators (long queries, many questions)
+        if context_lower.count("?") > 3 or len(context) > 500:
+            mood = "exploratory"
+            focus_score = 0.6
+
+        return mood, focus_score
+
+    def add_scheduled_task(
+        self,
+        description: str,
+        schedule_type: str = "interval",
+        schedule_value: Any = 3600,
+        task_id: Optional[str] = None,
+    ) -> ScheduledTask:
+        """
+        Add a new scheduled task.
+
+        Args:
+            description: What the task should do
+            schedule_type: "interval", "cron", or "one_off"
+            schedule_value: Seconds for interval, cron string, or datetime for one_off
+            task_id: Optional custom ID
+
+        Returns:
+            The created ScheduledTask
+        """
+        task = ScheduledTask(
+            id=task_id or f"task_{len(self.scheduled_tasks) + 1}_{int(datetime.now().timestamp())}",
+            description=description,
+            schedule_type=schedule_type,
+            schedule_value=schedule_value,
+            next_run=schedule_value if schedule_type == "one_off" and isinstance(schedule_value, datetime) else None,
+        )
+        self.scheduled_tasks.append(task)
+        logger.info(f"Added scheduled task: {task.id} - {description}")
+        return task
+
+    def remove_scheduled_task(self, task_id: str) -> bool:
+        """Remove a scheduled task by ID."""
+        for i, task in enumerate(self.scheduled_tasks):
+            if task.id == task_id:
+                self.scheduled_tasks.pop(i)
+                logger.info(f"Removed scheduled task: {task_id}")
+                return True
+        return False
+
+    def get_pending_suggestions(self) -> list[Suggestion]:
+        """Get all non-dismissed suggestions."""
+        return [s for s in self.suggestions if not s.is_dismissed]
+
+    def dismiss_suggestion(self, suggestion_id: str) -> bool:
+        """Dismiss a suggestion."""
+        for s in self.suggestions:
+            if s.id == suggestion_id:
+                s.is_dismissed = True
+                return True
+        return False
+
+    def accept_suggestion(self, suggestion_id: str) -> Optional[Suggestion]:
+        """Accept a suggestion and return it for execution."""
+        for s in self.suggestions:
+            if s.id == suggestion_id:
+                s.is_accepted = True
+                return s
+        return None
+
     def get_status(self) -> dict:
+        """Get proactive agent status."""
         return {
             "state": self.state.value,
             "is_running": self._is_running,
             "suggestion_count": len(self.suggestions),
+            "pending_suggestions": len(self.get_pending_suggestions()),
+            "scheduled_tasks": len(self.scheduled_tasks),
+            "active_scheduled_tasks": len([t for t in self.scheduled_tasks if t.enabled]),
         }

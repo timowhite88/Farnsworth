@@ -285,8 +285,9 @@ class FileSystemAgent:
                         language_lines[language] = \
                             language_lines.get(language, 0) + lines
 
-                except Exception:
-                    pass
+                except (OSError, UnicodeDecodeError) as e:
+                    # Skip files that can't be read (binary, permissions, etc.)
+                    logger.debug(f"Could not read file {path}: {e}")
 
             # Track special directories/files
             rel_path = str(path.relative_to(root))
@@ -493,8 +494,9 @@ class FileSystemAgent:
                                     "content": line.strip()[:200],
                                     "keyword": keyword,
                                 })
-                except Exception:
-                    pass
+                except (OSError, UnicodeDecodeError) as e:
+                    # Skip unreadable files during search
+                    logger.debug(f"Could not search file {path}: {e}")
 
             if name_match or content_matches:
                 relevance = 1.0 if name_match else 0.5
@@ -631,8 +633,10 @@ Return JSON:
             try:
                 change.original_content = file_path.read_text(encoding='utf-8')
                 change.diff = self._generate_diff(change.original_content, content)
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError) as e:
+                logger.debug(f"Could not read original file for diff: {e}")
+                change.original_content = None
+                change.diff = None
 
         # Validate if requested
         if validate:

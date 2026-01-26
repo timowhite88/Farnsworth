@@ -487,8 +487,10 @@ Return just a number between 0.0 and 1.0"""
                             rating = rating / 100
                         arg.peer_ratings[other_id] = max(0, min(1, rating))
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse peer rating: {e}")
+                    # Default to neutral rating on parse failure
+                    arg.peer_ratings[other_id] = 0.5
 
     async def _synthesize_debate(self, debate: Debate) -> str:
         """Synthesize debate into unified conclusion."""
@@ -567,7 +569,8 @@ Return JSON array of insight strings:
 
             return json.loads(self._extract_json(response))
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to extract insights: {e}")
             return []
 
     def _calculate_consensus(self, debate: Debate) -> float:
