@@ -111,6 +111,9 @@ class SetupWizard:
         if self._ask_bool("Configure SQL Database Access?"):
             self.config["DB_TYPE"] = self._ask_select("DB Type", ["sqlite", "postgres", "mysql"], "sqlite")
             self.config["DB_CONNECTION_STRING"] = self._ask("Connection String", "farnsworth_data.db")
+            
+        if self._ask_bool("Enable Universal Scraper (Crawlee)?"):
+            self.config["ENABLE_CRAWLEE"] = "true"
 
         # 6. Financial Intelligence
         print("\n📈 FINANCIAL INTELLIGENCE")
