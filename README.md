@@ -32,7 +32,18 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 **All processing happens locally on your machine.** Your data never leaves your computer.
 
-[**⚔️ See how Farnsworth compares to other agents (Clawdbot, Marge, etc.)**](COMPARED.md)
+**All processing happens locally on your machine.** Your data never leaves your computer.
+
+### ⚔️ Why choose Farnsworth?
+
+| Feature | 🧠 **Farnsworth** | 🤖 **Others (Marge, Ralph, Claudebot)** |
+|:---|:---:|:---:|
+| **Memory** | **Infinite & Planetary** | Session / Repo Only |
+| **Logic** | **Quantum & Causal** | Linear Chain-of-Thought |
+| **Tools** | **Solana / Stocks / Vision** | Basic IO |
+| **Privacy** | **Local First** | Cloud Dependent |
+
+[**👉 See the full Battle Chart vs. Marge, Ralph, and Claudebot**](COMPARED.md)
 
 ---
 
