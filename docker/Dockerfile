@@ -23,7 +23,7 @@ FROM python:3.11-slim as runtime
 # Labels
 LABEL org.opencontainers.image.title="Farnsworth"
 LABEL org.opencontainers.image.description="Self-Evolving Companion AI for Claude Code"
-LABEL org.opencontainers.image.version="2.0.0"
+LABEL org.opencontainers.image.version="2.1.0-alpha"
 LABEL org.opencontainers.image.source="https://github.com/timowhite88/Farnsworth"
 
 # Environment variables
@@ -43,6 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
     libglib2.0-0 \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder and install
@@ -102,6 +104,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     git \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
