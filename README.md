@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.6.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -56,9 +56,15 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🧙 **Granular Setup Wizard** - Step-by-step feature control (`python main.py --setup`)
 - 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow)
 - 🧠 **Synergy Engine** - Automated cross-domain learning (GitHub -> Memory -> Projects)
+### Mega Update (v2.6.0) - The "Omni-Market" Update
+- 🕷️ **Universal Scraper (Crawlee)** - Robust scraping for Social Media (X/Insta) and Live Platforms (Twitch/YouTube) with bot-evasion tactics.
+- 📉 **TradFi Agent** - Real-time Stocks & Forex tracking (yfinance / AlphaVantage). Farnsworth is now a multi-asset financial terminal.
+- 🎨 **Meme Quality Analyzer** - Vision-based AI that rates memes on "Originality" and "Cursed Energy" to predict viral potential.
+- 🐇 **Bonding Curve Sniper** - Tracks Pump.fun curves to alert you moments before a token graduates to Raydium.
+- ⚡ **Jito Bundle Execution** - Routes Solana trades directly to validators (Anti-MEV) to prevent sandwich attacks.
 - 🧊 **3D Reconstruction** - Building spatial mental models from video (SfM)
-- 🐈 **Quantum-Inspired Search (Schrödinger's Query)** - Superposition-based reasoning engine that explores multiple logic paths simultaneously before "collapsing" to the correct answer.
-- 🌍 **Planetary Memory (Akashic Record)** - Privacy-preserving global knowledge sharing. Your Farnsworth can "borrow" learned skills (e.g., bug fixes) from the global swarm without exposing your data.
+- 🐈 **Quantum-Inspired Search (Schrödinger's Query)** - Superposition-based reasoning engine.
+- 🌍 **Planetary Memory (Akashic Record)** - Privacy-preserving global knowledge sharing.
 
 ### The Spatio-Temporal Era (v2.0)
 - 🎥 **Video v2.0** - Duo-Stream Analysis (Visual Saliency + Audio Narrative)
