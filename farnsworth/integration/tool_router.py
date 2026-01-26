@@ -321,6 +321,75 @@ class ToolRouter:
             handler=self._handle_parallel_ai,
         ))
 
+        self.register_tool(ToolDefinition(
+            name="discord_broadcast",
+            description="Send a message to a specific Discord channel",
+            category=ToolCategory.COMMUNICATION,
+            parameters={
+                "channel_id": {"type": "integer", "required": True, "description": "Target Discord channel ID"},
+                "content": {"type": "string", "required": True, "description": "Message content"},
+            },
+            capabilities=["chatops", "discord", "broadcast"],
+            handler=self._handle_discord_send,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="generate_mermaid_chart",
+            description="Generate a Mermaid diagram for technical visualization",
+            category=ToolCategory.GENERATION,
+            parameters={
+                "diagram_type": {"type": "string", "required": True, "description": "flowchart / sequence / gantt"},
+                "data": {"type": "object", "required": True, "description": "Nodes and edges definition"},
+            },
+            capabilities=["visual_logic", "mermaid", "documentation"],
+            handler=self._handle_mermaid_gen,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="system_diagnostic",
+            description="Get deep system health, load, and active processes",
+            category=ToolCategory.UTILITY,
+            parameters={},
+            capabilities=["os_level", "diagnostics", "agentic_os"],
+            handler=self._handle_system_diag,
+        ))
+
+        # --- Community Fold Skills (YouTube, DB, Thinking) ---
+        self.register_tool(ToolDefinition(
+            name="youtube_analyze",
+            description="Extract transcript and main insights from a YouTube video",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "video_url": {"type": "string", "required": True, "description": "Full YouTube URL"},
+            },
+            capabilities=["video_understanding", "transcription", "youtube"],
+            handler=self._handle_youtube_analyze,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="sequential_thought",
+            description="Perform a step in a systematic reasoning chain",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "thought": {"type": "string", "required": True, "description": "The current logical step"},
+                "verification": {"type": "string", "required": False, "description": "How this step was verified"},
+                "is_new_chain": {"type": "boolean", "required": False, "description": "Start a fresh reasoning path"},
+            },
+            capabilities=["reasoning", "chain_of_thought", "systematic"],
+            handler=self._handle_sequential_thought,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="database_query",
+            description="Execute a read-only SQL query on a connected database",
+            category=ToolCategory.DATABASE,
+            parameters={
+                "query": {"type": "string", "required": True, "description": "SQL SELECT query"},
+            },
+            capabilities=["sql", "data_extraction", "analytics"],
+            handler=self._handle_db_query,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -846,4 +915,55 @@ class ToolRouter:
         orchestrator = create_parallel_orchestrator(backends)
         result = await orchestrator.fused_consensus(prompt)
         return {"consensus_result": result}
+
+    async def _handle_discord_send(self, channel_id: int, content: str) -> dict:
+        """Handle Discord message sending."""
+        from farnsworth.integration.external.discord_ext import discord_bridge
+        await discord_bridge.send_message(channel_id, content)
+        return {"status": "dispatched", "channel": channel_id}
+
+    async def _handle_mermaid_gen(self, diagram_type: str, data: dict) -> dict:
+        """Handle Mermaid diagram generation."""
+        from farnsworth.integration.diagrams import diagram_skill
+        if diagram_type == "flowchart":
+            code = diagram_skill.generate_mermaid_flowchart(data.get("nodes", []), data.get("edges", []))
+        elif diagram_type == "sequence":
+            code = diagram_skill.generate_sequence_diagram(data.get("participants", []), data.get("messages", []))
+        else:
+            return {"error": f"Diagram type {diagram_type} not supported."}
+        return {"code": code}
+
+    async def _handle_system_diag(self) -> dict:
+        """Handle System Diagnostics."""
+        from farnsworth.os_integration.agentic_os import agentic_os
+        return {
+            "load": agentic_os.get_system_load(),
+            "processes_top": agentic_os.list_processes()[:5],
+            "network": agentic_os.get_network_stats()
+        }
+
+    async def _handle_youtube_analyze(self, video_url: str) -> dict:
+        """Handle YouTube analysis."""
+        from farnsworth.integration.external.youtube import youtube_skill
+        vid_id = youtube_skill.extract_id(video_url)
+        if not vid_id:
+            return {"error": "Invalid YouTube URL."}
+        transcript = await youtube_skill.get_transcript(vid_id)
+        return {"video_id": vid_id, "transcript_preview": transcript[:1000]}
+
+    async def _handle_sequential_thought(self, thought: str, verification: str = "", is_new_chain: bool = False) -> dict:
+        """Handle Sequential Thinking."""
+        from farnsworth.core.cognition.sequential_thinking import sequential_thinker
+        if is_new_chain:
+            sequential_thinker.start_new_chain()
+        step = sequential_thinker.add_step(thought, verification)
+        return {"step": step.step_number, "chain_summary": sequential_thinker.get_summary()}
+
+    async def _handle_db_query(self, query: str) -> dict:
+        """Handle Database Querying."""
+        from farnsworth.integration.external.db_manager import db_skill
+        results = await db_skill.execute_query(query)
+        return {"results": results}
+
+
 

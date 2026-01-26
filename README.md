@@ -41,6 +41,9 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🦝 **Grok X Search** - Real-time X (Twitter) search and deep thinking via xAI
 - 🎬 **Remotion Video** - Programmatic React-based video generation and rendering
 - ⚡ **Parallel AI** - High-reliability consensus via multi-model concurrent dispatch
+- 📺 **YouTube Intelligence** - Transcript extraction and semantic video analysis
+- 🧩 **Sequential Thinking** - Systematic "Chain-of-Thought" reasoning tool
+- 🗄️ **Database Manager** - Secure, read-only SQL access to local/remote databases
 - 🧙 **Granular Setup Wizard** - Step-by-step feature control (`python main.py --setup`)
 - 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow)
 - 🧠 **Synergy Engine** - Automated cross-domain learning (GitHub -> Memory -> Projects)
