@@ -70,10 +70,22 @@ class SolanaTradingSkill:
             raw_tx = base58.b58decode(swap_data["swapTransaction"])
             tx = VersionedTransaction.from_bytes(raw_tx)
             
-            # Note: Implementation for signing and sending versioned transactions
-            # Requires solders and solana-py 0.30+
-            # This is a high-level representation
-            return {"status": "Transaction generated", "tx_base58": swap_data["swapTransaction"], "quote": quote_data}
+            # Sign with our keypair
+            signature = self.keypair.sign_message(tx.message.to_bytes())
+            signed_tx = VersionedTransaction(tx.message, [signature])
+            
+            # Send to the blockchain
+            try:
+                tx_sig = await self.client.send_raw_transaction(bytes(signed_tx))
+                return {
+                    "status": "success", 
+                    "signature": str(tx_sig.value), 
+                    "url": f"https://solscan.io/tx/{tx_sig.value}",
+                    "quote": quote_data
+                }
+            except Exception as e:
+                logger.error(f"Solana: Swap execution failed: {e}")
+                return {"error": f"Execution failed: {e}"}
 
     # --- Pump.fun Trading ---
     async def pump_fun_trade(self, action: str, mint: str, amount: float, denominated_in_sol: bool = True) -> Dict:
@@ -97,9 +109,25 @@ class SolanaTradingSkill:
             async with session.post(url, json=payload) as resp:
                 if resp.status != 200:
                     return {"error": f"PumpPortal Error: {await resp.text()}"}
-                tx_data = await resp.read()
-                # Sign and send logic here
-                return {"status": "Pump trade tx generated", "mint": mint, "action": action}
+                tx_bytes = await resp.read()
+                
+                # Sign and send
+                try:
+                    tx = VersionedTransaction.from_bytes(tx_bytes)
+                    signature = self.keypair.sign_message(tx.message.to_bytes())
+                    signed_tx = VersionedTransaction(tx.message, [signature])
+                    
+                    tx_sig = await self.client.send_raw_transaction(bytes(signed_tx))
+                    return {
+                        "status": "success",
+                        "signature": str(tx_sig.value),
+                        "url": f"https://solscan.io/tx/{tx_sig.value}",
+                        "mint": mint,
+                        "action": action
+                    }
+                except Exception as e:
+                    logger.error(f"Solana: Pump trade failed: {e}")
+                    return {"error": str(e)}
 
     # --- Meteora LP ---
     async def meteora_info(self, pair_address: str) -> Dict:
