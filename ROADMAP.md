@@ -187,6 +187,10 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - [x] **Google Calendar** (OAuth2 integration for scheduling)
   - [x] **Office 365** (Outlook/OneDrive via Microsoft Graph)
   - [x] **X (Twitter)** (Tweepy integration for social monitoring)
+  - [x] **Universal AI Gateway** (Hybrid Local/Cloud model routing for Grok/Gemini/OpenAI)
+
+- [x] **IDE Integrations** (`farnsworth/integration/ide/`)
+  - [x] **VS Code** (LSP Bridge for diagnostics and code actions)
 
 ### Research Directions 🎓
 

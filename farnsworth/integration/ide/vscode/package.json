@@ -1,0 +1,34 @@
+{
+    "name": "farnsworth-vscode",
+    "displayName": "Farnsworth Companion",
+    "description": "Connects VS Code to the local Farnsworth Agent Swarm.",
+    "version": "1.0.0",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "farnsworth.activate",
+                "title": "Farnsworth: Activate Swarm"
+            },
+            {
+                "command": "farnsworth.explain",
+                "title": "Farnsworth: Explain Selection"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "farnsworth-sidebar",
+                    "title": "Farnsworth",
+                    "icon": "media/icon.svg"
+                }
+            ]
+        }
+    }
+}
