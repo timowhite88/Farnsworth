@@ -58,6 +58,17 @@ from farnsworth.memory.conversation_export import (
     ExportOptions,
     ExportResult,
 )
+from farnsworth.memory.project_tracking import (
+    ProjectTracker,
+    Project,
+    Task,
+    Milestone,
+    ProjectLink,
+    ProjectStatus,
+    TaskStatus,
+    MilestoneType,
+    LinkType,
+)
 
 __all__ = [
     # Core memory components
@@ -100,4 +111,14 @@ __all__ = [
     "ConversationExportFormat",
     "ExportOptions",
     "ExportResult",
+    # Project Tracking
+    "ProjectTracker",
+    "Project",
+    "Task",
+    "Milestone",
+    "ProjectLink",
+    "ProjectStatus",
+    "TaskStatus",
+    "MilestoneType",
+    "LinkType",
 ]

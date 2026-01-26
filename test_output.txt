@@ -1,0 +1,64 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Fawnsworth
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 122 items / 3 errors
+
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/test_conversation_export.py ______________
+ImportError while importing test module 'C:\Fawnsworth\tests\test_conversation_export.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_conversation_export.py:15: in <module>
+    from farnsworth.memory.conversation_export import (
+farnsworth\__init__.py:12: in <module>
+    from farnsworth.memory import MemorySystem
+farnsworth\memory\__init__.py:19: in <module>
+    from farnsworth.memory.archival_memory import ArchivalMemory
+farnsworth\memory\archival_memory.py:21: in <module>
+    import numpy as np
+E   ModuleNotFoundError: No module named 'numpy'
+_______________ ERROR collecting tests/test_project_tracking.py _______________
+ImportError while importing test module 'C:\Fawnsworth\tests\test_project_tracking.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_project_tracking.py:15: in <module>
+    from farnsworth.memory.project_tracking import (
+farnsworth\__init__.py:12: in <module>
+    from farnsworth.memory import MemorySystem
+farnsworth\memory\__init__.py:19: in <module>
+    from farnsworth.memory.archival_memory import ArchivalMemory
+farnsworth\memory\archival_memory.py:21: in <module>
+    import numpy as np
+E   ModuleNotFoundError: No module named 'numpy'
+_______________ ERROR collecting tests/test_q1_2025_features.py _______________
+ImportError while importing test module 'C:\Fawnsworth\tests\test_q1_2025_features.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_q1_2025_features.py:21: in <module>
+    from farnsworth.memory.episodic_memory import (
+farnsworth\__init__.py:12: in <module>
+    from farnsworth.memory import MemorySystem
+farnsworth\memory\__init__.py:19: in <module>
+    from farnsworth.memory.archival_memory import ArchivalMemory
+farnsworth\memory\archival_memory.py:21: in <module>
+    import numpy as np
+E   ModuleNotFoundError: No module named 'numpy'
+=========================== short test summary info ===========================
+ERROR tests/test_conversation_export.py
+ERROR tests/test_project_tracking.py
+ERROR tests/test_q1_2025_features.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!
+============================== 3 errors in 0.40s ==============================

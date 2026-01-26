@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.0.0_rc-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -36,7 +36,7 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v2.0.0 (Release Candidate)
+## ✨ What's New in v2.0.0 (Production Release)
 
 - 🧠 **FCP Engine** - Farnsworth Cognitive Projection: Live holographic state projection (`VISION`/`FOCUS`/`HORIZON.md`)
 - ⚡ **The Nexus** - Asynchronous "Neural Event Bus" replacing standard function calls with signal propagation

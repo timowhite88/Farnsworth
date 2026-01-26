@@ -1,0 +1,17 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Fawnsworth
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 217 items
+
+tests\test_agents.py FFFFFFFFFFF.F.FF.FFF.FFF                            [ 11%]
+tests\test_conversation_export.py .....................                  [ 20%]
+tests\test_evolution.py ....FFFFFFFFF.FFF.FFFFFFF                        [ 32%]
+tests\test_mcp.py ...........FFFFFFFF..                                  [ 41%]
+tests\test_memory.py FFFFFFFFFFFFFFFFFFFFF.                              [ 52%]
+tests\test_project_tracking.py ......................................... [ 70%]
+....                                                                     [ 72%]
+tests\test_q1_2025_features.py .
