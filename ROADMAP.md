@@ -148,16 +148,6 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - Privacy-preserving improvement
   - Collective intelligence without central data
 
-- [ ] **Neuromorphic Computing**
-  - Brain-inspired memory architectures
-  - Event-driven processing
-  - Ultra-low power operation
-
-- [ ] **Agentic OS**
-  - Full operating system integration
-  - System-level context awareness
-  - Universal agent interface
-
 ### Research Directions 🎓
 
 - [ ] **Continual Learning**
