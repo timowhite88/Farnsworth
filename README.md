@@ -36,7 +36,7 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v1.3.0 (Alpha)
+## ✨ What's New in v2.0.0 (Release Candidate)
 
 - 🧠 **FCP Engine** - Farnsworth Cognitive Projection: Live holographic state projection (`VISION`/`FOCUS`/`HORIZON.md`)
 - ⚡ **The Nexus** - Asynchronous "Neural Event Bus" replacing standard function calls with signal propagation
@@ -55,14 +55,14 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🧠 **Decentralized Knowledge Graph (DKG)** - Federated fact-sharing across trust pools
 
 ### Cutting Edge (v1.6 - v1.9)
-- 🎭 **Theory of Mind** (v1.6) - Predictive Coding simulation of user intent
-- 👁️ **Visual Intelligence** (v1.7) - Visual Debugger & Diagram Understanding
-- 📅 **Personal Assistant** (v1.8) - Meeting Prep & Learning Co-Pilot
-- 🔗 **Connected Ecosystem** (v1.9) - Integrations with GitHub, Notion, O365, X, n8n
-- 🧠 **Neuromorphic Core** (v1.4) - Sparse Distributed Memory & Hebbian Learning
-- 🦾 **Agentic OS** (v1.4) - Deep system context awareness bridge
-- ♾️ **Continual Learning** (v1.5) - Experience Replay & Elastic Consolidation
-- 🔮 **Causal Reasoning** (v1.5) - Causal graphs, interventions, and counterfactuals
+- 🎭 **Theory of Mind (v1.6)** - Predictive Coding simulation of user intent
+- 👁️ **Visual Intelligence (v1.7)** - Visual Debugger & Diagram Understanding
+- 📅 **Personal Assistant (v1.8)** - Meeting Prep & Learning Co-Pilot
+- 🔗 **Connected Ecosystem (v1.9)** - Integrations with GitHub, Notion, O365, X, n8n
+- 🧠 **Neuromorphic Core (v1.4)** - Sparse Distributed Memory & Hebbian Learning
+- 🦾 **Agentic OS (v1.4)** - Deep system context awareness bridge
+- ♾️ **Continual Learning (v1.5)** - Experience Replay & Elastic Consolidation
+- 🔮 **Causal Reasoning (v1.5)** - Causal graphs, interventions, and counterfactuals
 
 ### Previously Added
 - 🖼️ **Multimodal** - Vision (CLIP/BLIP) & Voice (Whisper) support
