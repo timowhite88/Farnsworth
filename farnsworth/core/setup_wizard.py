@@ -9,8 +9,12 @@ It saves configuration to a local .env file.
 
 import os
 import json
+import argparse
+import asyncio
+import sys
 from pathlib import Path
 from typing import Dict, Any, List
+from dotenv import load_dotenv
 import questionary # We'll assume this or use standard input fallbacks
 from loguru import logger
 
@@ -90,6 +94,13 @@ class SetupWizard:
 
         if self._ask_bool("Enable Remotion Video Generation?"):
             self.config["REMOTION_WORKSPACE"] = self._ask("Remotion Workspace Path", "./remotion_workspace")
+
+        if self._ask_bool("Enable Discord Bridge (ChatOps)?"):
+            self.config["DISCORD_TOKEN"] = self._ask("Discord Bot Token")
+
+        if self._ask_bool("Configure SQL Database Access?"):
+            self.config["DB_TYPE"] = self._ask_select("DB Type", ["sqlite", "postgres", "mysql"], "sqlite")
+            self.config["DB_CONNECTION_STRING"] = self._ask("Connection String", "farnsworth_data.db")
 
         self.config["ENABLE_PARALLEL_AI"] = "true" if self._ask_bool("Enable Parallel AI (Multi-model consensus)?") else "false"
 

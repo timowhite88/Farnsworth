@@ -31,6 +31,9 @@ services:
       - FARNSWORTH_CONFIG_DIR=/config
       - FARNSWORTH_MODELS_DIR=/models
       - FARNSWORTH_ISOLATED=${FARNSWORTH_ISOLATED:-false}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - DISCORD_TOKEN=${DISCORD_TOKEN:-}
+      - DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-}
 
     healthcheck:
       test: [ "CMD", "python", "-c", "import farnsworth; print('ok')" ]
@@ -69,6 +72,9 @@ services:
       - FARNSWORTH_LOG_LEVEL=INFO
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_VISIBLE_DEVICES=0
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - DISCORD_TOKEN=${DISCORD_TOKEN:-}
+      - DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-}
 
     deploy:
       resources:
