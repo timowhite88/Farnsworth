@@ -566,7 +566,7 @@ class ModelManager:
 
         return False
 
-    async def generate(self, prompt: str, system: Optional[str] = None, config: Optional[GenerationConfig] = None) -> str:
+    async def generate(self, prompt: str, system: Optional[str] = None, config: Optional[dict] = None) -> str:
         """
         Unified generation interface.
 
@@ -576,6 +576,11 @@ class ModelManager:
         full_prompt = prompt
         if system:
             full_prompt = f"System: {system}\n\nUser: {prompt}"
+
+        # Convert dict to GenerationConfig if needed
+        gen_config = None
+        if config:
+            gen_config = GenerationConfig(**config)
 
         if not self.loaded_backends:
             # Auto-load a general model
@@ -587,7 +592,7 @@ class ModelManager:
 
         # Use the first loaded backend (or valid one)
         for backend in self.loaded_backends.values():
-            result = await backend.generate(full_prompt, config)
+            result = await backend.generate(full_prompt, gen_config)
             return result.text
         
         return "Error: Generation failed."
