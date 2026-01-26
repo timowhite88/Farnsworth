@@ -40,3 +40,4 @@ transformers>=4.38.0
 torch>=2.2.0
 playwright>=1.41.0
 beautifulsoup4>=4.12.0
+python-dotenv>=1.0.0

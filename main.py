@@ -21,12 +21,15 @@ Usage:
 
 import argparse
 import asyncio
-import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# Load configuration from .env if exists
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def print_banner():
@@ -63,74 +66,10 @@ def print_status(component: str, status: str, details: str = ""):
 
 
 async def run_setup_wizard():
-    """Run first-time setup wizard."""
-    print("\n🧙 Farnsworth Setup Wizard\n")
-    print("This wizard will configure Farnsworth for your system.\n")
-
-    # Check dependencies
-    print("Checking dependencies...")
-    missing = []
-
-    try:
-        import torch
-        print_status("PyTorch", "ok", f"v{torch.__version__}")
-    except ImportError:
-        print_status("PyTorch", "warning", "Not installed (optional for GPU)")
-
-    try:
-        import faiss
-        print_status("FAISS", "ok", "Installed")
-    except ImportError:
-        print_status("FAISS", "warning", "Not installed (will use numpy fallback)")
-
-    try:
-        import sentence_transformers
-        print_status("Sentence Transformers", "ok", "Installed")
-    except ImportError:
-        print_status("Sentence Transformers", "error", "Not installed (required)")
-        missing.append("sentence-transformers")
-
-    try:
-        import streamlit
-        print_status("Streamlit", "ok", f"v{streamlit.__version__}")
-    except ImportError:
-        print_status("Streamlit", "warning", "Not installed (optional for UI)")
-
-    if missing:
-        print(f"\n⚠️  Missing required dependencies: {', '.join(missing)}")
-        print("Run: pip install " + " ".join(missing))
-        return
-
-    # Create data directory
-    data_dir = PROJECT_ROOT / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    print_status("Data Directory", "ok", str(data_dir))
-
-    # Download models
-    print("\n📦 Model Setup")
-    print("Farnsworth works best with local LLMs. Recommended options:")
-    print("  1. Install Ollama: https://ollama.ai")
-    print("  2. Pull a model: ollama pull deepseek-r1:1.5b")
-    print("  3. Or use BitNet for maximum CPU efficiency")
-
-    # Generate Claude Code config
-    print("\n🔗 Claude Code Integration")
-    print("Add this to your Claude Code MCP settings:\n")
-
-    mcp_config = {
-        "mcpServers": {
-            "farnsworth": {
-                "command": "python",
-                "args": ["-m", "farnsworth.mcp_server"],
-                "cwd": str(PROJECT_ROOT)
-            }
-        }
-    }
-
-    import json
-    print(json.dumps(mcp_config, indent=2))
-
-    print("\n✅ Setup complete! Start Farnsworth with: python main.py")
+    """Run granular setup wizard."""
+    from farnsworth.core.setup_wizard import SetupWizard
+    wizard = SetupWizard(PROJECT_ROOT)
+    await wizard.run()
 
 
 async def run_mcp_server():

@@ -15,8 +15,10 @@ services:
     restart: unless-stopped
 
     ports:
-      - "8000:8000"  # MCP Server
-      - "8501:8501"  # Streamlit UI
+      - "8000:8000" # MCP Server
+      - "8501:8501" # Streamlit UI
+      - "8888:8888/udp" # P2P Discovery
+      - "9999:9999" # P2P Swarm Fabric
 
     volumes:
       - farnsworth-data:/data
@@ -28,9 +30,10 @@ services:
       - FARNSWORTH_DATA_DIR=/data
       - FARNSWORTH_CONFIG_DIR=/config
       - FARNSWORTH_MODELS_DIR=/models
+      - FARNSWORTH_ISOLATED=${FARNSWORTH_ISOLATED:-false}
 
     healthcheck:
-      test: ["CMD", "python", "-c", "import farnsworth; print('ok')"]
+      test: [ "CMD", "python", "-c", "import farnsworth; print('ok')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -54,6 +57,8 @@ services:
     ports:
       - "8000:8000"
       - "8501:8501"
+      - "8888:8888/udp"
+      - "9999:9999"
 
     volumes:
       - farnsworth-data:/data
@@ -71,7 +76,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
 
     networks:
       - farnsworth-network
@@ -94,7 +99,7 @@ services:
       - OLLAMA_HOST=0.0.0.0
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: [ "CMD", "curl", "-f", "http://localhost:11434/api/tags" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -140,7 +145,7 @@ services:
     command: redis-server --appendonly yes
 
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -170,7 +175,7 @@ services:
     environment:
       - FARNSWORTH_LOG_LEVEL=INFO
 
-    command: ["python", "-m", "streamlit", "run", "farnsworth/ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    command: [ "python", "-m", "streamlit", "run", "farnsworth/ui/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0" ]
 
     networks:
       - farnsworth-network
@@ -189,7 +194,7 @@ services:
     ports:
       - "8000:8000"
       - "8501:8501"
-      - "5678:5678"  # debugpy
+      - "5678:5678" # debugpy
 
     volumes:
       - ../farnsworth:/app/farnsworth:rw
@@ -202,7 +207,7 @@ services:
       - FARNSWORTH_LOG_LEVEL=DEBUG
       - PYTHONDONTWRITEBYTECODE=0
 
-    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "farnsworth.mcp_server"]
+    command: [ "python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "farnsworth.mcp_server" ]
 
     networks:
       - farnsworth-network

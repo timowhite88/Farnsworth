@@ -239,7 +239,7 @@ def print_next_steps():
    - Pull a model: ollama pull deepseek-r1:1.5b
 
 2. Start Farnsworth:
-   python main.py --setup    # First-time configuration
+   python main.py --setup    # First-time GRANULAR configuration (Privacy, Swarm, Engines)
    python main.py            # Start all services
 
 3. Configure Claude Code:

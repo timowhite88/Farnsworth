@@ -23,7 +23,7 @@ FROM python:3.11-slim as runtime
 # Labels
 LABEL org.opencontainers.image.title="Farnsworth"
 LABEL org.opencontainers.image.description="Self-Evolving Companion AI for Claude Code"
-LABEL org.opencontainers.image.version="0.3.0"
+LABEL org.opencontainers.image.version="2.0.0"
 LABEL org.opencontainers.image.source="https://github.com/timowhite88/Farnsworth"
 
 # Environment variables
@@ -41,6 +41,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder and install
@@ -62,10 +64,11 @@ RUN useradd -m -u 1000 farnsworth && \
 
 USER farnsworth
 
-# Expose ports
 # 8000 - MCP Server
 # 8501 - Streamlit UI
-EXPOSE 8000 8501
+# 8888 - UDP Discovery
+# 9999 - TCP Swarm Fabric
+EXPOSE 8000 8501 8888 9999
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -96,6 +99,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     libgomp1 \
     ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
     git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -124,7 +129,7 @@ RUN useradd -m -u 1000 farnsworth && \
 
 USER farnsworth
 
-EXPOSE 8000 8501
+EXPOSE 8000 8501 8888 9999
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python3.11 -c "import farnsworth; print('healthy')" || exit 1
