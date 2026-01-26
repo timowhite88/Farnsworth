@@ -176,6 +176,13 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - [x] **Error Message Extraction** (Regex pattern matching on OCR)
   - [x] **Diagram Parsing** (Heuristic labeling from Architecture diagrams)
 
+### Version 1.9.0 - Connected Ecosystem (In Progress) 🔗
+
+- [x] **External Integrations Framework** (`farnsworth/integration/external/`)
+  - [x] **GitHub** (PyGithub integration for Issues/PRs)
+  - [x] **Notion** (AsyncClient for Knowledge Base sync)
+  - [x] **Google Calendar** (OAuth2 integration for scheduling)
+
 ### Research Directions 🎓
 
 Want to help build these features? See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
