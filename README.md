@@ -11,7 +11,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](docker/)
 [![Models](https://img.shields.io/badge/Models-12%2B%20Supported-green.svg)](configs/models.yaml)
 
-[**Documentation**](docs/USER_GUIDE.md) • [**Roadmap**](ROADMAP.md) • [**Contributing**](CONTRIBUTING.md) • [**Docker**](docker/)
+[**Documentation**](docs/USER_GUIDE.md) • [**Roadmap**](ROADMAP.md) • [**Setup Wizard**](farnsworth/core/setup_wizard.py) • [**Isolated Mode**](README.md#isolated-mode)
 
 </div>
 
@@ -43,20 +43,24 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🛡️ **Resilience Layer** - Circuit breakers and entropy monitors to prevent hallucinations and loops
 - 🔌 **Omni-Channel Bridge** - "ChatOps" architecture for connecting to Discord/Slack (Beta)
 - 📊 **Project Tracking** (v1.2) - Auto-detect projects, track tasks & milestones
+- 🧙 **Granular Setup Wizard** - `python main.py --setup` for step-by-step feature control
+- 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow Action peaks)
+- 🌐 **P2P Fabric v2.5** - Secure TCP Gossip protocol for agent swarms
+- 🧠 **Synergy Engine** - Automated cross-domain learning (GitHub -> Memory -> Projects)
+- 🧊 **3D Reconstruction** - Building spatial mental models from video Structure from Motion (SfM)
 
 ### The Spatio-Temporal Era (v2.0)
-- 🎥 **Video v2.0** - Duo-Stream Spatio-Temporal Analysis (Visual Saliency + Audio Narrative)
-- 🧊 **3D Reconstruction** - Structure from Motion (SfM) for building spatial mental models
+- 🎥 **Video v2.0** - Duo-Stream Analysis (Visual Saliency + Audio Narrative)
 - 🌐 **P2P Swarm Fabric** - Decentralized agent discovery and Task Auctions (DTA)
 - 🧠 **Decentralized Knowledge Graph (DKG)** - Federated fact-sharing across trust pools
 
 ### Cutting Edge (v1.6 - v1.9)
-- 🎭 **Theory of Mind** (v1.6) - Mirror Neuron System & Affective Resonance
+- 🎭 **Theory of Mind** (v1.6) - Predictive Coding simulation of user intent
 - 👁️ **Visual Intelligence** (v1.7) - Visual Debugger & Diagram Understanding
 - 📅 **Personal Assistant** (v1.8) - Meeting Prep & Learning Co-Pilot
-- 🔗 **Connected Ecosystem** (v1.9) - Integrations (GitHub, n8n, AI Gateway, O365, X)
+- 🔗 **Connected Ecosystem** (v1.9) - Integrations with GitHub, Notion, O365, X, n8n
 - 🧠 **Neuromorphic Core** (v1.4) - Sparse Distributed Memory & Hebbian Learning
-- 🦾 **Agentic OS** (v1.4) - System context awareness and OS-level bridge
+- 🦾 **Agentic OS** (v1.4) - Deep system context awareness bridge
 - ♾️ **Continual Learning** (v1.5) - Experience Replay & Elastic Consolidation
 - 🔮 **Causal Reasoning** (v1.5) - Causal graphs, interventions, and counterfactuals
 
@@ -142,9 +146,15 @@ pip install farnsworth-ai
 # Start the MCP server
 farnsworth-server
 
-# Or customize configuration
-farnsworth-server --debug --port 8000
+# Run the GRANULAR setup wizard
+python main.py --setup
 ```
+
+### 🛡️ Isolated Mode
+For maximum privacy, Farnsworth can run in complete isolation:
+- Set `FARNSWORTH_ISOLATED=true` in your `.env`
+- All P2P discovery and network broadcasting is HARD-DISABLED.
+- Perfect for offline usage or highly sensitive environments.
 
 ### 🐳 Option 2: Docker
 
