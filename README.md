@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -34,21 +34,20 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v0.5.0
+## ✨ What's New in v1.2.0
 
-- 🐝 **Model Swarm** - PSO-based collaborative inference with multiple small models
-- 🔮 **Proactive Intelligence** - Anticipatory suggestions based on context and habits
-- 🚀 **12+ New Models** - Phi-4-mini, SmolLM2, Qwen3-4B, TinyLlama, BitNet 2B
-- ⚡ **Ultra-Efficient** - Run on <2GB RAM with TinyLlama, Qwen3-0.6B
-- 🎯 **Smart Routing** - Mixture-of-Experts automatically picks best model per task
-- 🔄 **Speculative Decoding** - 2.5x speedup with draft+verify pairs
-- 📊 **Hardware Profiles** - Auto-configure based on your available resources
+- 📊 **Project Tracking** - Auto-detect projects, track tasks & milestones, and transfer knowledge between projects
+- 📤 **Conversation Export** (v1.1) - Export memories and chats to JSON, Markdown, HTML, or TXT
+- 🏭 **Production Ready** (v1.0) - Reliability improvements, health monitoring, and sub-100ms recall
+- 🐝 **Model Swarm** (v0.5) - Collaborative inference with multiple specialized models
+- 🔮 **Proactive Intelligence** - Anticipatory suggestions based on context
 
-### Previously Added (v0.4.0)
-- 🖼️ **Vision Module** - CLIP/BLIP image understanding, VQA, OCR
-- 🎤 **Voice Module** - Whisper transcription, speaker diarization, TTS
+### Previously Added
+- 🖼️ **Multimodal** - Vision (CLIP/BLIP) & Voice (Whisper) support
 - 📦 **Docker Support** - One-command deployment with GPU support
 - 👥 **Team Collaboration** - Shared memory pools, multi-user sessions
+- 🔍 **Advanced RAG** - Hybrid search with semantic layers
+
 
 ---
 
@@ -256,6 +255,17 @@ Self-refining retrieval that gets better at finding relevant information:
 - **Context Compression** - Token-efficient memory injection
 - **Source Attribution** - Confidence scoring
 
+### 📊 Project Tracking (v1.2+)
+
+Turn conversations into concrete progress:
+
+- **Auto-Detection** - Identifies new projects from natural conversation
+- **Task Management** - Tracks dependencies, priorities, and status
+- **Milestone Tracking** - Monitors progress towards key goals
+- **Cross-Project Knowledge** - Transfers learnings between related projects
+- **Smart Linking** - Semantically links related initiatives
+
+
 ---
 
 ## 🛠️ Architecture
@@ -339,7 +349,10 @@ Once connected, Claude has access to these tools:
 | `farnsworth_vision(image, task)` | Analyze images (caption, VQA, OCR) |
 | `farnsworth_voice(audio, task)` | Process audio (transcribe, diarize) |
 | `farnsworth_collaborate(action, ...)` | Team collaboration operations |
-| `farnsworth_swarm(prompt, strategy)` | **NEW:** Multi-model collaborative inference |
+| `farnsworth_swarm(prompt, strategy)` | Multi-model collaborative inference |
+| `farnsworth_project_create(name, desc)` | **NEW:** Create and track projects |
+| `farnsworth_project_status(id)` | **NEW:** Get project progress and tasks |
+| `farnsworth_project_detect(text)` | **NEW:** Auto-detect projects from conversations |
 
 ---
 
@@ -395,11 +408,11 @@ docker-compose -f docker/docker-compose.yml --profile ui-only up -d
 See [ROADMAP.md](ROADMAP.md) for detailed plans.
 
 ### Completed ✅
-- v0.1.0 - Core memory, agents, evolution
-- v0.2.0 - Enhanced memory (episodic, semantic, sharing)
-- v0.3.0 - Advanced agents (planner, critic, web, filesystem, debates, teams)
-- v0.4.0 - Multimodal (vision, voice) + collaboration + Docker
-- v0.5.0 - **Model Swarm** + 12 new models + hardware profiles
+- v0.5.0 - Model Swarm + 12 new models + hardware profiles
+- v1.0.0 - **Production Release** - Performance, reliability, scaling
+- v1.1.0 - **Conversation Export** - multiple formats
+- v1.2.0 - **Project Tracking** - Tasks, milestones, knowledge transfer
+
 
 ### Coming Next
 - 🎬 Video understanding and summarization
