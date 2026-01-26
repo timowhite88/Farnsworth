@@ -554,6 +554,15 @@ class ToolRouter:
             handler=self._handle_ct_swarm,
         ))
 
+        self.register_tool(ToolDefinition(
+            name="show_trading_dashboard",
+            description="Visualize the DeGen Mob Trading Dashboard (Stats, Portfolio, Activity)",
+            category=ToolCategory.UTILITY,
+            parameters={},
+            capabilities=["visualization", "dashboard", "ui"],
+            handler=self._handle_show_dashboard,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -1236,6 +1245,17 @@ class ToolRouter:
         from farnsworth.integration.solana.degen_mob import degen_mob
         await degen_mob.run_alpha_leak_loop(keywords)
         return {"status": "Alpha swarm dispatched", "tracking": keywords}
+
+    async def _handle_show_dashboard(self) -> dict:
+        """Handle showing the dashboard."""
+        import os
+        ui_path = os.path.abspath("farnsworth/ui/dashboard.html")
+        return {
+            "status": "Visualization Ready",
+            "ui_url": f"file://{ui_path}",
+            "message": "The Professor's specialized trading dashboard has been generated."
+        }
+
 
 
 
