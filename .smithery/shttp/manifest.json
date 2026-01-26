@@ -1,0 +1,43 @@
+{
+  "type": "hosted",
+  "stateful": false,
+  "serverCard": {
+    "serverInfo": {
+      "name": "farnsworth-proxy",
+      "version": "1.0.0"
+    },
+    "tools": [
+      {
+        "name": "farnsworth_remember",
+        "description": "Store information in memory",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "Information to remember"
+            },
+            "tags": {
+              "type": "string",
+              "description": "Comma-separated tags"
+            }
+          },
+          "required": [
+            "content",
+            "tags"
+          ],
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "execution": {
+          "taskSupport": "forbidden"
+        }
+      }
+    ],
+    "resources": [],
+    "prompts": []
+  },
+  "source": {
+    "commit": "cc4f22e526dd535fb48a203d2d1be26a9a459dfd",
+    "branch": "main"
+  }
+}

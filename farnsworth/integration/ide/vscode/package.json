@@ -2,7 +2,7 @@
     "name": "farnsworth-vscode",
     "displayName": "Farnsworth Companion",
     "description": "Connects VS Code to the local Farnsworth Agent Swarm.",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "engines": {
         "vscode": "^1.80.0"
     },
