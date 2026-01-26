@@ -6,7 +6,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 ---
 
-## Current Version: 1.1.0
+## Current Version: 1.2.0
 
 ### Completed Features ✅
 
@@ -66,16 +66,42 @@ This document outlines planned features and improvements for Farnsworth. Feature
 - [x] `farnsworth_list_exports` MCP tool
 - [x] `farnsworth://exports/list` resource endpoint
 
+**v1.2.0 - Project Tracking**
+- [x] Project Tracking (`farnsworth/memory/project_tracking.py`)
+  - Automatic project detection from conversations via LLM
+  - Task management with dependencies and blocking
+  - Milestone tracking with progress calculation
+  - Cross-project linking and knowledge transfer
+  - Semantic similarity search for related projects
+- [x] MCP Tools:
+  - `farnsworth_project_create` - Create new projects
+  - `farnsworth_project_update` - Update project status/details
+  - `farnsworth_project_list` - List projects with filters
+  - `farnsworth_project_status` - Get detailed progress report
+  - `farnsworth_project_add_task` - Add tasks to projects
+  - `farnsworth_project_complete_task` - Mark tasks complete
+  - `farnsworth_project_add_milestone` - Add milestones
+  - `farnsworth_project_achieve_milestone` - Mark milestones achieved
+  - `farnsworth_project_link` - Link projects for knowledge transfer
+  - `farnsworth_project_detect` - Auto-detect projects from text
+  - `farnsworth_project_transfer_knowledge` - Transfer learnings between projects
+
 ---
 
 ## Upcoming Features
 
-### Version 1.2.0 - Enhanced Personal Assistant 📅
+### Version 1.3.0 - The Connected Agent (In Progress) 🔌
 
-- [ ] **Project Tracking**
-  - Automatic project detection from conversations
-  - Progress tracking and milestones
-  - Cross-project knowledge transfer
+- [x] **FCP Engine (Farnsworth Cognitive Projection)** (`farnsworth/core/fcp.py`)
+  - [x] Holographic State Projection (`VISION.md`, `FOCUS.md`, `HORIZON.md`)
+  - [x] Dynamic XML context injection via Resonance
+  - [x] Nexus Event Bus (`farnsworth/core/nexus.py`)
+
+- [x] **Omni-Channel Messaging** (`farnsworth/interfaces/messaging/`)
+  - [x] Messaging Bridge architecture (`base.py`)
+  - [x] Discord Adapter (`discord_adapter.py`)
+  - [ ] Slack/Telegram Adapters
+  - [ ] "ChatOps" command handling
 
 - [ ] **Meeting Preparation**
   - Recall relevant information before meetings
@@ -87,7 +113,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - Suggest next learning steps
   - Spaced repetition for knowledge retention
 
-### Version 1.3.0 - Advanced Multimodal 👁️
+### Version 1.4.0 - Advanced Multimodal 👁️
 
 - [ ] **Screenshot Analysis**
   - UI element recognition
@@ -99,7 +125,7 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - Flowchart interpretation
   - Whiteboard content extraction
 
-### Version 1.4.0 - Enterprise Security 🔒
+### Version 1.5.0 - Enterprise Security 🔒
 
 - [ ] **Encryption at Rest**
   - AES-256 encrypted memory storage
@@ -162,7 +188,7 @@ These features would have the most impact and we'd love help with:
 1. **Cloud Deployment** - AWS/Azure/GCP templates
 2. **Encryption at Rest** - AES-256 encrypted memory storage
 3. **Screenshot Analysis** - UI element recognition, error extraction
-4. **Project Tracking** - Automatic project detection and progress tracking
+4. **Meeting Preparation** - Briefing documents and follow-up task tracking
 
 ### Feature Requests
 
@@ -181,6 +207,7 @@ Have an idea not on this list? Open a GitHub issue with the `feature-request` la
 | 0.5.0   | Jan 2025     | Proactive Intelligence: Anticipatory suggestions, scheduling, context awareness |
 | 1.0.0   | Jan 2025     | Production Release: Performance, reliability, scaling, documentation |
 | 1.1.0   | Jan 2025     | Conversation Export: Export memories/conversations to JSON, MD, HTML, TXT |
+| 1.2.0   | Jan 2025     | Project Tracking: Auto-detection, tasks, milestones, cross-project knowledge transfer |
 
 ---
 
