@@ -200,8 +200,16 @@ class FarnsworthMCPServer:
             
             # Start background loops where necessary
             # Swarm Fabric (v2.5) needs explicit start
-            from farnsworth.core.swarm.p2p import swarm_fabric
-            asyncio.create_task(swarm_fabric.start())
+            # Check for isolated mode from ENV or Config
+            import os
+            is_isolated = os.environ.get("FARNSWORTH_ISOLATED", "false").lower() == "true"
+            
+            if not is_isolated:
+                from farnsworth.core.swarm.p2p import swarm_fabric
+                asyncio.create_task(swarm_fabric.start())
+                logger.info("Swarm Fabric: Active (Collaborative Mode)")
+            else:
+                logger.info("Swarm Fabric: Disabled (Isolated Mode)")
             
             # OS Bridge needs explicit start
             from farnsworth.os_integration.bridge import os_bridge
