@@ -78,6 +78,23 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
+## 🛠️ Usage & Examples
+
+### 📈 Financial Intelligence
+Ask Farnsworth about any token or market:
+- "Check the price and liquidity of $SOL on DexScreener."
+- "What are the current odds on Polymarket for the next SpaceX launch?"
+- "Give me a macro sentiment overview of the crypto market."
+
+### 🎬 Video & Diagrams
+- "Generate a Remotion video script summarizing our last project."
+- "Create a Mermaid sequence diagram showing the P2P handshake protocol."
+
+### 🧩 Systematic Reasoning
+- "Explain quantum tunneling using the Sequential Thinking tool."
+
+---
+
 ## 🐝 Model Swarm: Collaborative Multi-Model Inference
 
 The **Model Swarm** system enables multiple small models to work together, achieving better results than any single model:
