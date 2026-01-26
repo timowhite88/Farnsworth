@@ -241,6 +241,17 @@ Add to your Claude Code MCP settings (usually found in `claude_desktop_config.js
 
 ### 📖 [Full Installation Guide →](docs/USER_GUIDE.md#installation)
 
+### 🏥 System Health Check
+After installation, run the self-diagnostic tool to ensure all advanced features (like Focus Mode and Scrapers) have the necessary permissions and dependencies:
+
+```bash
+python scripts/verify_env.py
+```
+This will check for:
+- **Admin/Root Privileges** (Required for 'Focus Mode' hosts file blocking)
+- **Playwright** (Required for 'Universal Scraper')
+- **TTS Engine** (Required for 'Mimic' voice)
+
 ---
 
 ## 🌟 Key Features
