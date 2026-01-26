@@ -739,8 +739,28 @@ class BitNetBackend(LLMBackend):
             await asyncio.sleep(0.01)  # Simulate streaming delay
 
     async def get_embedding(self, text: str) -> list[float]:
-        """BitNet doesn't support embeddings natively."""
-        raise NotImplementedError("BitNet backend doesn't support embeddings")
+        """
+        BitNet doesn't support embeddings natively.
+        Fallback to simple hash-based embedding for basic functionality.
+        """
+        import hashlib
+
+        # Generate a deterministic pseudo-embedding from text hash
+        # This is NOT semantic but provides a fallback for systems that require embeddings
+        text_hash = hashlib.sha256(text.encode()).digest()
+
+        # Convert to 384-dimensional float vector (common embedding size)
+        embedding = []
+        for i in range(384):
+            byte_idx = i % 32
+            # Normalize to [-1, 1] range
+            val = (text_hash[byte_idx] / 255.0) * 2 - 1
+            # Add some variation based on position
+            val = val * (0.5 + 0.5 * ((i % 16) / 16))
+            embedding.append(val)
+
+        logger.warning("BitNet using hash-based pseudo-embeddings (not semantic)")
+        return embedding
 
 
 class CascadeBackend(LLMBackend):
@@ -852,4 +872,20 @@ class CascadeBackend(LLMBackend):
                 return await backend.get_embedding(text)
             except NotImplementedError:
                 continue
-        raise NotImplementedError("No backend supports embeddings")
+            except Exception as e:
+                logger.warning(f"Backend {backend.model_name} embedding failed: {e}")
+                continue
+
+        # Fallback to hash-based pseudo-embedding
+        import hashlib
+        logger.warning("All backends failed for embeddings, using hash-based fallback")
+
+        text_hash = hashlib.sha256(text.encode()).digest()
+        embedding = []
+        for i in range(384):
+            byte_idx = i % 32
+            val = (text_hash[byte_idx] / 255.0) * 2 - 1
+            val = val * (0.5 + 0.5 * ((i % 16) / 16))
+            embedding.append(val)
+
+        return embedding

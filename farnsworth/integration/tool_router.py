@@ -986,12 +986,62 @@ class ToolRouter:
         }
 
     async def _handle_web_search(self, query: str, num_results: int = 5) -> list[dict]:
-        """Search the web."""
-        # Placeholder - in production, use actual search API
+        """
+        Search the web using DuckDuckGo (no API key required).
+
+        Falls back to placeholder if network unavailable.
+        """
+        try:
+            # Use DuckDuckGo HTML search (no API key needed)
+            import urllib.request
+            import urllib.parse
+            import re
+
+            encoded_query = urllib.parse.quote_plus(query)
+            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            req = urllib.request.Request(url, headers=headers)
+
+            with urllib.request.urlopen(req, timeout=10) as response:
+                html = response.read().decode("utf-8")
+
+            # Parse results from HTML
+            results = []
+            # Find result blocks
+            result_pattern = r'<a class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>.*?<a class="result__snippet"[^>]*>([^<]+)</a>'
+            matches = re.findall(result_pattern, html, re.DOTALL)
+
+            for match in matches[:num_results]:
+                href, title, snippet = match
+                # Clean up the redirect URL
+                if "uddg=" in href:
+                    actual_url = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
+                else:
+                    actual_url = href
+
+                results.append({
+                    "title": title.strip(),
+                    "url": actual_url,
+                    "snippet": snippet.strip()[:300],
+                })
+
+            if results:
+                return results
+
+            # Fallback if parsing failed
+            logger.warning("Web search parsing returned no results, using fallback")
+
+        except Exception as e:
+            logger.warning(f"Web search failed: {e}, using fallback")
+
+        # Fallback placeholder
         return [{
             "title": f"Search result for: {query}",
-            "url": "https://example.com",
-            "snippet": "This is a placeholder search result",
+            "url": f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}",
+            "snippet": "Live search unavailable. Click the URL to search manually.",
         }]
 
     async def _handle_fetch_url(self, url: str) -> dict:
@@ -1009,36 +1059,184 @@ class ToolRouter:
             raise RuntimeError(f"Failed to fetch URL: {e}")
 
     async def _handle_summarize(self, text: str, max_length: int = 200) -> str:
-        """Summarize text."""
-        # Placeholder - in production, use LLM
-        words = text.split()
-        if len(words) <= max_length // 5:
-            return text
-        return " ".join(words[:max_length // 5]) + "..."
+        """
+        Summarize text using LLM if available, otherwise extractive summary.
+        """
+        # Try LLM-based summarization first
+        if hasattr(self, 'llm_fn') and self.llm_fn:
+            try:
+                prompt = f"""Summarize the following text in {max_length} characters or less.
+Be concise and capture the key points.
 
-    async def _handle_extract_entities(self, text: str) -> list[dict]:
-        """Extract named entities."""
-        # Placeholder - in production, use NER model
+Text:
+{text[:3000]}
+
+Summary:"""
+                if asyncio.iscoroutinefunction(self.llm_fn):
+                    summary = await self.llm_fn(prompt)
+                else:
+                    summary = self.llm_fn(prompt)
+                return summary.strip()[:max_length]
+            except Exception as e:
+                logger.debug(f"LLM summarization failed: {e}, using extractive")
+
+        # Extractive summarization fallback
         import re
 
-        # Simple capitalized word detection
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        if len(sentences) <= 2:
+            return text[:max_length]
+
+        # Score sentences by position and length
+        scored = []
+        for i, sent in enumerate(sentences):
+            # First and last sentences often contain key info
+            position_score = 1.0 if i == 0 else (0.8 if i == len(sentences) - 1 else 0.5)
+            # Prefer medium-length sentences
+            length_score = min(len(sent) / 100, 1.0) * 0.5
+            scored.append((sent, position_score + length_score))
+
+        # Sort by score and take top sentences
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        summary = []
+        current_length = 0
+        for sent, _ in scored:
+            if current_length + len(sent) > max_length:
+                break
+            summary.append(sent)
+            current_length += len(sent) + 1
+
+        # Reorder by original position
+        summary_set = set(summary)
+        ordered = [s for s in sentences if s in summary_set]
+
+        return " ".join(ordered)[:max_length]
+
+    async def _handle_extract_entities(self, text: str) -> list[dict]:
+        """
+        Extract named entities using pattern matching and heuristics.
+        Uses LLM if available for better accuracy.
+        """
+        import re
+
+        # Try LLM-based NER first
+        if hasattr(self, 'llm_fn') and self.llm_fn:
+            try:
+                prompt = f"""Extract named entities from this text. Return JSON array with objects containing "text" and "type".
+Types: PERSON, ORGANIZATION, LOCATION, DATE, MONEY, PRODUCT, EVENT, OTHER
+
+Text: {text[:2000]}
+
+Return ONLY the JSON array:"""
+                if asyncio.iscoroutinefunction(self.llm_fn):
+                    response = await self.llm_fn(prompt)
+                else:
+                    response = self.llm_fn(prompt)
+
+                # Parse JSON from response
+                import json
+                start = response.find('[')
+                end = response.rfind(']') + 1
+                if start >= 0 and end > start:
+                    entities = json.loads(response[start:end])
+                    return entities
+            except Exception as e:
+                logger.debug(f"LLM NER failed: {e}, using pattern matching")
+
+        # Pattern-based entity extraction fallback
         entities = []
-        words = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", text)
-        for word in set(words):
-            entities.append({
-                "text": word,
-                "type": "UNKNOWN",
-            })
-        return entities
+        seen = set()
+
+        # Email patterns
+        emails = re.findall(r'\b[\w.-]+@[\w.-]+\.\w+\b', text)
+        for email in emails:
+            if email not in seen:
+                entities.append({"text": email, "type": "EMAIL"})
+                seen.add(email)
+
+        # URL patterns
+        urls = re.findall(r'https?://\S+', text)
+        for url in urls:
+            if url not in seen:
+                entities.append({"text": url[:100], "type": "URL"})
+                seen.add(url)
+
+        # Date patterns
+        dates = re.findall(r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b', text, re.I)
+        for date in dates:
+            if date not in seen:
+                entities.append({"text": date, "type": "DATE"})
+                seen.add(date)
+
+        # Money patterns
+        money = re.findall(r'\$[\d,]+(?:\.\d{2})?|\b\d+(?:,\d{3})*(?:\.\d{2})?\s*(?:dollars?|USD|EUR|GBP)\b', text, re.I)
+        for m in money:
+            if m not in seen:
+                entities.append({"text": m, "type": "MONEY"})
+                seen.add(m)
+
+        # Capitalized phrases (potential names/organizations)
+        caps = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', text)
+        for cap in caps:
+            if cap not in seen and len(cap) > 3:
+                # Heuristic: if contains common name patterns
+                if any(title in cap for title in ['Mr', 'Mrs', 'Dr', 'Prof']):
+                    entities.append({"text": cap, "type": "PERSON"})
+                elif any(suffix in cap for suffix in ['Inc', 'Corp', 'LLC', 'Ltd', 'Company']):
+                    entities.append({"text": cap, "type": "ORGANIZATION"})
+                else:
+                    entities.append({"text": cap, "type": "UNKNOWN"})
+                seen.add(cap)
+
+        return entities[:50]  # Limit results
 
     async def _handle_generate_image(self, prompt: str, size: str = "512x512") -> dict:
-        """Generate an image."""
-        # Placeholder - in production, use image generation API
+        """
+        Generate an image description or placeholder.
+        Returns metadata about what would be generated.
+        """
+        import os
+
+        # Check for API keys
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        stability_key = os.environ.get("STABILITY_API_KEY")
+
+        if openai_key:
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        "https://api.openai.com/v1/images/generations",
+                        headers={"Authorization": f"Bearer {openai_key}"},
+                        json={
+                            "prompt": prompt,
+                            "n": 1,
+                            "size": size if size in ["256x256", "512x512", "1024x1024"] else "512x512",
+                        },
+                        timeout=60.0,
+                    )
+                    result = response.json()
+                    if "data" in result and result["data"]:
+                        return {
+                            "prompt": prompt,
+                            "size": size,
+                            "url": result["data"][0].get("url"),
+                            "provider": "openai",
+                        }
+            except Exception as e:
+                logger.warning(f"OpenAI image generation failed: {e}")
+
+        # Return descriptive placeholder
         return {
             "prompt": prompt,
             "size": size,
-            "url": "https://placeholder.com/generated_image.png",
-            "note": "Image generation requires API integration",
+            "url": None,
+            "description": f"Image generation requested: '{prompt[:100]}' at {size}",
+            "note": "Set OPENAI_API_KEY or STABILITY_API_KEY environment variable to enable image generation",
+            "provider": "none",
         }
 
     async def _handle_calculate(self, expression: str) -> float:

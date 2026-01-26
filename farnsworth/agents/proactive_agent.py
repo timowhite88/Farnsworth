@@ -208,8 +208,8 @@ Determine what action to take and execute it. Return a JSON response with:
                     if start >= 0 and end > start:
                         result = json.loads(response[start:end])
                         return result
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Task response not JSON-formatted, treating as plain text: {e}")
 
                 return {"success": True, "action_taken": "processed", "output": response}
 

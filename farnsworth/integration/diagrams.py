@@ -15,8 +15,18 @@ from typing import Dict, Any, List, Union
 from loguru import logger
 
 class DiagramSkill:
+    """
+    Diagram generation skill for creating Mermaid diagrams and ASCII visualizations.
+
+    Supports flowcharts, sequence diagrams, Gantt charts, state diagrams,
+    and directory tree visualizations.
+    """
+
     def __init__(self):
-        pass
+        """Initialize DiagramSkill with optional configuration."""
+        self.default_direction = "TD"  # Top-Down for flowcharts
+        self.theme = "farnsworth"  # Custom dark theme
+        logger.debug("DiagramSkill initialized")
 
     # --- Mermaid Generators ---
 

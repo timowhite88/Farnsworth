@@ -53,7 +53,23 @@ class CalendarProvider(ExternalProvider):
             return False
 
     async def sync(self):
-        pass
+        """
+        Sync calendar data by refreshing cached events.
+
+        Fetches upcoming events and stores them for quick access.
+        """
+        if not self.service:
+            logger.debug("Calendar sync skipped: not connected")
+            return
+
+        try:
+            # Refresh upcoming events cache
+            events = await self.get_upcoming_events(limit=50)
+            self._cached_events = events
+            self._last_sync = datetime.utcnow()
+            logger.info(f"Calendar synced: {len(events)} events cached")
+        except Exception as e:
+            logger.warning(f"Calendar sync failed: {e}")
 
     async def get_upcoming_events(self, limit: int = 5) -> List[Dict]:
         if not self.service: return []

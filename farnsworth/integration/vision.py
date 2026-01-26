@@ -146,7 +146,7 @@ class VisionModule:
             elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
                 return "mps"
         except ImportError:
-            pass
+            logger.debug("PyTorch not available for GPU detection, defaulting to CPU")
 
         return "cpu"
 

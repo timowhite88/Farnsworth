@@ -258,8 +258,8 @@ class QueryAnalyzer:
             non_ascii = sum(1 for c in query if ord(c) > 127)
             if non_ascii / max(1, len(query)) > 0.3:
                 analysis.is_multilingual = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Multilingual detection skipped: {e}")
 
         return analysis
 
@@ -714,7 +714,8 @@ class ModelSwarm:
                 draft_backend.generate(prompt),
                 timeout=timeout * 0.4
             )
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Speculative draft failed, falling back to MoE: {e}")
             return await self._infer_moe(prompt, analysis, timeout)
 
         # If draft is high confidence, use it
@@ -765,8 +766,9 @@ Provide the improved response:"""
                 verifier_model=strongest.model_name,
             )
 
-        except Exception:
+        except Exception as e:
             # Fall back to draft
+            logger.debug(f"Verification failed, using draft response: {e}")
             latency = time.time() - start
             return SwarmResponse(
                 text=draft_result.text,

@@ -847,20 +847,130 @@ class FarnsworthUI:
             st.success("Settings saved!")
 
     def _generate_response(self, user_input: str) -> str:
-        """Generate a response (placeholder for actual LLM integration)."""
-        # This would integrate with the actual LLM backend
-        return f"I received your message: '{user_input}'. This is a placeholder response. In production, this would use the Farnsworth LLM backend with memory augmentation."
+        """
+        Generate a response using the Farnsworth system.
+
+        Uses memory-augmented generation:
+        1. Recall relevant memories
+        2. Build context
+        3. Generate response with LLM
+        """
+        try:
+            # Run async code in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                # Ensure initialized
+                if not self._initialized:
+                    loop.run_until_complete(self.initialize())
+
+                # Recall relevant memories
+                memories = []
+                if self._memory_system:
+                    try:
+                        results = loop.run_until_complete(
+                            self._memory_system.recall(user_input, top_k=3)
+                        )
+                        memories = [r.content for r in results]
+                    except Exception as e:
+                        logger.debug(f"Memory recall failed: {e}")
+
+                # Build context with memories
+                context_parts = []
+                if memories:
+                    context_parts.append("Relevant memories:")
+                    for i, mem in enumerate(memories, 1):
+                        context_parts.append(f"  {i}. {mem[:200]}")
+
+                context = "\n".join(context_parts) if context_parts else ""
+
+                # Generate response using model manager
+                if self._model_manager and hasattr(self._model_manager, 'generate'):
+                    try:
+                        prompt = f"""You are Farnsworth, a helpful AI assistant with persistent memory.
+
+{context}
+
+User: {user_input}
+
+Respond naturally and helpfully, incorporating any relevant memory context."""
+
+                        response = loop.run_until_complete(
+                            self._model_manager.generate(prompt)
+                        )
+
+                        # Store interaction in memory
+                        if self._memory_system:
+                            try:
+                                loop.run_until_complete(
+                                    self._memory_system.remember(
+                                        f"User said: {user_input}\nAssistant responded: {response[:500]}",
+                                        tags=["conversation"],
+                                        importance=0.5,
+                                    )
+                                )
+                            except Exception as e:
+                                logger.debug(f"Failed to store memory: {e}")
+
+                        return response
+
+                    except Exception as e:
+                        logger.warning(f"Model generation failed: {e}")
+
+                # Fallback: Try swarm orchestrator
+                if self._swarm_orchestrator and hasattr(self._swarm_orchestrator, 'process'):
+                    try:
+                        result = loop.run_until_complete(
+                            self._swarm_orchestrator.process(user_input, context={"memories": memories})
+                        )
+                        if hasattr(result, 'output'):
+                            return result.output
+                        elif isinstance(result, str):
+                            return result
+                    except Exception as e:
+                        logger.warning(f"Swarm processing failed: {e}")
+
+                # Final fallback: Echo with memory summary
+                if memories:
+                    return f"I recall some related information: {memories[0][:200]}...\n\nRegarding your message: '{user_input}' - I'm currently operating in limited mode. How can I help?"
+                else:
+                    return f"I received your message: '{user_input}'. I'm currently operating in limited mode without full LLM capabilities. Please ensure the model backend is configured."
+
+            finally:
+                loop.close()
+
+        except Exception as e:
+            logger.error(f"Response generation error: {e}")
+            return f"I encountered an error while processing your request. Please try again. (Error: {type(e).__name__})"
 
 
 def create_app(data_dir: str = "./data") -> FarnsworthUI:
-    """Create and return the Farnsworth UI application."""
+    """
+    Create and return a FarnsworthUI instance.
+
+    Args:
+        data_dir: Directory for data storage
+
+    Returns:
+        Configured FarnsworthUI instance
+    """
     return FarnsworthUI(data_dir=data_dir)
 
 
 def main():
-    """Entry point for running the Streamlit app."""
-    ui = create_app()
-    ui.run()
+    """Main entry point for the Streamlit UI."""
+    import sys
+
+    # Parse command line args
+    data_dir = "./data"
+    for i, arg in enumerate(sys.argv):
+        if arg == "--data-dir" and i + 1 < len(sys.argv):
+            data_dir = sys.argv[i + 1]
+
+    # Create and run the UI
+    app = create_app(data_dir)
+    app.run()
 
 
 if __name__ == "__main__":
