@@ -148,17 +148,19 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - Privacy-preserving improvement
   - Collective intelligence without central data
 
-### Research Directions 🎓
+### Version 1.5.0 - Advanced Cognition (In Progress) 🧠
 
-- [ ] **Continual Learning**
-  - Learn new concepts without forgetting
-  - Graceful skill acquisition
-  - Catastrophic forgetting prevention
+- [x] **Continual Learning** (`farnsworth/core/learning/continual.py`)
+  - [x] Experience Replay Buffer (prevent catastrophic forgetting)
+  - [x] Elastic Concept Consolidation (protect core skills)
+  - [x] Concept Drift Detection
 
-- [ ] **Causal Reasoning**
-  - Understand cause and effect
-  - Intervention modeling
-  - Counterfactual reasoning
+- [x] **Causal Reasoning** (`farnsworth/core/reasoning/causal.py`)
+  - [x] Causal Graph Engine (DAG construction)
+  - [x] Intervention Modeling (Do-calculus simulation)
+  - [x] Counterfactual Generator ("What if?" analysis)
+
+### Version 1.6.0 - Theory of Mind 🎭
 
 - [ ] **Theory of Mind**
   - Model your mental states
