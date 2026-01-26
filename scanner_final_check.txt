@@ -1,0 +1,26 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Fawnsworth
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+________ ERROR collecting tests/integration/test_financial_scanners.py ________
+tests\integration\test_financial_scanners.py:7: in <module>
+    from farnsworth.integration.financial.dexscreener import dex_screener
+farnsworth\integration\__init__.py:12: in <module>
+    from farnsworth.integration.tool_router import ToolRouter
+farnsworth\integration\tool_router.py:89: in <module>
+    class ToolRouter:
+farnsworth\integration\tool_router.py:1243: in ToolRouter
+    async def _handle_ct_swarm(self, keywords: List[str]) -> dict:
+                                               ^^^^
+E   NameError: name 'List' is not defined
+------------------------------- Captured stderr -------------------------------
+2026-01-26 01:57:21.068 | WARNING  | farnsworth.memory.knowledge_graph:<module>:26 - NetworkX not installed, knowledge graph features limited
+=========================== short test summary info ===========================
+ERROR tests/integration/test_financial_scanners.py - NameError: name 'List' i...
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.94s ===============================
