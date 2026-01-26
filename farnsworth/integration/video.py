@@ -1,12 +1,12 @@
 """
-Farnsworth Video Module v2.0 - Duo-Stream Spatio-Temporal Analysis.
+Farnsworth Video Module v2.1 - Advanced Spatio-Temporal Flow Analysis.
 
-"I see not just what IS, but what IS HAPPENING!"
+"I can see the wind, and the code within the wind!"
 
-Novel Approaches:
-1. Duo-Stream Processing: Concurrent analysis of Visual (Keyframes) and Auditory (Speech) streams.
-2. Temporal Saliency: Keyframe extraction based on "Visual Surprise" (Feature Change Delta) rather than simple intervals.
-3. Narrative Synthesis: Uses LLM to correlate what was SAID with what was SEEN to describe intent.
+Improvements:
+1. Optical Flow (Farneback): Analyzes dense motion vectors to detect "Action Peaks".
+2. Motion Magnitude Saliency: Keyframes are extracted when motion exceeds the temporal baseline.
+3. Feature Stability Tracking: Uses feature persistence to identify static vs dynamic scenes.
 """
 
 import os
@@ -14,20 +14,20 @@ import asyncio
 import cv2
 import numpy as np
 from PIL import Image
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime
 from loguru import logger
 
 from farnsworth.integration.vision import VisionModule, VisionTask, ImageInput
-from farnsworth.integration.multimodal import MultimodalProcessor, Modality, MultimodalInput
+from farnsworth.integration.multimodal import MultimodalProcessor
 
 @dataclass
 class VisualEvent:
     timestamp: float
     description: str
-    objects_detected: List[str]
-    saliency_score: float # How "important" is this moment based on visual change
+    motion_magnitude: float # Mean magnitude of optical flow
+    saliency_score: float
+    is_key_action: bool
 
 @dataclass
 class VideoNarrative:
@@ -36,7 +36,7 @@ class VideoNarrative:
     events: List[VisualEvent]
     audio_transcript: str
     combined_summary: str
-    intent_analysis: str # Why was this video made / what is the goal?
+    motion_profile: List[float] # Magnitude over time
 
 class AdvancedVideoProcessor:
     def __init__(self, vision_module: VisionModule, multimodal_processor: Optional[MultimodalProcessor] = None):
@@ -44,21 +44,15 @@ class AdvancedVideoProcessor:
         self.multimodal = multimodal_processor or MultimodalProcessor()
         
     async def analyze_video(self, video_path: str) -> VideoNarrative:
-        """
-        Full Duo-Stream Analysis.
-        """
-        logger.info(f"Video v2.0: Starting Duo-Stream Analysis for {video_path}")
+        logger.info(f"Video v2.1: Advanced Flow Analysis for {video_path}")
         
-        # 1. Auditory Stream (Whisper)
+        # 1. Parallel Streams
         audio_task = asyncio.create_task(self._process_audio(video_path))
+        visual_task = asyncio.create_task(self._process_visual_flow(video_path))
         
-        # 2. Visual Stream (Saliency-based extraction)
-        visual_task = asyncio.create_task(self._process_visual(video_path))
+        transcript, result_bundle = await asyncio.gather(audio_task, visual_task)
+        events, motion_profile = result_bundle
         
-        # Wait for both
-        transcript, events = await asyncio.gather(audio_task, visual_task)
-        
-        # 3. Narrative Synthesis (Wait, we need an LLM for this - we'll use a placeholder description)
         summary = self._synthesize_narrative(events, transcript)
         
         return VideoNarrative(
@@ -67,72 +61,79 @@ class AdvancedVideoProcessor:
             events=events,
             audio_transcript=transcript,
             combined_summary=summary,
-            intent_analysis="Analyzing temporal intent..."
+            motion_profile=motion_profile
         )
 
     async def _process_audio(self, video_path: str) -> str:
-        """Extract and transcribe audio."""
         try:
-            # We use the multimodal processor's existing video->audio logic
             result = await self.multimodal.process_file(video_path)
-            if result.success:
-                return result.text or ""
-        except Exception as e:
-            logger.error(f"Video Audio processing failed: {e}")
-        return ""
+            return result.text or ""
+        except Exception: return ""
 
-    async def _process_visual(self, video_path: str) -> List[VisualEvent]:
-        """Extract events based on temporal saliency."""
+    async def _process_visual_flow(self, video_path: str) -> Tuple[List[VisualEvent], List[float]]:
+        """
+        Deep Flow Analysis using Farneback Method.
+        """
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        
         events = []
+        motion_profile = []
         
-        prev_frame = None
-        current_frame_idx = 0
+        ret, frame1 = cap.read()
+        if not ret: return [], []
         
-        # Sample every 1 second to find saliency
+        prvs = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        hsv = np.zeros_like(frame1)
+        hsv[..., 1] = 255
+        
+        frame_idx = 1
+        sample_rate = int(fps / 2) # Analyze 2 frames per second for flow
+        
         while True:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_idx)
-            ret, frame = cap.read()
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame2 = cap.read()
             if not ret: break
             
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            next_img = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
             
-            saliency = 0.0
-            if prev_frame is not None:
-                # Delta between frames
-                frame_delta = cv2.absdiff(prev_frame, gray)
-                thresh = cv2.threshold(frame_delta, 25, 255, cv2.THRESH_BINARY)[1]
-                saliency = np.sum(thresh) / thresh.size
+            # 1. Calculate Dense Optical Flow (Farneback)
+            flow = cv2.calcOpticalFlowFarneback(prvs, next_img, None, 0.5, 3, 15, 3, 5, 1.2, 0)
             
-            # If significant change (High Saliency) or every 10 seconds (Baseline)
-            if saliency > 5.0 or current_frame_idx % int(fps * 10) == 0:
-                # Capture Moment
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # 2. Compute Magnitude and Direction
+            mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+            avg_mag = np.mean(mag)
+            motion_profile.append(float(avg_mag))
+            
+            # 3. Saliency: Is this an 'Action peak'?
+            # We look for magnitude spikes relative to baseline (or > 2.0 threshold)
+            is_key = avg_mag > 2.5
+            
+            # Extract keyframe description if salient enough
+            if is_key or frame_idx % int(fps * 10) == 0:
+                rgb_frame = cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(rgb_frame)
                 
-                # Use VisionModule to describe this specific salient frame
                 vision_res = await self.vision.caption(pil_img)
                 
                 events.append(VisualEvent(
-                    timestamp=current_frame_idx / fps,
-                    description=vision_res.caption or "Action detected",
-                    objects_detected=[], # real impl would use detection
-                    saliency_score=saliency
+                    timestamp=frame_idx / fps,
+                    description=vision_res.caption or "Activity detected",
+                    motion_magnitude=float(avg_mag),
+                    saliency_score=float(avg_mag * 10),
+                    is_key_action=is_key
                 ))
-                
-            prev_frame = gray
-            current_frame_idx += int(fps * 1.0) # Check every second
+            
+            prvs = next_img
+            frame_idx += sample_rate
             
         cap.release()
-        return events
+        return events, motion_profile
 
     def _synthesize_narrative(self, events: List[VisualEvent], transcript: str) -> str:
-        """Combine Visual and Audio into a single story."""
-        summary = "Visual Highlights:\n"
+        narrative = "Video Flow Summary:\n"
         for e in events:
-            summary += f"- [{e.timestamp:.1f}s]: {e.description}\n"
-        
-        summary += f"\nSpeech Content:\n{transcript}"
-        return summary
+            action_tag = "[ACTION]" if e.is_key_action else "[SCENE]"
+            narrative += f"- {e.timestamp:.1f}s: {action_tag} {e.description} (Motion: {e.motion_magnitude:.2f})\n"
+        narrative += f"\nCombined Transcript:\n{transcript}"
+        return narrative

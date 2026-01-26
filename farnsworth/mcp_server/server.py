@@ -199,6 +199,10 @@ class FarnsworthMCPServer:
             import farnsworth.os_integration.bridge
             
             # Start background loops where necessary
+            # Swarm Fabric (v2.5) needs explicit start
+            from farnsworth.core.swarm.p2p import swarm_fabric
+            asyncio.create_task(swarm_fabric.start())
+            
             # OS Bridge needs explicit start
             from farnsworth.os_integration.bridge import os_bridge
             await os_bridge.start_monitoring(interval=10.0)
