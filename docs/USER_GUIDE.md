@@ -91,8 +91,22 @@ ollama pull deepseek-r1:1.5b
 | `phi3:mini` | 2.4GB | Complex tasks |
 | `llama3.2:1b` | 700MB | Balanced performance |
 
-### Step 4: Configure Claude Code
+### Step 4: Run the Granular Setup Wizard (NEW)
+Farnsworth v2.0+ includes a granular setup wizard to give you full control over privacy and active features.
 
+```bash
+python main.py --setup
+```
+
+The wizard will guide you through:
+- **Isolated Mode**: Disable all networking (highly private).
+- **Hardware Profile**: Choose how much VRAM/RAM to allocate.
+- **Cognitive Engines**: Enable/Disable Theory of Mind, Causal Reasoning, etc.
+- **External API Keys**: GitHub, Office 365, X (Twitter), etc.
+
+Settings are saved to a `.env` file in your root directory.
+
+### Step 5: Configure Claude Code
 Add Farnsworth to your Claude Code MCP settings:
 
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
@@ -113,8 +127,7 @@ Add Farnsworth to your Claude Code MCP settings:
 
 > **Note:** Replace `C:\\Farnsworth` with your actual installation path.
 
-### Step 5: Restart Claude Code
-
+### Step 6: Restart Claude Code
 Close and reopen Claude Code. You should see Farnsworth tools available.
 
 ---
@@ -259,6 +272,37 @@ Claude can also access these data streams:
 | `farnsworth://memory/graph` | Knowledge graph of entities |
 | `farnsworth://agents/active` | Currently running agents |
 | `farnsworth://evolution/fitness` | Performance metrics |
+| `farnsworth://vision/reconstruction` | 3D Point cloud data |
+
+---
+
+## Spatio-Temporal Intelligence (v2.0+)
+
+Farnsworth can now understand action over time and spatial depth.
+
+### Video v2.1: Flow Analysis
+Unlike basic frame captions, Video v2.1 uses **Dense Optical Flow (Farneback)** to track movement.
+- **Action Peaks**: It identifies moments of high activity automatically.
+- **Narrative Synthesis**: It correlates what it SEES with what it HEARS to understand the goal of a video.
+
+### 🧊 3D Scene Reconstruction
+Farnsworth can build a **Sparse Point Cloud** from video keyframes using Structure from Motion (SfM). This allows the agent to have a spatial mental model of an environment or object.
+
+---
+
+## Swarm Collaboration (v2.5)
+
+The **Swarm Fabric** allows multiple Farnsworth nodes to collaborate securely over a local network.
+
+- **TCP Gossip**: Scalable knowledge dissemination via a gossip protocol.
+- **Task Auctions (DTA)**: If your machine is busy, Farnsworth can auction a heavy task to another node in the swarm.
+
+### 🛡️ Isolated Mode (Offline/Private)
+If you do not want your agent to communicate with others:
+1. Run `python main.py --setup`
+2. Select **YES** for "Enable ISOLATED MODE"
+3. This hard-disables all UDP discovery and TCP swarm listening.
+
 
 ---
 
