@@ -8,6 +8,7 @@ import os
 import json
 import aiohttp
 import base58
+import base64
 from loguru import logger
 from typing import Dict, Any, List, Optional
 from solana.rpc.async_api import AsyncClient
@@ -67,7 +68,8 @@ class SolanaTradingSkill:
                 swap_data = await resp.json()
 
             # 3. Sign and Send
-            raw_tx = base58.b58decode(swap_data["swapTransaction"])
+            # Jupiter V6 returns swapTransaction as base64
+            raw_tx = base64.b64decode(swap_data["swapTransaction"])
             tx = VersionedTransaction.from_bytes(raw_tx)
             
             # Sign with our keypair
