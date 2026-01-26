@@ -173,6 +173,21 @@ Available Commands:
   node status  - Show node and peer status
   planetary    - Show Planetary Memory stats
 
+  Token Management:
+  tokens       - Show token budget and usage
+  cache        - Show response cache stats
+
+  Productivity:
+  notes        - List recent quick notes
+  note <text>  - Add a quick note
+  snippets     - List code snippets
+  focus start  - Start focus timer
+  focus stop   - Stop focus timer
+  summary      - Generate daily summary
+  profile      - Show current context profile
+  profiles     - List all profiles
+  switch <id>  - Switch context profile
+
   clear        - Clear screen
   exit         - Exit CLI
                 """)
@@ -319,6 +334,163 @@ Available Commands:
                         print("\n   Local Skills:")
                         for sid, skill in list(pm.local_skills.items())[:5]:
                             print(f"     • {sid[:8]}... : {skill.abstract_solution[:50]}...")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "tokens":
+                try:
+                    from farnsworth.core.token_saver import token_saver
+                    status = token_saver.get_status()
+                    budget = status["budget"]
+                    print(f"\n💰 Token Budget Status")
+                    print(f"   Daily Limit: {budget['daily_limit']:,}")
+                    print(f"   Used Today: {budget['used_today']:,}")
+                    print(f"   Remaining: {budget['remaining']:,}")
+                    if budget['warning']:
+                        print("   ⚠️  WARNING: Approaching budget limit!")
+
+                    cache = status["cache"]
+                    print(f"\n📦 Response Cache")
+                    print(f"   Entries: {cache['entries']} / {cache['max_size']}")
+
+                    comp = status["compression"]
+                    if comp.get("compressions", 0) > 0:
+                        print(f"\n🗜️ Compression Stats")
+                        print(f"   Compressions: {comp['compressions']}")
+                        print(f"   Tokens Saved: {comp['tokens_saved']:,}")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "cache":
+                try:
+                    from farnsworth.core.token_saver import token_saver
+                    stats = token_saver.cache.stats()
+                    print(f"\n📦 Response Cache")
+                    print(f"   Entries: {stats['entries']} / {stats['max_size']}")
+                    print(f"   TTL: {stats['ttl_hours']} hours")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "notes":
+                try:
+                    from farnsworth.tools.productivity.quick_notes import quick_notes
+                    recent = quick_notes.list_recent(10)
+                    stats = quick_notes.stats()
+                    print(f"\n📝 Quick Notes ({stats['active']} active, {stats['pinned']} pinned)")
+                    if recent:
+                        for note in recent:
+                            pin = "📌 " if note.pinned else ""
+                            tags = f" [{', '.join(note.tags)}]" if note.tags else ""
+                            print(f"   {pin}{note.id[:8]}: {note.content[:60]}...{tags}")
+                    else:
+                        print("   No notes yet. Use 'note <text>' to add one.")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd.startswith("note "):
+                try:
+                    from farnsworth.tools.productivity.quick_notes import quick_notes
+                    content = cmd[5:]
+                    # Extract tags from #hashtags
+                    import re
+                    tags = re.findall(r'#(\w+)', content)
+                    content = re.sub(r'#\w+', '', content).strip()
+                    note = quick_notes.add(content, tags)
+                    print(f"✅ Note added: {note.id[:8]}")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "snippets":
+                try:
+                    from farnsworth.tools.productivity.snippet_manager import snippet_manager
+                    popular = snippet_manager.list_popular(10)
+                    stats = snippet_manager.stats()
+                    print(f"\n📋 Code Snippets ({stats['total']} total, {stats['favorites']} favorites)")
+                    if popular:
+                        for s in popular:
+                            fav = "⭐ " if s.favorite else ""
+                            print(f"   {fav}{s.id[:8]}: {s.name} [{s.language}] (used {s.usage_count}x)")
+                    else:
+                        print("   No snippets yet.")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "focus start":
+                try:
+                    from farnsworth.tools.productivity.focus_timer import focus_timer
+                    asyncio.create_task(focus_timer.start_work())
+                    print(f"🍅 Focus session started ({focus_timer.config.work_minutes} min)")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "focus stop":
+                try:
+                    from farnsworth.tools.productivity.focus_timer import focus_timer
+                    asyncio.create_task(focus_timer.stop())
+                    print("⏹️ Focus session stopped")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "focus" or cmd == "focus status":
+                try:
+                    from farnsworth.tools.productivity.focus_timer import focus_timer
+                    status = focus_timer.get_status()
+                    today = focus_timer.get_today_stats()
+                    print(f"\n🍅 Focus Timer")
+                    print(f"   State: {status['state']}")
+                    if status['remaining_seconds'] > 0:
+                        print(f"   Remaining: {status['remaining_display']}")
+                    print(f"   Sessions Today: {today['sessions']}")
+                    print(f"   Focus Time: {today['total_minutes']} min")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "summary":
+                try:
+                    from farnsworth.tools.productivity.daily_summary import daily_summary
+                    print("Generating daily summary...")
+                    s = await daily_summary.generate_summary(memory_system=memory)
+                    print(daily_summary.format_summary(s))
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "profile":
+                try:
+                    from farnsworth.core.context_profiles import context_profiles
+                    active = context_profiles.get_active_profile()
+                    if active:
+                        print(f"\n{active.icon} Active Profile: {active.name}")
+                        print(f"   Description: {active.description}")
+                        print(f"   Memory Pool: {active.memory_pool}")
+                        print(f"   Personality: {active.personality}")
+                        print(f"   Temperature: {active.temperature}")
+                    else:
+                        print("No active profile")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd == "profiles":
+                try:
+                    from farnsworth.core.context_profiles import context_profiles
+                    profiles = context_profiles.list_profiles()
+                    active_id = context_profiles.active_profile_id
+                    print(f"\n📋 Context Profiles")
+                    for p in profiles:
+                        active = " (ACTIVE)" if p.id == active_id else ""
+                        print(f"   {p.icon} {p.id}: {p.name}{active}")
+                        print(f"      {p.description}")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
+            elif cmd.startswith("switch "):
+                try:
+                    from farnsworth.core.context_profiles import context_profiles
+                    profile_id = cmd[7:].strip()
+                    profile = context_profiles.switch_profile(profile_id)
+                    if profile:
+                        print(f"✅ Switched to {profile.icon} {profile.name}")
+                    else:
+                        print(f"❌ Profile not found: {profile_id}")
                 except Exception as e:
                     print(f"❌ Error: {e}")
 
