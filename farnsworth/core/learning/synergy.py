@@ -20,53 +20,51 @@ from farnsworth.core.nexus import nexus, Signal, SignalType
 from farnsworth.core.neuromorphic.engine import neuro_engine
 from farnsworth.core.learning.continual import continual_learner
 
+from farnsworth.memory.project_tracking import ProjectTracker
+from farnsworth.core.learning.paths import learning_copilot
+
 class SynergyEngine:
-    def __init__(self):
-        # Subscribe to EVERYTHING (Wildcard)
-        # Nexus doesn't support wildcard yet, so we subscribe to key aggregation types
+    def __init__(self, project_tracker: ProjectTracker):
+        self.project_tracker = project_tracker
         nexus.subscribe(SignalType.EXTERNAL_ALERT, self._handle_external_event)
         nexus.subscribe(SignalType.TASK_COMPLETED, self._handle_internal_success)
         nexus.subscribe(SignalType.USER_MESSAGE, self._handle_user_context)
         
     async def _handle_external_event(self, signal: Signal):
-        """
-        Correlate External Events -> Internal Projects.
-        Example: GitHub PR merged -> Complete associated Task -> Reinforce Developer Skill.
-        """
+        """Correlate External Events -> Internal Projects."""
         data = signal.payload
         event_type = data.get("type")
+        title = data.get("title", "")
         
-        if event_type == "pr_merge" or type == "issue_closed":
-            # 1. Update Project Tracker (Heuristic matching)
-            # await project_tracker.fuzzy_complete_task(data.get("title"))
-            pass
-            
+        if event_type in ["pr_merge", "issue_closed", "email"]:
+            # 1. Update Project Tracker (Semantic check)
+            # Find tasks matching the external event title
+            projects = await self.project_tracker.list_projects()
+            for p in projects:
+                for t in p.tasks:
+                    if t.status == "pending" and (title.lower() in t.title.lower() or t.title.lower() in title.lower()):
+                        await self.project_tracker.complete_task(t.id)
+                        logger.success(f"Synergy: Auto-completed task '{t.title}' based on external {event_type}")
+
             # 2. Trigger Neuromorphic Reward
-            # We treat external success as a high-reward signal
-            await neuro_engine._update_weight("external_integration_success", 0.2)
-            
-            logger.info(f"Synergy: Correlated external '{event_type}' to internal reward.")
+            await neuro_engine._update_weight("external_sync_success", 0.1)
 
     async def _handle_internal_success(self, signal: Signal):
-        """
-        Correlate Internal Success -> Skill Tree.
-        """
-        task = signal.payload.get("task_description", "")
+        """Correlate Internal Success -> Skill Tree."""
+        task_title = signal.payload.get("title", "")
         
-        # 1. Identify skills used (Text classification stub)
-        # skills = classify_skills(task)
-        
-        # 2. Update Learning Paths (Mock)
-        # await learning_copilot.update_progress("coding", 0.05)
-        pass
+        # Heuristic Skill Identification
+        if any(w in task_title.lower() for w in ["fix", "bug", "issue", "error"]):
+            learning_copilot.add_skill("Debugging", "Resolving code anomalies")
+            # In real system: update progress
+        elif any(w in task_title.lower() for w in ["implement", "add", "feature"]):
+            learning_copilot.add_skill("Software Engineering", "Building complex systems")
 
     async def _handle_user_context(self, signal: Signal):
-        """
-        Correlate ToM Context -> Search Ranking.
-        If user is 'frustrated', boost recall of 'help' docs.
-        """
-        # Listen to ToM state changes (via Nexus)
+        """Correlate User Message -> Affective Resonance."""
+        # This is handled primarily by ToM, but Synergy can trigger Memory Dream
         pass
 
-# Global Instance
-synergy_engine = SynergyEngine()
+# Global instance initialization happens in server.py
+def create_synergy_engine(tracker):
+    return SynergyEngine(tracker)

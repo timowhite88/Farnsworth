@@ -16,13 +16,15 @@ We have entered the **Vision and Social** era. Farnsworth no longer just thinks;
 - [x] **P2P Swarm Fabric** (`farnsworth/core/swarm/p2p.py`)
   - [x] Peer Discovery & Node Health (mDNS/UDP Broadcast)
   - [x] Distributed Task Auction (DTA) logic for hybrid compute
-- [ ] **Decentralized Knowledge Graph**
-  - Federated edge updates between trust pools
-  - Cross-node concept verification
+- [x] **Decentralized Knowledge Graph** (`farnsworth/core/swarm/dkg.py`)
+  - [x] Federated edge updates between trust pools
+  - [x] CRDT-based Last-Writer-Wins (LWW) conflict resolution
 - [ ] **Planetary Memory**
   - Global shared vector cache (encrypted & anonymized)
-- [ ] **3D Scene Reconstruction**
-  - Building spatial mental models from video keyframes
+- [x] **3D Scene Reconstruction** (`farnsworth/integration/vision/reconstruction.py`)
+  - [x] Sparse Point Cloud generation via SfM (OpenCV)
+  - [x] Fundamental Matrix & Trifocal Tensor estimation logic
+
 
 ---
 

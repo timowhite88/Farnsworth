@@ -56,8 +56,27 @@ class XProvider(ExternalProvider):
             return False
 
     async def sync(self):
-        # Poll mentions
-        pass
+        """Poll for new mentions."""
+        if self.status != ConnectionStatus.CONNECTED:
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            # v2 get_users_mentions
+            def _get_mentions():
+                me = self.client.get_me()
+                return self.client.get_users_mentions(id=me.data.id, max_results=5)
+
+            response = await loop.run_in_executor(None, _get_mentions)
+            if response.data:
+                for tweet in response.data:
+                    await nexus.emit(
+                        SignalType.EXTERNAL_ALERT,
+                        {"provider": "x", "type": "mention", "text": tweet.text, "id": tweet.id},
+                        source="x_provider"
+                    )
+        except Exception as e:
+            logger.error(f"X sync error: {e}")
 
     async def execute_action(self, action: str, params: Dict[str, Any]) -> Any:
         if self.status != ConnectionStatus.CONNECTED:
