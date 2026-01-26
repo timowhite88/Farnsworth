@@ -81,6 +81,14 @@ class SetupWizard:
         if self._ask_bool("Enable Dream Catcher (Offline Sleep Learning)?", default=True):
             self.config["ENABLE_DREAM_CATCHER"] = "true"
 
+        if self._ask_bool("Enable Emotion-to-Action (Affective Computing)?", default=False):
+            self.config["ENABLE_AFFECTIVE_COMPUTING"] = "true"
+
+        if self._ask_bool("Enable Biological Interface Support (Neuro-integration)?", default=False):
+            self.config["ENABLE_BIO_INTERFACE"] = "true"
+            if self._ask_bool("  - Use Mock Provider for testing?", default=True):
+                self.config["BIO_INTERFACE_PROVIDER"] = "mock"
+
         print("\n⚡ PRODUCTIVITY TOOLS")
         if self._ask_bool("Enable Focus Mode (Distraction Blocking)?"):
             self.config["ENABLE_FOCUS_MODE"] = "true"

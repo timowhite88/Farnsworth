@@ -491,6 +491,8 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 - **3D Scene Reconstruction**: SfM-based sparse point cloud generation
 - **P2P Swarm**: mDNS discovery & Distributed Task Auctions
 - **DKG**: Decentralized Knowledge Graph with CRDT resolution
+- **Emotion-to-Action**: Directly mapping affective states into system priorities
+- **Biological Support**: Standardized API for neuro-integration
 
 ### Version 1.9.0 - Connected Ecosystem 🔗
 - **External Framework**: GitHub, Notion, Calendar, Office365, X (Twitter)
