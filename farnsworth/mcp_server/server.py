@@ -70,6 +70,7 @@ class FarnsworthMCPServer:
         self._vision_module = None
         self._web_agent = None
         self._conversation_exporter = None
+        self._project_tracker = None
 
         # Server instance
         self.server = None
@@ -148,6 +149,12 @@ class FarnsworthMCPServer:
             self._conversation_exporter.get_relationships_fn = self._get_all_relationships
             self._conversation_exporter.get_statistics_fn = self._get_memory_statistics
 
+            # Initialize project tracker
+            from farnsworth.memory.project_tracking import ProjectTracker
+            self._project_tracker = ProjectTracker(
+                data_dir=str(self.data_dir),
+            )
+
             # Initialize fitness tracker
             self._fitness_tracker = FitnessTracker()
 
@@ -177,8 +184,24 @@ class FarnsworthMCPServer:
             if self._model_manager:
                 self._proactive_agent.llm_fn = self._model_manager.generate
                 self._planner_agent.llm_fn = self._model_manager.generate
+                if self._project_tracker:
+                    self._project_tracker.llm_fn = self._model_manager.generate
 
-            logger.info("Farnsworth components initialized")
+            # --- ACTIVATE COGNITIVE ENGINES (v1.4 - v1.9) ---
+            # Importing these modules triggers their Nexus subscriptions
+            import farnsworth.core.neuromorphic.engine
+            import farnsworth.core.learning.continual
+            import farnsworth.core.learning.synergy
+            import farnsworth.core.reasoning.causal
+            import farnsworth.core.cognition.theory_of_mind
+            import farnsworth.os_integration.bridge
+            
+            # Start background loops where necessary
+            # OS Bridge needs explicit start
+            from farnsworth.os_integration.bridge import os_bridge
+            await os_bridge.start_monitoring(interval=10.0)
+            
+            logger.info("Farnsworth Cognitive Cloud fully active.")
 
         except Exception as e:
             logger.error(f"Failed to initialize components: {e}")
@@ -499,6 +522,375 @@ class FarnsworthMCPServer:
 
         except Exception as e:
             logger.error(f"List exports failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    # ==================== Project Tracking Methods ====================
+
+    async def project_create(
+        self,
+        name: str,
+        description: str,
+        tags: Optional[list[str]] = None,
+        status: str = "active",
+    ) -> dict:
+        """Create a new project."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            from farnsworth.memory.project_tracking import ProjectStatus
+
+            status_map = {
+                "detected": ProjectStatus.DETECTED,
+                "active": ProjectStatus.ACTIVE,
+                "on_hold": ProjectStatus.ON_HOLD,
+                "completed": ProjectStatus.COMPLETED,
+                "archived": ProjectStatus.ARCHIVED,
+            }
+            project_status = status_map.get(status.lower(), ProjectStatus.ACTIVE)
+
+            project = await self._project_tracker.create_project(
+                name=name,
+                description=description,
+                tags=tags,
+                status=project_status,
+            )
+
+            return {"success": True, "project": project.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project create failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_update(
+        self,
+        project_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        status: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> dict:
+        """Update an existing project."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            from farnsworth.memory.project_tracking import ProjectStatus
+
+            project_status = None
+            if status:
+                status_map = {
+                    "detected": ProjectStatus.DETECTED,
+                    "active": ProjectStatus.ACTIVE,
+                    "on_hold": ProjectStatus.ON_HOLD,
+                    "completed": ProjectStatus.COMPLETED,
+                    "archived": ProjectStatus.ARCHIVED,
+                }
+                project_status = status_map.get(status.lower())
+
+            project = await self._project_tracker.update_project(
+                project_id=project_id,
+                name=name,
+                description=description,
+                status=project_status,
+                tags=tags,
+            )
+
+            if not project:
+                return {"success": False, "error": f"Project not found: {project_id}"}
+
+            return {"success": True, "project": project.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project update failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_list(
+        self,
+        status_filter: Optional[list[str]] = None,
+        tag_filter: Optional[list[str]] = None,
+    ) -> dict:
+        """List projects with optional filters."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            from farnsworth.memory.project_tracking import ProjectStatus
+
+            parsed_status_filter = None
+            if status_filter:
+                status_map = {
+                    "detected": ProjectStatus.DETECTED,
+                    "active": ProjectStatus.ACTIVE,
+                    "on_hold": ProjectStatus.ON_HOLD,
+                    "completed": ProjectStatus.COMPLETED,
+                    "archived": ProjectStatus.ARCHIVED,
+                }
+                parsed_status_filter = [
+                    status_map[s.lower()] for s in status_filter
+                    if s.lower() in status_map
+                ]
+
+            projects = await self._project_tracker.list_projects(
+                status_filter=parsed_status_filter,
+                tag_filter=tag_filter,
+            )
+
+            return {
+                "success": True,
+                "count": len(projects),
+                "projects": [p.to_dict() for p in projects],
+            }
+
+        except Exception as e:
+            logger.error(f"Project list failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_status(self, project_id: str) -> dict:
+        """Get detailed project status with progress metrics."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            status = await self._project_tracker.get_project_status(project_id)
+
+            if not status:
+                return {"success": False, "error": f"Project not found: {project_id}"}
+
+            return {"success": True, **status}
+
+        except Exception as e:
+            logger.error(f"Project status failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_add_task(
+        self,
+        project_id: str,
+        title: str,
+        description: str,
+        priority: int = 5,
+        depends_on: Optional[list[str]] = None,
+    ) -> dict:
+        """Add a task to a project."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            task = await self._project_tracker.create_task(
+                project_id=project_id,
+                title=title,
+                description=description,
+                priority=priority,
+                depends_on=depends_on,
+            )
+
+            if not task:
+                return {"success": False, "error": f"Project not found: {project_id}"}
+
+            return {"success": True, "task": task.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project add task failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_complete_task(self, task_id: str) -> dict:
+        """Mark a task as completed."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            task = await self._project_tracker.complete_task(task_id)
+
+            if not task:
+                return {"success": False, "error": f"Task not found: {task_id}"}
+
+            return {"success": True, "task": task.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project complete task failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_add_milestone(
+        self,
+        project_id: str,
+        title: str,
+        description: str,
+        milestone_type: str = "checkpoint",
+        target_date: Optional[str] = None,
+        criteria: Optional[list[str]] = None,
+        task_ids: Optional[list[str]] = None,
+    ) -> dict:
+        """Add a milestone to a project."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            from farnsworth.memory.project_tracking import MilestoneType
+            from datetime import datetime
+
+            type_map = {
+                "goal": MilestoneType.GOAL,
+                "checkpoint": MilestoneType.CHECKPOINT,
+                "deadline": MilestoneType.DEADLINE,
+                "deliverable": MilestoneType.DELIVERABLE,
+            }
+            parsed_type = type_map.get(milestone_type.lower(), MilestoneType.CHECKPOINT)
+
+            parsed_target_date = None
+            if target_date:
+                parsed_target_date = datetime.fromisoformat(target_date)
+
+            milestone = await self._project_tracker.create_milestone(
+                project_id=project_id,
+                title=title,
+                description=description,
+                milestone_type=parsed_type,
+                target_date=parsed_target_date,
+                criteria=criteria,
+                task_ids=task_ids,
+            )
+
+            if not milestone:
+                return {"success": False, "error": f"Project not found: {project_id}"}
+
+            return {"success": True, "milestone": milestone.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project add milestone failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_achieve_milestone(self, milestone_id: str) -> dict:
+        """Mark a milestone as achieved."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            milestone = await self._project_tracker.achieve_milestone(milestone_id)
+
+            if not milestone:
+                return {"success": False, "error": f"Milestone not found: {milestone_id}"}
+
+            return {"success": True, "milestone": milestone.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project achieve milestone failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_link(
+        self,
+        source_id: str,
+        target_id: str,
+        link_type: str = "related_to",
+        shared_concepts: Optional[list[str]] = None,
+    ) -> dict:
+        """Link two projects for knowledge transfer."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            from farnsworth.memory.project_tracking import LinkType
+
+            type_map = {
+                "depends_on": LinkType.DEPENDS_ON,
+                "related_to": LinkType.RELATED_TO,
+                "successor_of": LinkType.SUCCESSOR_OF,
+                "informs": LinkType.INFORMS,
+            }
+            parsed_type = type_map.get(link_type.lower(), LinkType.RELATED_TO)
+
+            link = await self._project_tracker.link_projects(
+                source_id=source_id,
+                target_id=target_id,
+                link_type=parsed_type,
+                shared_concepts=shared_concepts,
+            )
+
+            if not link:
+                return {"success": False, "error": "One or both projects not found"}
+
+            return {"success": True, "link": link.to_dict()}
+
+        except Exception as e:
+            logger.error(f"Project link failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_detect(self, text: str) -> dict:
+        """Auto-detect a project from text."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            project = await self._project_tracker.detect_project_from_text(text)
+
+            if not project:
+                return {
+                    "success": True,
+                    "detected": False,
+                    "message": "No project detected from the text",
+                }
+
+            return {
+                "success": True,
+                "detected": True,
+                "project": project.to_dict(),
+            }
+
+        except Exception as e:
+            logger.error(f"Project detect failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def project_transfer_knowledge(
+        self,
+        from_id: str,
+        to_id: str,
+    ) -> dict:
+        """Transfer knowledge from one project to another."""
+        await self._ensure_initialized()
+        self.stats["tool_calls"] += 1
+
+        try:
+            if not self._project_tracker:
+                return {"success": False, "error": "Project tracker not initialized"}
+
+            result = await self._project_tracker.transfer_knowledge(from_id, to_id)
+
+            if not result:
+                return {"success": False, "error": "Knowledge transfer failed"}
+
+            return {"success": True, **result}
+
+        except Exception as e:
+            logger.error(f"Project transfer knowledge failed: {e}")
             return {"success": False, "error": str(e)}
 
     # Data access helpers for exporter
@@ -872,6 +1264,264 @@ def create_mcp_server() -> Server:
                     "properties": {},
                 },
             ),
+            # Project Tracking Tools
+            Tool(
+                name="farnsworth_project_create",
+                description="Create a new project to track. Projects can have tasks, milestones, and can be linked to other projects for knowledge transfer.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the project",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Description of the project",
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional tags for categorization",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Initial status: 'active', 'on_hold', 'detected'",
+                            "enum": ["active", "on_hold", "detected"],
+                            "default": "active",
+                        },
+                    },
+                    "required": ["name", "description"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_update",
+                description="Update an existing project's details or status.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "ID of the project to update",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "New name for the project",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New description",
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "New status: 'active', 'on_hold', 'completed', 'archived'",
+                            "enum": ["active", "on_hold", "completed", "archived"],
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "New tags (replaces existing)",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_list",
+                description="List all tracked projects with optional filters.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "status_filter": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter by status: 'active', 'on_hold', 'completed', 'archived', 'detected'",
+                        },
+                        "tag_filter": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter by tags (any match)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="farnsworth_project_status",
+                description="Get detailed status of a project including task progress, milestones, and linked projects.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "ID of the project",
+                        },
+                    },
+                    "required": ["project_id"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_add_task",
+                description="Add a task to a project. Tasks can have dependencies on other tasks.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "ID of the project",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Task title",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Task description",
+                        },
+                        "priority": {
+                            "type": "integer",
+                            "description": "Priority 0-10 (higher is more important)",
+                            "default": 5,
+                        },
+                        "depends_on": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Task IDs this task depends on",
+                        },
+                    },
+                    "required": ["project_id", "title", "description"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_complete_task",
+                description="Mark a task as completed. This will automatically unblock dependent tasks.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "task_id": {
+                            "type": "string",
+                            "description": "ID of the task to complete",
+                        },
+                    },
+                    "required": ["task_id"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_add_milestone",
+                description="Add a milestone to a project. Milestones track major project goals and deadlines.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "ID of the project",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Milestone title",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Milestone description",
+                        },
+                        "milestone_type": {
+                            "type": "string",
+                            "description": "Type: 'goal', 'checkpoint', 'deadline', 'deliverable'",
+                            "enum": ["goal", "checkpoint", "deadline", "deliverable"],
+                            "default": "checkpoint",
+                        },
+                        "target_date": {
+                            "type": "string",
+                            "description": "Target date (ISO format: YYYY-MM-DD)",
+                        },
+                        "criteria": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Completion criteria",
+                        },
+                        "task_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Tasks that contribute to this milestone",
+                        },
+                    },
+                    "required": ["project_id", "title", "description"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_achieve_milestone",
+                description="Mark a milestone as achieved.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "milestone_id": {
+                            "type": "string",
+                            "description": "ID of the milestone to mark as achieved",
+                        },
+                    },
+                    "required": ["milestone_id"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_link",
+                description="Link two projects to enable knowledge transfer. Linked projects can share concepts and learnings.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "source_id": {
+                            "type": "string",
+                            "description": "Source project ID",
+                        },
+                        "target_id": {
+                            "type": "string",
+                            "description": "Target project ID",
+                        },
+                        "link_type": {
+                            "type": "string",
+                            "description": "Relationship type: 'depends_on', 'related_to', 'successor_of', 'informs'",
+                            "enum": ["depends_on", "related_to", "successor_of", "informs"],
+                            "default": "related_to",
+                        },
+                        "shared_concepts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Concepts shared between projects",
+                        },
+                    },
+                    "required": ["source_id", "target_id"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_detect",
+                description="Automatically detect a project from conversation text. Uses LLM to identify project information.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Text to analyze for project detection",
+                        },
+                    },
+                    "required": ["text"],
+                },
+            ),
+            Tool(
+                name="farnsworth_project_transfer_knowledge",
+                description="Transfer learnings and knowledge from one project to another. Uses LLM to identify transferable insights.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "from_id": {
+                            "type": "string",
+                            "description": "Source project ID",
+                        },
+                        "to_id": {
+                            "type": "string",
+                            "description": "Target project ID",
+                        },
+                    },
+                    "required": ["from_id", "to_id"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -922,6 +1572,73 @@ def create_mcp_server() -> Server:
             )
         elif name == "farnsworth_list_exports":
             result = await farnsworth.list_exports()
+        # Project Tracking Tools
+        elif name == "farnsworth_project_create":
+            result = await farnsworth.project_create(
+                name=arguments["name"],
+                description=arguments["description"],
+                tags=arguments.get("tags"),
+                status=arguments.get("status", "active"),
+            )
+        elif name == "farnsworth_project_update":
+            result = await farnsworth.project_update(
+                project_id=arguments["project_id"],
+                name=arguments.get("name"),
+                description=arguments.get("description"),
+                status=arguments.get("status"),
+                tags=arguments.get("tags"),
+            )
+        elif name == "farnsworth_project_list":
+            result = await farnsworth.project_list(
+                status_filter=arguments.get("status_filter"),
+                tag_filter=arguments.get("tag_filter"),
+            )
+        elif name == "farnsworth_project_status":
+            result = await farnsworth.project_status(
+                project_id=arguments["project_id"],
+            )
+        elif name == "farnsworth_project_add_task":
+            result = await farnsworth.project_add_task(
+                project_id=arguments["project_id"],
+                title=arguments["title"],
+                description=arguments["description"],
+                priority=arguments.get("priority", 5),
+                depends_on=arguments.get("depends_on"),
+            )
+        elif name == "farnsworth_project_complete_task":
+            result = await farnsworth.project_complete_task(
+                task_id=arguments["task_id"],
+            )
+        elif name == "farnsworth_project_add_milestone":
+            result = await farnsworth.project_add_milestone(
+                project_id=arguments["project_id"],
+                title=arguments["title"],
+                description=arguments["description"],
+                milestone_type=arguments.get("milestone_type", "checkpoint"),
+                target_date=arguments.get("target_date"),
+                criteria=arguments.get("criteria"),
+                task_ids=arguments.get("task_ids"),
+            )
+        elif name == "farnsworth_project_achieve_milestone":
+            result = await farnsworth.project_achieve_milestone(
+                milestone_id=arguments["milestone_id"],
+            )
+        elif name == "farnsworth_project_link":
+            result = await farnsworth.project_link(
+                source_id=arguments["source_id"],
+                target_id=arguments["target_id"],
+                link_type=arguments.get("link_type", "related_to"),
+                shared_concepts=arguments.get("shared_concepts"),
+            )
+        elif name == "farnsworth_project_detect":
+            result = await farnsworth.project_detect(
+                text=arguments["text"],
+            )
+        elif name == "farnsworth_project_transfer_knowledge":
+            result = await farnsworth.project_transfer_knowledge(
+                from_id=arguments["from_id"],
+                to_id=arguments["to_id"],
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
 
