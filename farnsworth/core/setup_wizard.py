@@ -122,6 +122,10 @@ class SetupWizard:
             
         if self._ask_bool("Enable Bags.fm (Social Memecoins)?"):
             self.config["BAGS_API_KEY"] = self._ask("Bags.fm API Key (Get at dev.bags.fm)")
+
+        if self._ask_bool("Enable TradFi Agent (Stocks & Forex)?"):
+            self.config["ENABLE_TRADFI"] = "true"
+            self.config["ALPHAVANTAGE_API_KEY"] = self._ask("Alpha Vantage API Key (Optional if yfinance used)")
             
         # 7. Solana Trading
         print("\n💰 SOLANA TRADING (DANGER ZONE)")
