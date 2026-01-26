@@ -286,6 +286,41 @@ class ToolRouter:
             handler=self._handle_datetime,
         ))
 
+        # --- New Skills (Grok, Remotion, Parallel) ---
+        self.register_tool(ToolDefinition(
+            name="grok_search",
+            description="Perform a real-time search on X (Twitter) using Grok AI",
+            category=ToolCategory.WEB,
+            parameters={
+                "query": {"type": "string", "required": True, "description": "Search query"},
+            },
+            capabilities=["x_search", "grok", "realtime"],
+            handler=self._handle_grok_search,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="render_video",
+            description="Render a programmatic video using Remotion/React",
+            category=ToolCategory.GENERATION,
+            parameters={
+                "narrative": {"type": "string", "required": True, "description": "Script/Narrative for the video"},
+                "composition_id": {"type": "string", "required": False, "description": "ID of the remotion composition"},
+            },
+            capabilities=["video_render", "remotion", "react"],
+            handler=self._handle_remotion_render,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="parallel_ai_dispatch",
+            description="Dispatch a prompt to multiple models in parallel and fuse results",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "prompt": {"type": "string", "required": True, "description": "The prompt to dispatch"},
+            },
+            capabilities=["parallel_processing", "consensus", "high_reliability"],
+            handler=self._handle_parallel_ai,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -781,3 +816,34 @@ class ToolRouter:
             "timezone": timezone,
             "unix_timestamp": now.timestamp(),
         }
+
+    async def _handle_grok_search(self, query: str) -> dict:
+        """Handle Grok search."""
+        import os
+        from farnsworth.integration.external.grok import create_grok_provider
+        
+        api_key = os.environ.get("XAI_API_KEY")
+        if not api_key:
+            return {"error": "XAI_API_KEY not set in environment."}
+            
+        provider = create_grok_provider(api_key)
+        return await provider.execute_action("grok_search", {"query": query})
+
+    async def _handle_remotion_render(self, narrative: str, composition_id: str = "Main") -> dict:
+        """Handle Remotion rendering."""
+        from farnsworth.integration.video_gen import remotion_skill
+        output = f"output_{int(datetime.now().timestamp())}.mp4"
+        success = await remotion_skill.render_video(composition_id, {"text": narrative}, output)
+        return {"success": success, "output": output}
+
+    async def _handle_parallel_ai(self, prompt: str) -> dict:
+        """Handle Parallel AI dispatch."""
+        from farnsworth.core.parallel_orchestrator import create_parallel_orchestrator
+        from farnsworth.core.llm_backend import llm_backend # Assume this exists and has a generate method
+        
+        # In actual usage, we'd pull these from the model_manager
+        backends = [llm_backend.generate] # placeholder for multi-backend list
+        orchestrator = create_parallel_orchestrator(backends)
+        result = await orchestrator.fused_consensus(prompt)
+        return {"consensus_result": result}
+

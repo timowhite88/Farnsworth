@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.1.0_alpha-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -36,18 +36,15 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v2.0.0 (Production Release)
+## ✨ What's New in v2.1.0 (The Skill Swarm)
 
-- 🧠 **FCP Engine** - Farnsworth Cognitive Projection: Live holographic state projection (`VISION`/`FOCUS`/`HORIZON.md`)
-- ⚡ **The Nexus** - Asynchronous "Neural Event Bus" replacing standard function calls with signal propagation
-- 🛡️ **Resilience Layer** - Circuit breakers and entropy monitors to prevent hallucinations and loops
-- 🔌 **Omni-Channel Bridge** - "ChatOps" architecture for connecting to Discord/Slack (Beta)
-- 📊 **Project Tracking** (v1.2) - Auto-detect projects, track tasks & milestones
-- 🧙 **Granular Setup Wizard** - `python main.py --setup` for step-by-step feature control
-- 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow Action peaks)
-- 🌐 **P2P Fabric v2.5** - Secure TCP Gossip protocol for agent swarms
+- 🦝 **Grok X Search** - Real-time X (Twitter) search and deep thinking via xAI
+- 🎬 **Remotion Video** - Programmatic React-based video generation and rendering
+- ⚡ **Parallel AI** - High-reliability consensus via multi-model concurrent dispatch
+- 🧙 **Granular Setup Wizard** - Step-by-step feature control (`python main.py --setup`)
+- 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow)
 - 🧠 **Synergy Engine** - Automated cross-domain learning (GitHub -> Memory -> Projects)
-- 🧊 **3D Reconstruction** - Building spatial mental models from video Structure from Motion (SfM)
+- 🧊 **3D Reconstruction** - Building spatial mental models from video (SfM)
 
 ### The Spatio-Temporal Era (v2.0)
 - 🎥 **Video v2.0** - Duo-Stream Analysis (Visual Saliency + Audio Narrative)

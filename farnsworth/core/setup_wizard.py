@@ -83,7 +83,17 @@ class SetupWizard:
         if self._ask_bool("Configure n8n integration?", default=False):
             self.config["N8N_WEBHOOK_URL"] = self._ask("n8n Webhook URL")
 
-        # 5. Save Configuration
+        # 5. Advanced Skills
+        print("\n🚀 ADVANCED SKILLS")
+        if self._ask_bool("Enable Grok (xAI) Integration?"):
+            self.config["XAI_API_KEY"] = self._ask("xAI API Key")
+
+        if self._ask_bool("Enable Remotion Video Generation?"):
+            self.config["REMOTION_WORKSPACE"] = self._ask("Remotion Workspace Path", "./remotion_workspace")
+
+        self.config["ENABLE_PARALLEL_AI"] = "true" if self._ask_bool("Enable Parallel AI (Multi-model consensus)?") else "false"
+
+        # 6. Save Configuration
         self._save()
         print("\n" + "="*50)
         print("✅ SETUP COMPLETE!")
