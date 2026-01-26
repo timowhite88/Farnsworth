@@ -180,6 +180,8 @@ This document outlines planned features and improvements for Farnsworth. Feature
 
 - [x] **External Integrations Framework** (`farnsworth/integration/external/`)
   - [x] **Auth Manager** (Secure credential storage with Keyring)
+  - [x] **n8n Bridge** (Trigger and monitor workflows)
+  - [x] **Universal AI Gateway** (Hybrid Local/Cloud model routing for Grok/Gemini/OpenAI)
   - [x] **GitHub** (PyGithub integration for Issues/PRs)
   - [x] **Notion** (AsyncClient for Knowledge Base sync)
   - [x] **Google Calendar** (OAuth2 integration for scheduling)
