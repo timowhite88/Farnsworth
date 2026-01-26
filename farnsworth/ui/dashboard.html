@@ -1,193 +1,240 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Farnsworth | DeGen Mob Dashboard</title>
+    <title>Farnsworth DeGen Swarm HUD</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
+
 <body>
-    <div class="dashboard-grid">
-        
-        <!-- Top Header Area -->
-        <header class="card header">
-            <h1>gn, <span>anon</span></h1>
-            <div class="status-bar">
-                <div class="live-indicator"></div>
-                <span>Live: Monitoring bags.fm for creator launches...</span>
-            </div>
-        </header>
+    <div class="dashboard-container">
 
-        <section class="quick-stats">
-            <div class="stat-box">
-                <span class="label">24h Trades</span>
-                <span class="value">47 executions</span>
+        <!-- TOP NAVIGATION -->
+        <nav class="glass-card top-nav">
+            <div class="logo-group">
+                <div class="logo-icon">🦉</div>
+                <div style="font-weight: 800; font-size: 20px; letter-spacing: -0.5px;">FARNSWORTH <span
+                        style="font-weight: 300; opacity: 0.5;">SWARM</span></div>
             </div>
-            <div class="stat-box">
-                <span class="label">24h P&L</span>
-                <span class="value trend up">+$2,847.32</span>
-            </div>
-            <div class="stat-box">
-                <span class="label">Rugs Avoided</span>
-                <span class="value trend down">2 honeypots</span>
-            </div>
-        </section>
 
-        <!-- Portfolio Visualization -->
-        <section class="card portfolio">
-            <div class="label" style="font-size: 12px; color: #888; text-transform: uppercase;">Portfolio Value</div>
-            <div class="portfolio-value">$44,818.59 <span style="font-size: 18px; color: var(--accent-green);">+$3,438.70 (24h)</span></div>
-            
-            <div class="portfolio-breakdown">
-                <div class="breakdown-item">
-                    <div class="symbol">🔷 SOL</div>
-                    <div class="amt">$12,894.22</div>
-                    <div class="trend up" style="font-size: 11px;">+4.2%</div>
+            <div class="nav-metrics">
+                <div class="nav-metric-item">
+                    <div class="label">System Load</div>
+                    <div class="val" id="sys-load">12.4%</div>
                 </div>
-                <div class="breakdown-item">
-                    <div class="symbol">🐸 Memecoins</div>
-                    <div class="amt">$18,784.79</div>
-                    <div class="trend up" style="font-size: 11px;">+34.5%</div>
+                <div class="nav-metric-item">
+                    <div class="label">Solana RPC</div>
+                    <div class="val" style="color: var(--accent-cyan);">14ms</div>
                 </div>
-                <div class="breakdown-item">
-                    <div class="symbol">💵 Stables</div>
-                    <div class="amt">$8,500.00</div>
-                    <div class="trend" style="font-size: 11px; color: #555;">+0%</div>
-                </div>
-                <div class="breakdown-item">
-                    <div class="symbol">⚡ Pending</div>
-                    <div class="amt">$2,450.00</div>
-                    <div class="trend up" style="font-size: 11px;">+0%</div>
-                </div>
-                <div class="breakdown-item">
-                    <div class="symbol">💀 Rugged</div>
-                    <div class="amt">-$869.31</div>
-                    <div class="trend down" style="font-size: 11px;">-100%</div>
+                <div class="nav-metric-item">
+                    <div class="label">Swarm Health</div>
+                    <div class="val">99.8%</div>
                 </div>
             </div>
-        </section>
+        </nav>
 
-        <!-- Agent Swarm / Communication -->
-        <section class="card agent-swarm">
-            <div class="label" style="font-size: 14px; font-weight: 700;">Agent Swarm <span style="float: right; font-weight: 400; color: #555; font-size: 10px;">Inter-agent comms</span></div>
-            <div class="swarm-log">
-                <div class="log-entry">
-                    <span class="scout">SCOUT</span> ⮕ <span class="sniper">SNIPER</span>
-                    <span>New pump.fun launch detected - $CATGIRL bonding</span>
+        <!-- LEFT SIDEBAR: MACRO -->
+        <aside class="sidebar-left">
+            <div class="glass-card" style="flex: 1;">
+                <div style="font-size: 14px; font-weight: 700; color: var(--text-secondary);">MARKET MACRO</div>
+
+                <div style="margin-top: 30px;">
+                    <div style="font-size: 11px; color: #555;">FEAR & GREED</div>
+                    <div style="font-size: 24px; font-weight: 800; color: var(--accent-green);" id="fng-val">74</div>
+                    <div style="font-size: 11px; color: var(--accent-green);">GREED ENGINE ACTIVE</div>
                 </div>
-                <div class="log-entry">
-                    <span class="whale">WHALE</span> ⮕ <span class="sniper">SNIPER</span>
-                    <span>DEX volume spike - $GAS up 200% in 1h</span>
+
+                <div class="macro-chart">
+                    <canvas id="macroChart"></canvas>
                 </div>
-                <div class="log-entry">
-                    <span class="alpha">ALPHA</span> ⮕ <span class="scout">SCOUT</span>
-                    <span>CT alpha: @weremcow accumulating $POPCAT</span>
+
+                <div style="margin-top: 40px;">
+                    <div style="font-size: 14px; font-weight: 700; color: var(--text-secondary);">TOP NARRATIVES</div>
+                    <div id="narrative-list" style="margin-top: 15px;">
+                        <!-- JS Populated -->
+                    </div>
                 </div>
-                <div class="log-entry">
-                    <span class="safety">SAFETY</span> ⮕ <span class="sniper">SNIPER</span>
-                    <span>BLOCKED: Honeypot detected on $FAKESOL</span>
+            </div>
+        </aside>
+
+        <!-- MAIN VIEW -->
+        <main class="main-view">
+            <div class="hero-stats">
+                <div class="glass-card big-stat">
+                    <div class="label">Total Portfolio</div>
+                    <div class="value" id="port-total">$44,818.59</div>
+                    <div class="sub" style="color: var(--accent-green);">+$3,438.70 (Today)</div>
+                </div>
+                <div class="glass-card big-stat">
+                    <div class="label">24h Trades</div>
+                    <div class="value" id="trade-count">142</div>
+                    <div class="sub" style="color: var(--accent-cyan);">Aggressive Mode</div>
+                </div>
+                <div class="glass-card big-stat">
+                    <div class="label">Rugs Avoided</div>
+                    <div class="value" id="rug-count">7</div>
+                    <div class="sub" style="color: var(--accent-orange);">Shield active</div>
                 </div>
             </div>
 
-            <div class="label" style="margin-top: 40px; font-size: 14px; font-weight: 700;">Agent Activity</div>
-            <div class="activity-feed">
-                <div class="feed-item">
-                    <div class="meta"><span>BAGS</span> <span>Just now</span></div>
-                    New alpha found: $PIPPIN up 18.56% - turnaround signs
+            <div class="glass-card" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div style="font-size: 16px; font-weight: 700;">LIVE TOKEN SCOUT</div>
+                    <div style="font-size: 10px; color: var(--accent-green);">SCANNING 10k TWEETS/M</div>
                 </div>
-                <div class="feed-item">
-                    <div class="meta"><span>SAFETY</span> <span>2m ago</span></div>
-                    Aped Into $SHMEEGUS - up 44.8% and climbing
-                </div>
-                <div class="feed-item">
-                    <div class="meta"><span>ALPHA</span> <span>5m ago</span></div>
-                    Scanning pump.fun for new narratives...
+                <div class="token-scout-grid" id="token-grid">
+                    <!-- JS Generated Token Cards -->
                 </div>
             </div>
-        </section>
+        </main>
 
-        <!-- Alpha Plays -->
-        <section class="card alpha-plays">
-            <div class="label" style="font-size: 14px; font-weight: 700;">Alpha Plays <span style="float: right; color: var(--accent-green);">Today P&L: +$3,342</span></div>
-            <div class="play-grid">
-                <div class="play-card">
-                    <span class="tag">5-10x</span>
-                    <div class="token-name">$SHMEEGUS</div>
-                    <div style="font-size: 10px; color: var(--accent-green);">74% conf</div>
-                    <div class="metrics">Up 44.8% 24h. $319M mcap - massive surge.</div>
-                    <button class="btn-ape">Ape In →</button>
-                </div>
-                <div class="play-card">
-                    <span class="tag">2-3x</span>
-                    <div class="token-name">$PEPE Mom..</div>
-                    <div style="font-size: 10px; color: var(--accent-green);">85% conf</div>
-                    <div class="metrics">Blue chip meme. Leading resurgence with whale activity.</div>
-                    <button class="btn-ape" style="color: #888;">Watching</button>
-                </div>
-                <div class="play-card">
-                    <span class="tag">4x to ATH</span>
-                    <div class="token-name">$PENGU Bro..</div>
-                    <div style="font-size: 10px; color: var(--accent-green);">78% conf</div>
-                    <div class="metrics">Broke out of wedge. Strong IP with NFT ties.</div>
-                    <button class="btn-ape" style="color: var(--accent-green); border-color: var(--accent-green);">✓ Executed</button>
-                </div>
-                <div class="play-card">
-                    <span class="tag" style="color: var(--accent-red);">10x+ (High)</span>
-                    <div class="token-name">$RALPH..</div>
-                    <div style="font-size: 10px; color: var(--accent-orange);">42% conf</div>
-                    <div class="metrics">bags.fm meta. Peaked $5M, now $2.5M - extreme volatility.</div>
-                    <button class="btn-ape">Ape In →</button>
+        <!-- RIGHT SIDEBAR: CONSOLE -->
+        <aside class="sidebar-right">
+            <div class="glass-card" style="flex: 1; display: flex; flex-direction: column;">
+                <div style="font-size: 14px; font-weight: 700; margin-bottom: 15px;">SWARM COGNITION LOG</div>
+                <div class="swarm-console" id="console-logs">
+                    <!-- JS Live Logs -->
                 </div>
             </div>
-        </section>
 
-        <!-- Trading Stats -->
-        <section class="card" style="grid-column: span 4;">
-            <div class="label" style="font-size: 14px; font-weight: 700;">Trading Stats</div>
-            <div style="margin-top: 15px;">
-                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;">
-                    <span>Win Rate</span>
-                    <span style="color: var(--accent-green);">67.4%</span>
-                </div>
-                <div style="height: 4px; background: #222; border-radius: 2px;">
-                    <div style="width: 67.4%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div>
-                </div>
-                
-                <div style="display: flex; justify-content: space-between; font-size: 12px; margin: 15px 0 8px;">
-                    <span>Avg Gain</span>
-                    <span style="color: var(--accent-green);">3.3x</span>
-                </div>
-                <div style="height: 4px; background: #222; border-radius: 2px;">
-                    <div style="width: 45%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div>
-                </div>
-
-                <div style="display: flex; justify-content: space-between; font-size: 12px; margin: 15px 0 8px;">
-                    <span>Max Drawdown</span>
-                    <span style="color: var(--accent-red);">17.8%</span>
-                </div>
-                <div style="height: 4px; background: #222; border-radius: 2px;">
-                    <div style="width: 17.8%; height: 100%; background: var(--accent-red); border-radius: 2px;"></div>
+            <div class="glass-card" style="height: 180px;">
+                <div style="font-size: 14px; font-weight: 700;">WHALE RADAR</div>
+                <div id="whale-list" style="margin-top: 10px;">
+                    <!-- Whale alerts -->
                 </div>
             </div>
-        </section>
+        </aside>
 
-        <!-- Safety Scanner -->
-        <section class="card" style="grid-column: span 4;">
-            <div class="label" style="font-size: 14px; font-weight: 700;">Safety Scanner <span style="float: right; color: var(--accent-green);">Rug Score: 90/100</span></div>
-            <div style="margin-top: 20px; font-size: 12px;">
-                <div style="color: var(--accent-green); font-weight: 600;">Portfolio Safety: SAFE</div>
-                <div style="color: #666; margin-top: 5px;">2 tokens verified, 0 honeypots detected</div>
-                
-                <div style="margin-top: 20px; border-left: 2px solid var(--accent-green); padding-left: 10px;">
-                    <div style="font-weight: 600;">$ULPEPE</div>
-                    <div style="color: #555; font-size: 10px;">ENTRY SOON</div>
-                </div>
-            </div>
-        </section>
+        <!-- PERFORMANCE (BOTTOM) -->
+        <footer class="glass-card performance-chart">
+            <div style="font-size: 14px; font-weight: 700; margin-bottom: 15px;">PNL PERFORMANCE (72H)</div>
+            <canvas id="pnlChart" style="max-height: 180px;"></canvas>
+        </footer>
 
     </div>
+
+    <script>
+        // --- REAL-TIME SIMULATION ENGINE ---
+
+        const logs = document.getElementById('console-logs');
+        const tokenGrid = document.getElementById('token-grid');
+        const whaleList = document.getElementById('whale-list');
+
+        const AGENTS = [
+            { name: 'SCOUT', color: '#00ff88' },
+            { name: 'SNIPER', color: '#ff3333' },
+            { name: 'WHALE', color: '#00f2ff' },
+            { name: 'SAFETY', color: '#bc00ff' },
+            { name: 'ALPHA', color: '#ffaa00' }
+        ];
+
+        const logMessages = [
+            "New pump.fun launch detected: $PROJECT_X",
+            "Whale 0x72a... rotating $SOL to $STABLES",
+            "High sentiment spike on 'DePIN' narratives",
+            "Rug risk detected on $FAKE_BONK. Authorities not renounced.",
+            "Jupiter swap executed: 1.5 SOL -> $WIF",
+            "Meteora vault yield optimizing...",
+            "Sentiment scan complete: 12,402 tweets processed",
+            "Helius metadata check: $ALPHA verified",
+            "Bonding curve for $TKN at 84%. Potential migration in T-10m."
+        ];
+
+        function addLog() {
+            const agent = AGENTS[Math.floor(Math.random() * AGENTS.length)];
+            const msg = logMessages[Math.floor(Math.random() * logMessages.length)];
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            div.innerHTML = `<span style="color: ${agent.color}; font-weight: 700;">[${agent.name}]</span> <span>${msg}</span>`;
+            logs.prepend(div);
+            if (logs.children.length > 50) logs.removeChild(logs.lastChild);
+        }
+
+        const tokens = [
+            { name: 'SHMEEGUS', sym: '$SHMEE', liq: '542k', vol: '1.2M', curve: 82, conf: 84 },
+            { name: 'PEPE MOM', sym: '$MOM', liq: '124k', vol: '450k', curve: 45, conf: 72 },
+            { name: 'RALPH', sym: '$RALPH', liq: '2.1M', vol: '8.4M', curve: 98, conf: 41 },
+            { name: 'PENGU BRO', sym: '$PBRO', liq: '87k', vol: '12k', curve: 12, conf: 91 },
+            { name: 'SOL DOGE', sym: '$SDOGE', liq: '310k', vol: '600k', curve: 65, conf: 68 },
+            { name: 'MOON AGENT', sym: '$MAGENT', liq: '15k', vol: '120k', curve: 88, conf: 35 }
+        ];
+
+        function updateTokens() {
+            tokenGrid.innerHTML = tokens.map(t => `
+                <div class="token-card">
+                    <div class="header">
+                        <div class="name">${t.sym}</div>
+                        <div style="font-size: 10px; color: ${t.conf > 70 ? 'var(--accent-green)' : 'var(--accent-orange)'}">${t.conf}% CONF</div>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">Liq: ${t.liq} | Vol: ${t.vol}</div>
+                    <div class="curve-bg"><div class="curve-fill" style="width: ${t.curve}%"></div></div>
+                    <div style="display: flex; justify-content: space-between; font-size: 9px; opacity: 0.5;">
+                        <span>Progress</span> <span>${t.curve}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- Charts Initialization ---
+        const macroCtx = document.getElementById('macroChart').getContext('2d');
+        new Chart(macroCtx, {
+            type: 'line',
+            data: {
+                labels: ['', '', '', '', '', ''],
+                datasets: [{
+                    data: [65, 59, 80, 81, 76, 74],
+                    borderColor: '#00ff88',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: { plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+        });
+
+        const pnlCtx = document.getElementById('pnlChart').getContext('2d');
+        new Chart(pnlCtx, {
+            type: 'line',
+            data: {
+                labels: Array(24).fill(''),
+                datasets: [{
+                    label: 'Portfolio Equity',
+                    data: Array(24).fill(0).map(() => Math.random() * 5000 + 40000),
+                    borderColor: '#00f2ff',
+                    backgroundColor: 'rgba(0, 242, 255, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { grid: { color: 'rgba(255,255,255,0.05)' }, border: { display: false } },
+                    x: { grid: { display: false }, border: { display: false } }
+                }
+            }
+        });
+
+        // Initialize and Start Loops
+        updateTokens();
+        setInterval(addLog, 1500);
+        setInterval(() => {
+            // Mock system load fluctuation
+            document.getElementById('sys-load').innerText = (Math.random() * 5 + 10).toFixed(1) + '%';
+            // Shuffle confidence values slightly
+            tokens.forEach(t => t.conf = Math.min(100, Math.max(0, t.conf + (Math.random() * 4 - 2))));
+            updateTokens();
+        }, 3000);
+
+    </script>
 </body>
+
 </html>
