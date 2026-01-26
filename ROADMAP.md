@@ -168,9 +168,14 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - [x] **Synchronization Metric** (Surprise-based adaptive verbosity)
 
 
----
+### Version 1.7.0 - Visual Intelligence (In Progress) 👁️
 
-## How to Contribute
+- [x] **Visual Debugger** (`farnsworth/integration/visual_debugging.py`)
+  - [x] **UI Element Recognition** (OCR + VQA heuristics)
+  - [x] **Error Message Extraction** (Regex pattern matching on OCR)
+  - [x] **Diagram Parsing** (Heuristic labeling from Architecture diagrams)
+
+### Research Directions 🎓
 
 Want to help build these features? See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
