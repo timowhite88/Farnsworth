@@ -77,6 +77,16 @@ class SetupWizard:
             self.config["ENABLE_PLANETARY_MEMORY"] = "true"
             use_p2p = self._ask_bool("  - Allow P2P Skill Sharing (Anonymized)?", default=False)
             self.config["PLANETARY_USE_P2P"] = "true" if use_p2p else "false"
+            
+        if self._ask_bool("Enable Dream Catcher (Offline Sleep Learning)?", default=True):
+            self.config["ENABLE_DREAM_CATCHER"] = "true"
+
+        print("\n⚡ PRODUCTIVITY TOOLS")
+        if self._ask_bool("Enable Focus Mode (Distraction Blocking)?"):
+            self.config["ENABLE_FOCUS_MODE"] = "true"
+        
+        if self._ask_bool("Enable Boomerang (Task Resurfacer)?", default=True):
+            self.config["ENABLE_BOOMERANG"] = "true"
 
         # 4. External Integrations
         print("\n🔗 EXTERNAL INTEGRATIONS")
