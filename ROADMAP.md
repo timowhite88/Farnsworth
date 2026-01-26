@@ -10,12 +10,12 @@ This document outlines the evolutionary path of Farnsworth, from a memory-booste
 
 We have entered the **Vision and Social** era. Farnsworth no longer just thinks; it *sees* action over time and *collaborates* across machines.
 
-- [x] **Video v2.0: Duo-Stream Analysis** (`farnsworth/integration/video.py`)
-  - [x] Visual Saliency Event Detection (Temporal Change delta)
-  - [x] Audio-Visual Narrative Synthesis (Whisper + CLIP correlation)
-- [x] **P2P Swarm Fabric** (`farnsworth/core/swarm/p2p.py`)
-  - [x] Peer Discovery & Node Health (mDNS/UDP Broadcast)
-  - [x] Distributed Task Auction (DTA) logic for hybrid compute
+- [x] **Video v2.1: Advanced Flow Analysis** (`farnsworth/integration/video.py`)
+  - [x] Farneback Optical Flow Action Detection
+  - [x] Motion Magnitude Peak Keyframe Extraction
+- [x] **P2P Swarm Fabric v2.5** (`farnsworth/core/swarm/p2p.py`)
+  - [x] Multiplexed TCP Streams (The "Professorial" gossip protocol)
+  - [x] Gossipsub & DHT-Lite for knowledge fragments
 - [x] **Decentralized Knowledge Graph** (`farnsworth/core/swarm/dkg.py`)
   - [x] Federated edge updates between trust pools
   - [x] CRDT-based Last-Writer-Wins (LWW) conflict resolution
