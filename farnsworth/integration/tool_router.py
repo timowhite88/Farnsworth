@@ -422,6 +422,29 @@ class ToolRouter:
             handler=self._handle_sentiment_check,
         ))
 
+        # --- High-Degeneracy Memecoin Skills ---
+        self.register_tool(ToolDefinition(
+            name="pump_fun_track",
+            description="Track bonding curve and token data on Pump.fun",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "mint_address": {"type": "string", "required": True, "description": "Solana mint address of the token"},
+            },
+            capabilities=["pump.fun", "solana", "bonding_curve", "memecoins"],
+            handler=self._handle_pump_track,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_track",
+            description="Track token data and trending analytics on Bags.fm",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "token_address": {"type": "string", "required": True, "description": "Token address or name"},
+            },
+            capabilities=["bags.fm", "memecoins", "social_finance"],
+            handler=self._handle_bags_track,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -1020,6 +1043,21 @@ class ToolRouter:
             "global_market": global_data,
             "bitcoin": btc_price
         }
+
+    async def _handle_pump_track(self, mint_address: str) -> dict:
+        """Handle Pump.fun tracking."""
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        return await memecoin_tracker.get_pump_token(mint_address)
+
+    async def _handle_bags_track(self, token_address: str) -> dict:
+        """Handle Bags.fm tracking."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        return await memecoin_tracker.get_bags_token(token_address)
+
 
 
 

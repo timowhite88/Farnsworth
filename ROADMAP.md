@@ -31,7 +31,7 @@ We have entered the **Vision and Social** era. Farnsworth no longer just thinks;
 ## ✅ Completed Milestones
 
 ### Version 2.1.0 - The Skill Swarm 🐝
-- [x] **Financial Intelligence**: DexScreener & Polymarket integration
+- [x] **Financial Intelligence**: DexScreener, Polymarket, **Pump.fun**, & **Bags.fm**
 - [x] **Market Sentiment**: Fear & Greed, Global Market Macro
 - [x] **Grok X Search**: Real-time X (Twitter) intelligence
 - [x] **Remotion Video**: Programmatic React-based video rendering

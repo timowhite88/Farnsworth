@@ -110,6 +110,9 @@ class SetupWizard:
         if self._ask_bool("Enable Polymarket (Prediction markets)?"):
             self.config["ENABLE_POLYMARKET"] = "true"
             
+        if self._ask_bool("Enable Bags.fm (Social Memecoins)?"):
+            self.config["BAGS_API_KEY"] = self._ask("Bags.fm API Key (Get at dev.bags.fm)")
+            
         if self._ask_bool("Configure CoinGecko (Market data)?"):
             self.config["COINGECKO_API_KEY"] = self._ask("CoinGecko API Key (Optional for free tier)")
 

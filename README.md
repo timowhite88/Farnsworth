@@ -41,7 +41,7 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🦝 **Grok X Search** - Real-time X (Twitter) search and deep thinking via xAI
 - 🎬 **Remotion Video** - Programmatic React-based video generation and rendering
 - ⚡ **Parallel AI** - High-reliability consensus via multi-model concurrent dispatch
-- 📈 **Financial Intelligence** - Real-time DexScreener tracking & Polymarket scanning
+- 📈 **Financial Intelligence** - DexScreener, Polymarket, & **Pump.fun/Bags.fm** tracking
 - 💹 **Market Sentiment** - Crypto Fear & Greed index and global market macro
 - 📺 **YouTube Intelligence** - Transcript extraction and semantic video analysis
 - 🧩 **Sequential Thinking** - Systematic "Chain-of-Thought" reasoning tool
@@ -83,8 +83,9 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 ### 📈 Financial Intelligence
 Ask Farnsworth about any token or market:
 - "Check the price and liquidity of $SOL on DexScreener."
+- "What's the bonding curve progress for [MINT_ADDRESS] on pump.fun?"
+- "Show me the trending tokens on bags.fm."
 - "What are the current odds on Polymarket for the next SpaceX launch?"
-- "Give me a macro sentiment overview of the crypto market."
 
 ### 🎬 Video & Diagrams
 - "Generate a Remotion video script summarizing our last project."
