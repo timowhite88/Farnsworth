@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-1.9.0_beta-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.0.0_rc-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -43,6 +43,12 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🛡️ **Resilience Layer** - Circuit breakers and entropy monitors to prevent hallucinations and loops
 - 🔌 **Omni-Channel Bridge** - "ChatOps" architecture for connecting to Discord/Slack (Beta)
 - 📊 **Project Tracking** (v1.2) - Auto-detect projects, track tasks & milestones
+
+### The Spatio-Temporal Era (v2.0)
+- 🎥 **Video v2.0** - Duo-Stream Spatio-Temporal Analysis (Visual Saliency + Audio Narrative)
+- 🧊 **3D Reconstruction** - Structure from Motion (SfM) for building spatial mental models
+- 🌐 **P2P Swarm Fabric** - Decentralized agent discovery and Task Auctions (DTA)
+- 🧠 **Decentralized Knowledge Graph (DKG)** - Federated fact-sharing across trust pools
 
 ### Cutting Edge (v1.6 - v1.9)
 - 🎭 **Theory of Mind** (v1.6) - Mirror Neuron System & Affective Resonance
@@ -392,27 +398,22 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 - v1.2.0 - **Project Tracking** - Tasks, milestones, knowledge transfer
 
 
+### Version 2.0.0 - Spatio-Temporal era 🚀
+- **Video Duo-Stream**: Visual Saliency + Audio-Visual Narrative
+- **3D Scene Reconstruction**: SfM-based sparse point cloud generation
+- **P2P Swarm**: mDNS discovery & Distributed Task Auctions
+- **DKG**: Decentralized Knowledge Graph with CRDT resolution
+
 ### Version 1.9.0 - Connected Ecosystem 🔗
 - **External Framework**: GitHub, Notion, Calendar, Office365, X (Twitter)
 - **Universal AI Gateway**: Hybrid route to Grok/Gemini/OpenAI
 - **n8n Bridge**: Infinite extensibility via workflows
 - **IDE Integrations**: VS Code LSP & Cursor Shadow Workspace
 
-### Version 1.8.0 - Personal Assistant 📅
-- **Meeting Assistant**: Context recall, briefing generation, action extraction
-- **Learning Co-Pilot**: Spaced repetition (SM-2) & Skill Trees
-
-### Version 1.7.0 - Visual Intelligence 👁️
-- **Visual Debugger**: OCR + Error Pattern Matching
-- **Diagram Parsing**: Architecture understanding
-
-### Version 1.6.0 - Theory of Mind 🎭
-- **Mirror Neurons**: Predictive coding simulation of user intent
-- **Affective Resonance**: Emotional velocity tracking
-
 ### Coming Next
-- 🎬 Video understanding and summarization (v2.0)
-- 🌐 Decentralized Swarm Protocol
+- 🪐 Planetary Memory (Global shared vector cache)
+- 🪐 Biological Neural Interfacing (SDK)
+
 
 
 
