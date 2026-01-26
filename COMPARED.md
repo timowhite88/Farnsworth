@@ -4,19 +4,28 @@
 
 Farnsworth isn't just another MCP server. It's a **Planetary-Scale Cognitive Engine**. Here is how we stack up against the popular alternatives.
 
-## 🏆 The Master Chart
+## 🏆 The Master Comparison
 
-| Feature | 🧠 **Farnsworth** | 🤖 **Claudebot** | 👵 **Marge** | 🐶 **Ralph** |
+### 🧠 Core Cognition
+| Feature | **Farnsworth** (Us) | **Claudebot** | **Marge** | **Ralph** |
 |:---|:---:|:---:|:---:|:---:|
-| **Memory** | **Infinite & Planetary** (P2P Shared) | Session Only | Repo Context | Simple Log |
-| **Logic Engine** | **Quantum Superposition** (Multiple Paths) | Linear A* | Linear | If/Else |
-| **Connectivity** | **Akashic Record** (Global Swarm) | Isolated | Isolated | Local |
-| **DeGen Tools** | **Solana Sniper / Jito Bundles** | ❌ | ❌ | ❌ |
-| **Finance** | **Stocks / Forex / Crypto** | ❌ | ❌ | ❌ |
-| **Creativity** | **Meme Analysis / Holodeck** | Text Only | Text Only | Text Only |
-| **Productivity** | **Dream Catcher** (Sleep Learning) | ❌ | ❌ | ❌ |
-| **Architecture** | **Local Swarm** (Privacy First) | Cloud | Cloud | Script |
+| **Memory Architecture** | **Holographic & Planetary** | Session / Simple RAG | Repo Context | Log File |
+| **Logic Engine** | **Quantum Superposition** | Linear Chain | Standard | If/Else |
+| **Learning** | **Sleep Consolidation** | None | None | None |
+
+### 🛠️ Tools & Markets
+| Feature | **Farnsworth** (Us) | **Claudebot** | **Marge** | **Ralph** |
+|:---|:---:|:---:|:---:|:---:|
+| **Solana / DeGen** | **Full Suite (Sniper/Jito)** | ❌ | ❌ | ❌ |
+| **Stocks / Forex** | **Real-time Terminal** | ❌ | ❌ | ❌ |
+| **Web Scraping** | **Universal (Crawlee)** | Basic | ❌ | ❌ |
+
+### 🗣️ Interaction & Privacy
+| Feature | **Farnsworth** (Us) | **Claudebot** | **Marge** | **Ralph** |
+|:---|:---:|:---:|:---:|:---:|
+| **Visualization** | **3D Holodeck** | Text | Text | Text |
 | **Voice** | **Native Mimic TTS** | ❌ | ❌ | ❌ |
+| **Privacy Model** | **Local First + P2P** | Cloud | Cloud | Local |
 
 ---
 
