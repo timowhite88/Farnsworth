@@ -160,12 +160,13 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - [x] Intervention Modeling (Do-calculus simulation)
   - [x] Counterfactual Generator ("What if?" analysis)
 
-### Version 1.6.0 - Theory of Mind 🎭
+### Version 1.6.0 - Theory of Mind (In Progress) 🎭
 
-- [ ] **Theory of Mind**
-  - Model your mental states
-  - Predict your needs and reactions
-  - Empathetic responses
+- [x] **Mirror Neuron Substrate** (`farnsworth/core/cognition/theory_of_mind.py`)
+  - [x] **Shadow User Simulation** (Predictive Coding / Free Energy Principle)
+  - [x] **Affective Resonance** (Emotional Velocity tracking)
+  - [x] **Synchronization Metric** (Surprise-based adaptive verbosity)
+
 
 ---
 
