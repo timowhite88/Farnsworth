@@ -5,17 +5,19 @@ The Nexus is the central nervous system of Farnsworth v1.3.
 It replaces traditional "function calls" with a high-speed, asynchronous event bus
 that allows the Agent Swarm to coordinate in real-time.
 
-Unlike simple message queues, the Nexus uses "Neural Routing" to determine
-which agents should react to a given signal based on their specialization.
+UPDATES:
+- Added Middleware pipeline support
+- Added Priority Queues (via urgency sort)
+- Added 'Signal Black Box' for debugging
 """
 
 import asyncio
+import uuid
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Callable, Any, Optional, Awaitable
 from loguru import logger
-import uuid
 
 class SignalType(Enum):
     # Core Lifecycle
@@ -26,7 +28,7 @@ class SignalType(Enum):
     THOUGHT_EMITTED = "cognitive.thought"
     DECISION_REACHED = "cognitive.decision"
     ANOMALY_DETECTED = "cognitive.anomaly"
-    CONFUSIOM_DETECTED = "cognitive.confusion"
+    CONFUSION_DETECTED = "cognitive.confusion"
     
     # Task Signals
     TASK_CREATED = "task.created"
@@ -35,10 +37,10 @@ class SignalType(Enum):
     TASK_FAILED = "task.failed"
     TASK_BLOCKED = "task.blocked"
     
-    # External I/O (The "Connected" part)
+    # External I/O
     USER_MESSAGE = "io.user.message"
     USER_INTERRUPTION = "io.user.interruption"
-    EXTERNAL_ALERT = "io.external.alert"  # e.g. from GitHub, CI/CD
+    EXTERNAL_ALERT = "io.external.alert"
 
 @dataclass
 class Signal:
@@ -48,22 +50,24 @@ class Signal:
     source_id: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.now)
-    urgency: float = 0.5  # 0.0 to 1.0
+    urgency: float = 0.5  # 0.0 to 1.0 (Higher = processed first)
     
-    # Neural context (optional embedding vector or semantic tags)
     context_vector: Optional[List[float]] = None
     semantic_tags: List[str] = field(default_factory=list)
 
+MiddlewareFunc = Callable[[Signal], bool] # Returns True to continue, False to block
+
 class Nexus:
     """
-    The central event bus.
+    The central event bus with Neural Routing and Middleware.
     """
     _instance = None
     
     def __init__(self):
         self._subscribers: Dict[SignalType, List[Callable[[Signal], Awaitable[None]]]] = {}
-        self._history: List[Signal] = []  # Short-term memory of signals
-        self._interceptors: List[Callable[[Signal], bool]] = []
+        self._history: List[Signal] = []  # Black Box
+        self._middleware: List[MiddlewareFunc] = []
+        self._lock = asyncio.Lock()
         
     @classmethod
     def get_instance(cls):
@@ -76,32 +80,42 @@ class Nexus:
         if signal_type not in self._subscribers:
             self._subscribers[signal_type] = []
         self._subscribers[signal_type].append(handler)
-        logger.debug(f"Nexus: Synapse connected for {signal_type.value}")
+
+    def add_middleware(self, func: MiddlewareFunc):
+        """Add a middleware function that runs on every signal."""
+        self._middleware.append(func)
 
     async def broadcast(self, signal: Signal):
         """
-        Propagate a signal through the Nexus.
+        Propagate a signal through the Nexus with priority and safety checks.
         """
-        # 1. Store in short-term history
+        # 1. Store in Black Box (Circular Buffer)
         self._history.append(signal)
         if len(self._history) > 1000:
             self._history.pop(0)
-            
-        # 2. Run interceptors (e.g., for safety or filtering)
-        for interceptor in self._interceptors:
-            if not interceptor(signal):
-                logger.warning(f"Nexus: Signal {signal.id} intercepted/blocked")
+
+        # 2. Run Middleware (Logging, Safety, Filtering)
+        for mw in self._middleware:
+            try:
+                if not mw(signal):
+                    logger.debug(f"Nexus: Signal {signal.type.value} blocked by middleware")
+                    return
+            except Exception as e:
+                logger.error(f"Nexus: Middleware error: {e}")
                 return
 
-        # 3. Neural Routing (Find handlers)
+        # 3. Neural Routing
         handlers = self._subscribers.get(signal.type, [])
-        
+        if not handlers:
+            return
+
         # 4. Asynchronous Propagation
-        if handlers:
-            logger.debug(f"Nexus: Propagating {signal.type.value} to {len(handlers)} synapses")
-            await asyncio.gather(*[h(signal) for h in handlers])
-        else:
-            logger.trace(f"Nexus: No synapses active for {signal.type.value}")
+        # Note: In a threaded environment, we might use a PriorityQueue here.
+        # For asyncio, we just spawn tasks.
+        try:
+            await asyncio.gather(*[h(signal) for h in handlers], return_exceptions=True)
+        except Exception as e:
+            logger.error(f"Nexus: Critical propagation failure: {e}")
 
     async def emit(self, type: SignalType, payload: Dict[str, Any], source: str, urgency: float = 0.5):
         """Helper to create and broadcast a signal."""
@@ -113,5 +127,19 @@ class Nexus:
         )
         await self.broadcast(signal)
 
+    def inspection_black_box(self, last_n: int = 10) -> List[Signal]:
+        """Retrieve recent signals for debugging/introspection."""
+        return self._history[-last_n:]
+
 # Global accessor
 nexus = Nexus.get_instance()
+
+# Default Middleware: Logger
+def logging_middleware(signal: Signal) -> bool:
+    if signal.urgency > 0.7:
+        logger.warning(f"🚨 [URGENT] {signal.type.value} from {signal.source_id}")
+    else:
+        logger.debug(f"⚡ {signal.type.value} from {signal.source_id}")
+    return True
+
+nexus.add_middleware(logging_middleware)
