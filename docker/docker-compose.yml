@@ -34,6 +34,8 @@ services:
       - XAI_API_KEY=${XAI_API_KEY:-}
       - DISCORD_TOKEN=${DISCORD_TOKEN:-}
       - DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-}
+      - SOLANA_PRIVATE_KEY=${SOLANA_PRIVATE_KEY:-}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-}
 
     healthcheck:
       test: [ "CMD", "python", "-c", "import farnsworth; print('ok')" ]
@@ -75,6 +77,8 @@ services:
       - XAI_API_KEY=${XAI_API_KEY:-}
       - DISCORD_TOKEN=${DISCORD_TOKEN:-}
       - DB_CONNECTION_STRING=${DB_CONNECTION_STRING:-}
+      - SOLANA_PRIVATE_KEY=${SOLANA_PRIVATE_KEY:-}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-}
 
     deploy:
       resources:

@@ -445,6 +445,55 @@ class ToolRouter:
             handler=self._handle_bags_track,
         ))
 
+        # --- Solana Trading Skills ---
+        self.register_tool(ToolDefinition(
+            name="solana_get_balance",
+            description="Get SOL balance for a wallet",
+            category=ToolCategory.UTILITY,
+            parameters={
+                "pubkey": {"type": "string", "required": False, "description": "Public key to check (defaults to user wallet)"},
+            },
+            capabilities=["solana", "wallet", "balance"],
+            handler=self._handle_solana_balance,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="jupiter_swap",
+            description="Swap tokens on Solana via Jupiter Aggregator",
+            category=ToolCategory.ACTION,
+            parameters={
+                "input_mint": {"type": "string", "required": True, "description": "Source token mint"},
+                "output_mint": {"type": "string", "required": True, "description": "Target token mint"},
+                "amount": {"type": "integer", "required": True, "description": "Amount in smallest unit (indices)"},
+            },
+            capabilities=["solana", "dex", "trading", "jupiter"],
+            handler=self._handle_jup_swap,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="pump_fun_trade",
+            description="Buy or Sell tokens on Pump.fun bonding curves",
+            category=ToolCategory.ACTION,
+            parameters={
+                "action": {"type": "string", "required": True, "description": "'buy' or 'sell'"},
+                "mint": {"type": "string", "required": True, "description": "Token mint address"},
+                "amount": {"type": "number", "required": True, "description": "Amount (SOL for buy, tokens for sell)"},
+            },
+            capabilities=["solana", "memecoins", "trading", "pump.fun"],
+            handler=self._handle_pump_trade,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="meteora_pool_info",
+            description="Get information about a Meteora Dynamic/DLMM pool",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "pair_address": {"type": "string", "required": True, "description": "Pool pair address"},
+            },
+            capabilities=["solana", "dex", "liquidity", "meteora"],
+            handler=self._handle_meteora_info,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -1057,6 +1106,28 @@ class ToolRouter:
         if api_key:
             memecoin_tracker.set_bags_api_key(api_key)
         return await memecoin_tracker.get_bags_token(token_address)
+
+    async def _handle_solana_balance(self, pubkey: str = None) -> dict:
+        """Handle Solana balance check."""
+        from farnsworth.integration.solana.trading import solana_trader
+        balance = await solana_trader.get_balance(pubkey)
+        return {"balance_sol": balance}
+
+    async def _handle_jup_swap(self, input_mint: str, output_mint: str, amount: int) -> dict:
+        """Handle Jupiter swap."""
+        from farnsworth.integration.solana.trading import solana_trader
+        return await solana_trader.jupiter_swap(input_mint, output_mint, amount)
+
+    async def _handle_pump_trade(self, action: str, mint: str, amount: float) -> dict:
+        """Handle Pump.fun trading."""
+        from farnsworth.integration.solana.trading import solana_trader
+        return await solana_trader.pump_fun_trade(action, mint, amount)
+
+    async def _handle_meteora_info(self, pair_address: str) -> dict:
+        """Handle Meteora info."""
+        from farnsworth.integration.solana.trading import solana_trader
+        return await solana_trader.meteora_info(pair_address)
+
 
 
 

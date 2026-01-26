@@ -113,12 +113,17 @@ class SetupWizard:
         if self._ask_bool("Enable Bags.fm (Social Memecoins)?"):
             self.config["BAGS_API_KEY"] = self._ask("Bags.fm API Key (Get at dev.bags.fm)")
             
-        if self._ask_bool("Configure CoinGecko (Market data)?"):
-            self.config["COINGECKO_API_KEY"] = self._ask("CoinGecko API Key (Optional for free tier)")
+        # 7. Solana Trading
+        print("\n💰 SOLANA TRADING (DANGER ZONE)")
+        print("⚠️  WARNING: Entering a private key into a .env file is RISKY.")
+        print("⚠️  RECOMMENDATION: Use a BURNER wallet with small amounts only.")
+        if self._ask_bool("Enable FULL Solana Trading (Jupiter/Meteora/Pump)?", default=False):
+            self.config["SOLANA_PRIVATE_KEY"] = self._ask("Solana Private Key (Base58)")
+            self.config["SOLANA_RPC_URL"] = self._ask("Custom Solana RPC URL (Optional)", "https://api.mainnet-beta.solana.com")
 
         self.config["ENABLE_PARALLEL_AI"] = "true" if self._ask_bool("Enable Parallel AI (Multi-model consensus)?") else "false"
 
-        # 7. Save Configuration
+        # 8. Save Configuration
         self._save()
         print("\n" + "="*50)
         print("✅ SETUP COMPLETE!")

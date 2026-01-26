@@ -51,3 +51,8 @@ openai-whisper>=20231117
 questionary>=2.0.0
 sounddevice>=0.4.6
 pyannote.audio>=3.1.0
+
+# --- Solana Trading ---
+solana>=0.30.0
+solders>=0.18.0
+base58>=2.1.0

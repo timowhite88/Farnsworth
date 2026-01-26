@@ -41,7 +41,8 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🦝 **Grok X Search** - Real-time X (Twitter) search and deep thinking via xAI
 - 🎬 **Remotion Video** - Programmatic React-based video generation and rendering
 - ⚡ **Parallel AI** - High-reliability consensus via multi-model concurrent dispatch
-- 📈 **Financial Intelligence** - DexScreener, Polymarket, & **Pump.fun/Bags.fm** tracking
+- 💰 **Elite Solana Trading** - Jupiter Swaps, Meteora LP management, & Pump.fun execution
+- 📈 **Financial Intelligence** - DexScreener, Polymarket, & Pump.fun/Bags.fm tracking
 - 💹 **Market Sentiment** - Crypto Fear & Greed index and global market macro
 - 📺 **YouTube Intelligence** - Transcript extraction and semantic video analysis
 - 🧩 **Sequential Thinking** - Systematic "Chain-of-Thought" reasoning tool
@@ -87,9 +88,14 @@ Ask Farnsworth about any token or market:
 - "Show me the trending tokens on bags.fm."
 - "What are the current odds on Polymarket for the next SpaceX launch?"
 
+### 💰 Elite Solana Trading
+Farnsworth can now manage assets and execute trades (Burner wallet recommended):
+- "Swap 0.1 SOL for $WIF on Jupiter."
+- "Create a one-sided Meteora DLMM pool for my new token."
+- "Buy 0.5 SOL worth of [MINT] on the Pump.fun bonding curve."
+- "Check my SOL balance."
+
 ### 🎬 Video & Diagrams
-- "Generate a Remotion video script summarizing our last project."
-- "Create a Mermaid sequence diagram showing the P2P handshake protocol."
 
 ### 🧩 Systematic Reasoning
 - "Explain quantum tunneling using the Sequential Thinking tool."
