@@ -390,6 +390,38 @@ class ToolRouter:
             handler=self._handle_db_query,
         ))
 
+        # --- Financial Intelligence Skills ---
+        self.register_tool(ToolDefinition(
+            name="dex_screener_search",
+            description="Search for on-chain tokens and trading pairs on DexScreener",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "query": {"type": "string", "required": True, "description": "Token name, symbol, or address"},
+            },
+            capabilities=["crypto", "dex", "token_data"],
+            handler=self._handle_dex_search,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="polymarket_scan",
+            description="Scan prediction markets and betting odds on Polymarket",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "query": {"type": "string", "required": True, "description": "Search term for events/markets"},
+            },
+            capabilities=["prediction_markets", "betting", "forecasting"],
+            handler=self._handle_poly_scan,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="market_sentiment_check",
+            description="Fetch global market conditions and Fear & Greed Index",
+            category=ToolCategory.UTILITY,
+            parameters={},
+            capabilities=["market_sentiment", "macro", "crypto"],
+            handler=self._handle_sentiment_check,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -964,6 +996,31 @@ class ToolRouter:
         from farnsworth.integration.external.db_manager import db_skill
         results = await db_skill.execute_query(query)
         return {"results": results}
+
+    async def _handle_dex_search(self, query: str) -> dict:
+        """Handle DexScreener search."""
+        from farnsworth.integration.financial.dexscreener import dex_screener
+        pairs = await dex_screener.search_pairs(query)
+        return {"pairs": pairs[:5]} # Top 5 results
+
+    async def _handle_poly_scan(self, query: str) -> dict:
+        """Handle Polymarket scanning."""
+        from farnsworth.integration.financial.polymarket import polymarket
+        events = await polymarket.search_markets(query)
+        return {"events": events[:5]}
+
+    async def _handle_sentiment_check(self) -> dict:
+        """Handle Market Sentiment check."""
+        from farnsworth.integration.financial.market_sentiment import market_sentiment
+        fng = await market_sentiment.get_fear_and_greed()
+        global_data = await market_sentiment.get_global_market_cap()
+        btc_price = await market_sentiment.get_token_price("bitcoin")
+        return {
+            "fear_and_greed": fng,
+            "global_market": global_data,
+            "bitcoin": btc_price
+        }
+
 
 
 
