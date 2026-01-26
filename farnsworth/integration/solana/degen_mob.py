@@ -114,5 +114,4 @@ class DeGenMob:
         # Periodic batch sentiment check
         pass
 
-import aiohttp
 degen_mob = DeGenMob()
