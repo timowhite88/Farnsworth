@@ -1,16 +1,24 @@
 # Farnsworth Setup Guide 🛠️
 
-Welcome to Farnsworth! This guide will help you get the system running on your local machine or server.
+Welcome to Farnsworth! This guide provides detailed instructions on configuring the environment, API keys, and local services.
 
-## 📋 System Requirements
+> **🔒 Privacy First**: Farnsworth is designed to run 100% locally. No data is sent to the cloud unless you explicitly enable an external integration (like X.com or Grok). All memories, vector databases, and keyrings are stored in your `./data` folder.
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| **OS** | Windows 10+/Linux/macOS | Ubuntu 22.04 LTS |
-| **Python** | 3.10 | 3.11 |
-| **RAM** | 8 GB | 16+ GB (for local models) |
-| **GPU** | None (Cloud only) | NVIDIA RTX 3060+ (8GB VRAM) |
-| **Disk** | 10 GB | 50 GB NVMe |
+---
+
+## 📋 Feature Prerequisites
+
+Before running the Setup Wizard, ensure you have the necessary prerequisites for the features you intend to use.
+
+| Feature Suite | Requires | Details |
+|---------------|----------|---------|
+| **Core Cognition** | Python 3.10+ | Runs on CPU/local RAM. No keys needed. |
+| **Local Inference/RAG** | [Ollama](https://ollama.ai) | Suggested models: `mistral`, `nomic-embed-text`. |
+| **DeGen Mob (Solana)** | `HELIUS_API_KEY` | Get free key at [dev.helius.xyz](https://dev.helius.xyz). |
+| **Elite Trading** | `SOLANA_PRIVATE_KEY` | **Safety Warning**: Use a burner wallet with minimal funds. |
+| **Grok X Search** | `XAI_API_KEY` | Get key at [x.ai](https://x.ai) for live Twitter access. |
+| **Discord Bridge** | `DISCORD_TOKEN` | Create a bot on [Discord Developer Portal](https://discord.com/developers). |
+| **GitHub Integration** | `GITHUB_TOKEN` | Personal Access Token (Classic) with repo scopes. |
 
 ---
 
@@ -18,130 +26,81 @@ Welcome to Farnsworth! This guide will help you get the system running on your l
 
 ### 1. Environment Setup
 
-First, ensure you have Python 3.10+ installed.
-
 ```bash
-# Check Python version
-python --version
-```
+# Verify Python
+python --version  # Should be 3.10 or higher
 
-Create a virtual environment to keep dependencies clean:
-
-```bash
+# Create Virtual Environment (Recommended)
 python -m venv venv
-
-# Windows
+# Windows:
 .\venv\Scripts\activate
-
-# Linux/Mac
+# Mac/Linux:
 source venv/bin/activate
 ```
 
 ### 2. Install Dependencies
 
-Install the required Python packages.
-
 ```bash
 pip install -r requirements.txt
 ```
 
-> **Note**: If you want to use local GPU acceleration for `llama-cpp-python`, ensure you have the CUDA toolkit installed and install with:
+> **GPU Support**: If you have an NVIDIA GPU, install the CUDA version of llama-cpp-python for faster inference:
 > `CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python`
 
-### 3. Local Model Setup (Ollama)
+### 3. Feature Configuration (The Wizard)
 
-For the best "Hybrid" experience (fast local inference + smart cloud), install [Ollama](https://ollama.ai).
-
-1.  Download & Install Ollama.
-2.  Pull recommended models:
-
-```bash
-ollama pull mistral      # General reasoning
-ollama pull qwen2.5-coder # Coding specialist
-ollama pull nomic-embed-text # Embeddings
-```
-
-### 4. Configuration
-
-Run the automated setup wizard. This is the easiest way to configure your `.env` file.
+Run the granular setup tool. It will generate a secure `.env` file for you.
 
 ```bash
 python main.py --setup
 ```
 
-You will be asked for:
-*   **Anthropic/OpenAI Keys**: Optional, for cloud fallback.
-*   **Solana RPC**: Optional, for DeGen Mob features.
-*   **Memory Path**: Where to store the database (default: `./data`).
+#### Wizard Walkthrough:
 
----
+1.  **Hardware Profile**: Select `cpu_only` if you lack a GPU, or `medium_vram` if you have 6GB+.
+2.  **Solana RPC**:
+    *   **Public**: `https://api.mainnet-beta.solana.com` (Rate limited)
+    *   **Private**: `https://mainnet.helius-rpc.com/?api-key=...` (Recommended for DeGen Mob)
+3.  **Keys**: Enter keys only for the services you plan to use. Leave others blank.
 
-## 🐳 Docker Setup
+### 4. Local Model Management
 
-If you prefer containers, we provide a production-ready `docker-compose`.
-
-```yaml
-# docker-compose.yml included in repo
-version: '3.8'
-services:
-  farnsworth:
-    build: .
-    ports:
-      - "8501:8501" # Dashboard
-      - "8000:8000" # MCP Server
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-```
-
-Run it:
+Farnsworth uses Ollama for local intelligence.
 
 ```bash
-docker-compose up -d
+# 1. Install Ollama from ollama.ai
+
+# 2. Pull the Swarm
+ollama pull mistral           # General reasoning
+ollama pull qwen2.5-coder     # Coding specialist
+ollama pull nomic-embed-text  # Embeddings (Crucial for Memory)
 ```
 
 ---
 
-## 🏃‍♂️ Running Farnsworth
+## 🐳 Docker Deployment (Isolated)
 
-### Mode A: Full System (Dashboard + Core)
-This starts the Streamlit UI, MCP Server, and background Swarm.
-
-```bash
-python main.py
-```
-> Access UI at: `http://localhost:8501`
-
-### Mode B: MCP Server Only (for Claude Code)
-Use this if you are connecting from Claude Desktop or VS Code.
+For maximum isolation, use Docker. This keeps your environment clean.
 
 ```bash
-python main.py --mcp
+# Basic CPU run
+docker-compose -f docker/docker-compose.yml up -d
+
+# GPU accelerated run (requires nvidia-container-toolkit)
+docker-compose -f docker/docker-compose.yml --profile gpu up -d
 ```
 
-### Mode C: CLI Mode
-Interactive terminal chat.
-
-```bash
-python main.py --cli
-```
+Access the dashboard at `http://localhost:8501`.
 
 ---
 
-## 🐛 Troubleshooting
+## 🔍 Verification
 
-*   **"Ollama connection refused"**: Ensure Ollama is running (`ollama serve`). By default it runs on port 11434.
-*   **"CUDA out of memory"**: Adjust `max_gpu_layers` in `config/models.yaml` or switch to a smaller model (e.g., `phi-2`).
-*   **"Missing dependency"**: Run `pip install .` in the root directory to install the package in editable mode.
+To verify everything is working locally:
+
+1.  **Check Memory**: `python main.py --cli` -> type `status`. Should show "Memory System: OK".
+2.  **Check Solana**: If DeGen mob is enabled, logs will show `Connected to Solana RPC`.
+3.  **Check Keys**: Inspect your `.env` file (it is `.gitignore`'d by default) to ensure keys are saved correctly.
 
 ---
 

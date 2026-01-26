@@ -551,7 +551,7 @@ If Farnsworth helps you, consider giving it a star! ⭐
 
 <div align="center">
 
-**Built with ❤️ for the Claude community**
+**Built with ❤️ for the Community**
 
 *"Good news, everyone!"* - Professor Farnsworth
 
