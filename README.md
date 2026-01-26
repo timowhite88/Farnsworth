@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-1.3.0_alpha-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-1.9.0_beta-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -42,13 +42,15 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🔌 **Omni-Channel Bridge** - "ChatOps" architecture for connecting to Discord/Slack (Beta)
 - 📊 **Project Tracking** (v1.2) - Auto-detect projects, track tasks & milestones
 
-### Cutting Edge (v1.4 & v1.5)
-- 🧠 **Neuromorphic Core** - Sparse Distributed Memory & Hebbian Learning
-- 🦾 **Agentic OS** - System context awareness and OS-level bridge
-- ♾️ **Continual Learning** - Experience Replay & Elastic Consolidation
-- 🔮 **Causal Reasoning** - Causal graphs, interventions, and counterfactuals
-- 📤 **Conversation Export** (v1.1) - Export memories and chats
-- 🐝 **Model Swarm** (v0.5) - Collaborative inference with multiple specialized models
+### Cutting Edge (v1.6 - v1.9)
+- 🎭 **Theory of Mind** (v1.6) - Mirror Neuron System & Affective Resonance
+- 👁️ **Visual Intelligence** (v1.7) - Visual Debugger & Diagram Understanding
+- 📅 **Personal Assistant** (v1.8) - Meeting Prep & Learning Co-Pilot
+- 🔗 **Connected Ecosystem** (v1.9) - Integrations (GitHub, n8n, AI Gateway, O365, X)
+- 🧠 **Neuromorphic Core** (v1.4) - Sparse Distributed Memory & Hebbian Learning
+- 🦾 **Agentic OS** (v1.4) - System context awareness and OS-level bridge
+- ♾️ **Continual Learning** (v1.5) - Experience Replay & Elastic Consolidation
+- 🔮 **Causal Reasoning** (v1.5) - Causal graphs, interventions, and counterfactuals
 
 ### Previously Added
 - 🖼️ **Multimodal** - Vision (CLIP/BLIP) & Voice (Whisper) support
@@ -388,13 +390,28 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 - v1.2.0 - **Project Tracking** - Tasks, milestones, knowledge transfer
 
 
-### Version 1.5.0 - Advanced Cognition 🧠
-- **Continual Learning**: Prevents catastrophic forgetting via Experience Replay
-- **Causal Reasoning**: Simulates "What If" scenarios and counterfactuals
+### Version 1.9.0 - Connected Ecosystem 🔗
+- **External Framework**: GitHub, Notion, Calendar, Office365, X (Twitter)
+- **Universal AI Gateway**: Hybrid route to Grok/Gemini/OpenAI
+- **n8n Bridge**: Infinite extensibility via workflows
+- **IDE Integrations**: VS Code LSP & Cursor Shadow Workspace
+
+### Version 1.8.0 - Personal Assistant 📅
+- **Meeting Assistant**: Context recall, briefing generation, action extraction
+- **Learning Co-Pilot**: Spaced repetition (SM-2) & Skill Trees
+
+### Version 1.7.0 - Visual Intelligence 👁️
+- **Visual Debugger**: OCR + Error Pattern Matching
+- **Diagram Parsing**: Architecture understanding
+
+### Version 1.6.0 - Theory of Mind 🎭
+- **Mirror Neurons**: Predictive coding simulation of user intent
+- **Affective Resonance**: Emotional velocity tracking
 
 ### Coming Next
-- 🎬 Video understanding and summarization
-- 🎭 Theory of Mind (v1.6)
+- 🎬 Video understanding and summarization (v2.0)
+- 🌐 Decentralized Swarm Protocol
+
 
 
 ---
