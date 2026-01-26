@@ -42,7 +42,11 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🔌 **Omni-Channel Bridge** - "ChatOps" architecture for connecting to Discord/Slack (Beta)
 - 📊 **Project Tracking** (v1.2) - Auto-detect projects, track tasks & milestones
 
-### Previously Added
+### Cutting Edge (v1.4 & v1.5)
+- 🧠 **Neuromorphic Core** - Sparse Distributed Memory & Hebbian Learning
+- 🦾 **Agentic OS** - System context awareness and OS-level bridge
+- ♾️ **Continual Learning** - Experience Replay & Elastic Consolidation
+- 🔮 **Causal Reasoning** - Causal graphs, interventions, and counterfactuals
 - 📤 **Conversation Export** (v1.1) - Export memories and chats
 - 🐝 **Model Swarm** (v0.5) - Collaborative inference with multiple specialized models
 
@@ -384,11 +388,14 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 - v1.2.0 - **Project Tracking** - Tasks, milestones, knowledge transfer
 
 
+### Version 1.5.0 - Advanced Cognition 🧠
+- **Continual Learning**: Prevents catastrophic forgetting via Experience Replay
+- **Causal Reasoning**: Simulates "What If" scenarios and counterfactuals
+
 ### Coming Next
 - 🎬 Video understanding and summarization
-- 🔐 Encryption at rest (AES-256)
-- ☁️ Cloud deployment templates (AWS, Azure, GCP)
-- 📊 Performance optimization (<100ms recall)
+- 🎭 Theory of Mind (v1.6)
+
 
 ---
 
