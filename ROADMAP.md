@@ -27,6 +27,8 @@ We have entered the **Vision and Social** era. Farnsworth no longer just thinks;
 - [x] **3D Scene Reconstruction** (`farnsworth/integration/vision/reconstruction.py`)
   - [x] Sparse Point Cloud generation via SfM (OpenCV)
   - [x] Fundamental Matrix & Trifocal Tensor estimation logic
+- [ ] **Emotion-to-Action**: Directly mapping affective states into system priorities
+- [ ] **Biological Interface Support**: Standardized API for neuro-integration
 
 
 ---
@@ -82,8 +84,7 @@ We have entered the **Vision and Social** era. Farnsworth no longer just thinks;
 ## 🧪 Future Explorations (2026+)
 
 
-- [ ] **Emotion-to-Action**: Directly mapping affective states into system priorities
-- [ ] **Biological Interface Support**: Standardized API for neuro-integration (future-proofing)
+
 
 ---
 
