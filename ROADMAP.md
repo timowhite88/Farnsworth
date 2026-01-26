@@ -19,8 +19,11 @@ We have entered the **Vision and Social** era. Farnsworth no longer just thinks;
 - [x] **Decentralized Knowledge Graph** (`farnsworth/core/swarm/dkg.py`)
   - [x] Federated edge updates between trust pools
   - [x] CRDT-based Last-Writer-Wins (LWW) conflict resolution
-- [ ] **Planetary Memory**
-  - Global shared vector cache (encrypted & anonymized)
+- [x] **Planetary Memory** (`farnsworth/core/memory/planetary/akashic.py`)
+  - [x] Global shared vector cache (encrypted & anonymized)
+  - [x] Skill Vector exchange protocol
+- [x] **Quantum-Inspired Search** (`farnsworth/core/quantum/search.py`)
+  - [x] Schrödinger's Query (Superposition-based reasoning path exploration)
 - [x] **3D Scene Reconstruction** (`farnsworth/integration/vision/reconstruction.py`)
   - [x] Sparse Point Cloud generation via SfM (OpenCV)
   - [x] Fundamental Matrix & Trifocal Tensor estimation logic
@@ -78,7 +81,7 @@ We have entered the **Vision and Social** era. Farnsworth no longer just thinks;
 
 ## 🧪 Future Explorations (2026+)
 
-- [ ] **Quantum-Inspired Search**: Using superposition logic for multi-path graph traversal
+
 - [ ] **Emotion-to-Action**: Directly mapping affective states into system priorities
 - [ ] **Biological Interface Support**: Standardized API for neuro-integration (future-proofing)
 
