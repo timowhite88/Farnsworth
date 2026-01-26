@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.6.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.7.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -56,6 +56,14 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🧙 **Granular Setup Wizard** - Step-by-step feature control (`python main.py --setup`)
 - 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow)
 - 🧠 **Synergy Engine** - Automated cross-domain learning (GitHub -> Memory -> Projects)
+### Update v2.7.0 - The "Cognitive Productivity" Suite
+- 💤 **Dream Catcher (Sleep Learning)** - Farnsworth performs "offline memory consolidation" while idling, hallucinating questions it *should* have been asked to refine its own knowledge base.
+- 🏙️ **The Holodeck** - A 3D WebGL visualization of your codebase topology (Buildings = Classes, Height = LoC, Color = Complexity).
+- 🤫 **Cone of Silence (Focus Mode)** - System-level blocking of distraction sites (X/Reddit) during deep work sessions.
+- 🪃 **Boomerang** - "Remind me of this if I don't hear back." Smart task resurfacing.
+- 🗣️ **Mimic** - Lightweight local Text-to-Speech (TTS) engine.
+- 📝 **Auto-Docs & Meeting Whisperer** - Real-time documentation scanning and transcript keyword spotting.
+
 ### Mega Update (v2.6.0) - The "Omni-Market" Update
 - 🕷️ **Universal Scraper (Crawlee)** - Robust scraping for Social Media (X/Insta) and Live Platforms (Twitch/YouTube) with bot-evasion tactics.
 - 📉 **TradFi Agent** - Real-time Stocks & Forex tracking (yfinance / AlphaVantage). Farnsworth is now a multi-asset financial terminal.
