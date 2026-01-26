@@ -27,7 +27,14 @@
       "Bash(dir C:Farnsworth /s /b)",
       "Bash(grep:*)",
       "Bash(wc:*)",
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh release:*)",
+      "Bash(git remote get-url:*)",
+      "Bash(git pull:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pip:*)",
+      "Bash(pip3:*)"
     ]
   }
 }
