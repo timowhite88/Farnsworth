@@ -494,6 +494,19 @@ class ToolRouter:
             handler=self._handle_meteora_info,
         ))
 
+        self.register_tool(ToolDefinition(
+            name="evaluate_trade_signal",
+            description="Perform a deep cognitive analysis of a token signal (Reasoning + Learning)",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "token_symbol": {"type": "string", "required": True, "description": "Token symbol or mint"},
+                "liquidity": {"type": "number", "required": False, "description": "Current liquidity in USD"},
+                "volume_24h": {"type": "number", "required": False, "description": "24h trading volume"},
+            },
+            capabilities=["reasoning", "trading_alpha", "learning"],
+            handler=self._handle_trade_evaluation,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -1114,19 +1127,38 @@ class ToolRouter:
         return {"balance_sol": balance}
 
     async def _handle_jup_swap(self, input_mint: str, output_mint: str, amount: int) -> dict:
-        """Handle Jupiter swap."""
+        """Handle Jupiter swap with exception mapping."""
         from farnsworth.integration.solana.trading import solana_trader
-        return await solana_trader.jupiter_swap(input_mint, output_mint, amount)
+        from farnsworth.core.cognition.trading_cognition import exception_manager
+        
+        return await exception_manager.handle_execution(
+            solana_trader.jupiter_swap(input_mint, output_mint, amount)
+        )
 
     async def _handle_pump_trade(self, action: str, mint: str, amount: float) -> dict:
-        """Handle Pump.fun trading."""
+        """Handle Pump.fun trading with exception mapping."""
         from farnsworth.integration.solana.trading import solana_trader
-        return await solana_trader.pump_fun_trade(action, mint, amount)
+        from farnsworth.core.cognition.trading_cognition import exception_manager
+
+        return await exception_manager.handle_execution(
+            solana_trader.pump_fun_trade(action, mint, amount)
+        )
 
     async def _handle_meteora_info(self, pair_address: str) -> dict:
         """Handle Meteora info."""
         from farnsworth.integration.solana.trading import solana_trader
         return await solana_trader.meteora_info(pair_address)
+
+    async def _handle_trade_evaluation(self, token_symbol: str, liquidity: float = 0, volume_24h: float = 0) -> dict:
+        """Handle cognitive signal evaluation."""
+        from farnsworth.core.cognition.trading_cognition import trading_cognition
+        token_data = {
+            "symbol": token_symbol,
+            "liquidity": {"usd": liquidity},
+            "volume": {"h24": volume_24h}
+        }
+        return await trading_cognition.evaluate_token(token_data)
+
 
 
 
