@@ -102,9 +102,20 @@ class SetupWizard:
             self.config["DB_TYPE"] = self._ask_select("DB Type", ["sqlite", "postgres", "mysql"], "sqlite")
             self.config["DB_CONNECTION_STRING"] = self._ask("Connection String", "farnsworth_data.db")
 
+        # 6. Financial Intelligence
+        print("\n📈 FINANCIAL INTELLIGENCE")
+        if self._ask_bool("Enable DexScreener (On-chain tracking)?"):
+            self.config["ENABLE_DEXSCREENER"] = "true"
+            
+        if self._ask_bool("Enable Polymarket (Prediction markets)?"):
+            self.config["ENABLE_POLYMARKET"] = "true"
+            
+        if self._ask_bool("Configure CoinGecko (Market data)?"):
+            self.config["COINGECKO_API_KEY"] = self._ask("CoinGecko API Key (Optional for free tier)")
+
         self.config["ENABLE_PARALLEL_AI"] = "true" if self._ask_bool("Enable Parallel AI (Multi-model consensus)?") else "false"
 
-        # 6. Save Configuration
+        # 7. Save Configuration
         self._save()
         print("\n" + "="*50)
         print("✅ SETUP COMPLETE!")
