@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-1.3.0_alpha-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -34,13 +34,17 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v1.2.0
+## ✨ What's New in v1.3.0 (Alpha)
 
-- 📊 **Project Tracking** - Auto-detect projects, track tasks & milestones, and transfer knowledge between projects
-- 📤 **Conversation Export** (v1.1) - Export memories and chats to JSON, Markdown, HTML, or TXT
-- 🏭 **Production Ready** (v1.0) - Reliability improvements, health monitoring, and sub-100ms recall
+- 🧠 **FCP Engine** - Farnsworth Cognitive Projection: Live holographic state projection (`VISION`/`FOCUS`/`HORIZON.md`)
+- ⚡ **The Nexus** - Asynchronous "Neural Event Bus" replacing standard function calls with signal propagation
+- 🛡️ **Resilience Layer** - Circuit breakers and entropy monitors to prevent hallucinations and loops
+- 🔌 **Omni-Channel Bridge** - "ChatOps" architecture for connecting to Discord/Slack (Beta)
+- 📊 **Project Tracking** (v1.2) - Auto-detect projects, track tasks & milestones
+
+### Previously Added
+- 📤 **Conversation Export** (v1.1) - Export memories and chats
 - 🐝 **Model Swarm** (v0.5) - Collaborative inference with multiple specialized models
-- 🔮 **Proactive Intelligence** - Anticipatory suggestions based on context
 
 ### Previously Added
 - 🖼️ **Multimodal** - Vision (CLIP/BLIP) & Voice (Whisper) support
@@ -273,63 +277,29 @@ Turn conversations into concrete progress:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Claude Code                             │
-│              (Your AI Programming Partner)                   │
+│              (The User Interface)                           │
 └─────────────────────────────────────────────────────────────┘
-                              │ MCP Protocol
+                              │ FCP Context Injection
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  Farnsworth MCP Server                       │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │ Memory   │ │ Agent    │ │Evolution │ │Multimodal│       │
-│  │ Tools    │ │ Tools    │ │ Tools    │ │ Tools    │       │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
-└─────────────────────────────────────────────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   Memory     │  │    Agent     │  │  Multimodal  │
-│   System     │  │    Swarm     │  │   Engine     │
-│              │  │              │  │              │
-│ • Episodic   │  │ • Planner    │  │ • Vision     │
-│ • Semantic   │  │ • Critic     │  │   (CLIP/BLIP)│
-│ • Knowledge  │  │ • Web        │  │ • Voice      │
-│   Graph v2   │  │ • FileSystem │  │   (Whisper)  │
-│ • Archival   │  │ • Debates    │  │ • OCR        │
-│ • Sharing    │  │ • Teams      │  │ • TTS        │
-└──────────────┘  └──────────────┘  └──────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  Evolution   │  │Collaboration │  │   Storage    │
-│   Engine     │  │   System     │  │   Backends   │
-│              │  │              │  │              │
-│ • Genetic    │  │ • Multi-User │  │ • FAISS      │
-│   Optimizer  │  │ • Shared     │  │ • ChromaDB   │
-│ • Fitness    │  │   Memory     │  │ • Redis      │
-│   Tracker    │  │ • Sessions   │  │ • SQLite     │
-│ • LoRA       │  │ • Permissions│  │              │
-└──────────────┘  └──────────────┘  └──────────────┘
-          │                │                │
-          └────────────────┴────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Model Swarm (v0.5+)                        │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │              PSO Collaborative Engine                │   │
-│  │   • Particle positions = model configs              │   │
-│  │   • Velocity = adaptation direction                 │   │
-│  │   • Global/personal best tracking                   │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                           │                                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │ Phi-4    │ │DeepSeek  │ │ Qwen3    │ │ SmolLM2  │       │
-│  │ mini     │ │ R1-1.5B  │ │ 0.6B/4B  │ │ 1.7B     │       │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │TinyLlama │ │ BitNet   │ │ Gemma    │ │ Cascade  │       │
-│  │ 1.1B     │ │ 2B(1-bit)│ │ 3n-E2B   │ │ (hybrid) │       │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
+│                    Farnsworth Nexus                          │
+│                (The Neural Event Bus)                       │
+│                                                             │
+│  ┌──────────┐   Signals    ┌──────────┐   Signals           │
+│  │ Agents   │ ◄──────────► │ FCP      │ ◄──────────► User   │
+│  │          │              │ Engine   │              State  │
+│  └──────────┘              └──────────┘              Files  │
+│       ▲                          │                          │
+│       │                          ▼                          │
+│       │             ┌─────────────────────────┐             │
+│       │             │ Vision | Focus | Horizon│             │
+│       │             └─────────────────────────┘             │
+│       │                                                     │
+│       ▼                                                     │
+│  ┌──────────┐              ┌──────────┐                     │
+│  │ Resilience│             │ Omni-    │                     │
+│  │ Layer     │             │ Channel  │ ◄────► Discord/Slack│
+│  └──────────┘              └──────────┘                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
