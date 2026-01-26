@@ -179,9 +179,12 @@ This document outlines planned features and improvements for Farnsworth. Feature
 ### Version 1.9.0 - Connected Ecosystem (In Progress) 🔗
 
 - [x] **External Integrations Framework** (`farnsworth/integration/external/`)
+  - [x] **Auth Manager** (Secure credential storage with Keyring)
   - [x] **GitHub** (PyGithub integration for Issues/PRs)
   - [x] **Notion** (AsyncClient for Knowledge Base sync)
   - [x] **Google Calendar** (OAuth2 integration for scheduling)
+  - [x] **Office 365** (Outlook/OneDrive via Microsoft Graph)
+  - [x] **X (Twitter)** (Tweepy integration for social monitoring)
 
 ### Research Directions 🎓
 
