@@ -116,22 +116,109 @@ class SwarmFabric:
     async def _process_peer_message(self, msg: Dict, writer: asyncio.StreamWriter):
         m_type = msg.get("type")
         m_id = msg.get("msg_id", str(uuid.uuid4()))
-        
-        if m_id in self.seen_messages: return
+
+        if m_id in self.seen_messages:
+            return
         self.seen_messages.add(m_id)
-        
+
         if m_type == "HELLO":
-            # Handshake back if not connected
-            pass
+            # Handshake acknowledgment
+            peer_id = msg.get("id")
+            if peer_id:
+                logger.debug(f"P2P: Handshake from {peer_id}")
+                # Send our capabilities back
+                await self._send_to_writer(writer, {
+                    "type": "HELLO_ACK",
+                    "id": self.node_id,
+                    "caps": ["CV", "NLP", "P2P", "PLANETARY"]
+                })
+
+        elif m_type == "HELLO_ACK":
+            peer_id = msg.get("id")
+            logger.debug(f"P2P: Handshake ACK from {peer_id}")
+
         elif m_type == "GOSSIP_DKG":
             # 1. Merge locally
-            self.dkg.merge_fragment(msg["fragment"])
+            fragment = msg.get("fragment")
+            if fragment:
+                self.dkg.merge_fragment(fragment)
+                logger.debug(f"P2P: Merged DKG fragment from gossip")
             # 2. Re-broadcast (Gossip)
             await self.gossip(msg)
-            
+
+        elif m_type == "GOSSIP_SKILL":
+            # Planetary Memory skill sharing
+            skill_data = msg.get("skill")
+            if skill_data:
+                # Signal to planetary memory
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "planetary_skill_received",
+                        "skill": skill_data
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.info(f"P2P: Received planetary skill: {skill_data.get('id', 'unknown')[:8]}...")
+            await self.gossip(msg)
+
         elif m_type == "DHT_QUERY":
-            # Logic to find node with capability
-            pass
+            # Find node with capability
+            requested_cap = msg.get("capability")
+            if requested_cap in ["CV", "NLP", "P2P", "PLANETARY"]:
+                await self._send_to_writer(writer, {
+                    "type": "DHT_RESPONSE",
+                    "node_id": self.node_id,
+                    "capability": requested_cap,
+                    "available": True
+                })
+
+        elif m_type == "TASK_AUCTION":
+            # Distributed Task Auction
+            task_desc = msg.get("task")
+            task_id = msg.get("task_id")
+            # Emit for local agents to bid
+            nexus.emit(Signal(
+                type=SignalType.TASK_RECEIVED,
+                payload={
+                    "task_id": task_id,
+                    "description": task_desc,
+                    "from_peer": msg.get("from_node")
+                },
+                source="p2p_fabric"
+            ))
+            logger.info(f"P2P: Task auction received: {task_id}")
+
+    async def _send_to_writer(self, writer: asyncio.StreamWriter, msg: Dict):
+        """Send message directly to a writer."""
+        try:
+            msg["msg_id"] = msg.get("msg_id", str(uuid.uuid4()))
+            payload = json.dumps(msg).encode()
+            writer.write(payload)
+            await writer.drain()
+        except Exception as e:
+            logger.debug(f"P2P: Send failed: {e}")
+
+    async def broadcast_skill(self, skill_data: Dict):
+        """Broadcast a planetary skill to the swarm."""
+        msg = {
+            "type": "GOSSIP_SKILL",
+            "skill": skill_data,
+            "from_node": self.node_id
+        }
+        await self.gossip(msg)
+        logger.info(f"P2P: Broadcasted skill to {len(self.peers)} peers")
+
+    async def submit_task_auction(self, task_id: str, task_desc: str):
+        """Submit a task for distributed auction."""
+        msg = {
+            "type": "TASK_AUCTION",
+            "task_id": task_id,
+            "task": task_desc,
+            "from_node": self.node_id
+        }
+        await self.gossip(msg)
+        logger.info(f"P2P: Submitted task auction: {task_id}")
 
     async def gossip(self, msg: Dict):
         """Propagate message through the fabric."""

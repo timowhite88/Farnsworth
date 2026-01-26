@@ -17,6 +17,8 @@ Usage:
     python main.py --ui               # Streamlit dashboard only
     python main.py --cli              # Interactive CLI mode
     python main.py --setup            # First-time setup wizard
+    python main.py --node             # Spin up as P2P network node
+    python main.py --node --port 9999 # Custom port for P2P node
 """
 
 import argparse
@@ -157,15 +159,22 @@ async def run_cli_mode():
             elif cmd == "help":
                 print("""
 Available Commands:
-  status     - Show system status
-  remember   - Store a memory (usage: remember <content>)
-  recall     - Search memories (usage: recall <query>)
-  fitness    - Show fitness metrics
-  evolve     - Trigger evolution cycle
-  dream      - Trigger memory consolidation
-  backup     - Create a backup
-  clear      - Clear screen
-  exit       - Exit CLI
+  status       - Show system status
+  remember     - Store a memory (usage: remember <content>)
+  recall       - Search memories (usage: recall <query>)
+  fitness      - Show fitness metrics
+  evolve       - Trigger evolution cycle
+  dream        - Trigger memory consolidation
+  backup       - Create a backup
+
+  P2P Network:
+  node start   - Start P2P node in background
+  node stop    - Stop P2P node
+  node status  - Show node and peer status
+  planetary    - Show Planetary Memory stats
+
+  clear        - Clear screen
+  exit         - Exit CLI
                 """)
 
             elif cmd == "status":
@@ -246,6 +255,73 @@ Available Commands:
                 except Exception as e:
                     print(f"❌ Backup error: {e}")
 
+            elif cmd == "node start":
+                print("Starting P2P node in background...")
+                try:
+                    import os
+                    if os.getenv("FARNSWORTH_ISOLATED", "").lower() == "true":
+                        print("❌ Cannot start: FARNSWORTH_ISOLATED=true")
+                        print("   Set FARNSWORTH_ISOLATED=false in .env to enable P2P")
+                    else:
+                        from farnsworth.core.swarm.p2p import swarm_fabric
+                        if not hasattr(run_cli_mode, '_node_task') or run_cli_mode._node_task is None:
+                            run_cli_mode._node_task = asyncio.create_task(swarm_fabric.start())
+                            print(f"✅ P2P Node started: {swarm_fabric.node_id}")
+                            print(f"   TCP Port: {swarm_fabric.port}")
+                            print("   UDP Discovery: Port 8888")
+                        else:
+                            print("⚠️  Node already running")
+                except Exception as e:
+                    print(f"❌ Failed to start node: {e}")
+
+            elif cmd == "node stop":
+                try:
+                    if hasattr(run_cli_mode, '_node_task') and run_cli_mode._node_task:
+                        run_cli_mode._node_task.cancel()
+                        run_cli_mode._node_task = None
+                        print("✅ P2P Node stopped")
+                    else:
+                        print("⚠️  No node running")
+                except Exception as e:
+                    print(f"❌ Error stopping node: {e}")
+
+            elif cmd == "node status":
+                try:
+                    from farnsworth.core.swarm.p2p import swarm_fabric
+                    print(f"\n🌐 P2P Node Status")
+                    print(f"   Node ID: {swarm_fabric.node_id}")
+                    print(f"   Port: {swarm_fabric.port}")
+                    print(f"   Connected Peers: {len(swarm_fabric.peers)}")
+
+                    if swarm_fabric.peers:
+                        print("\n   Peers:")
+                        for pid, peer in swarm_fabric.peers.items():
+                            caps = ", ".join(peer.capabilities) if peer.capabilities else "none"
+                            print(f"     • {pid} @ {peer.addr}:{peer.port} [{caps}]")
+
+                    print(f"\n   DKG Status:")
+                    print(f"     Nodes: {len(swarm_fabric.dkg.nodes)}")
+                    print(f"     Edges: {len(swarm_fabric.dkg.edges)}")
+                    print(f"   Messages seen: {len(swarm_fabric.seen_messages)}")
+                except Exception as e:
+                    print(f"❌ Error getting status: {e}")
+
+            elif cmd == "planetary":
+                try:
+                    from farnsworth.core.memory.planetary.akashic import PlanetaryMemory
+                    pm = PlanetaryMemory(use_p2p=True)
+                    print(f"\n🌍 Planetary Memory (Akashic Record)")
+                    print(f"   Local Skills: {len(pm.local_skills)}")
+                    print(f"   Global Cache: {len(pm.global_cache)}")
+                    print(f"   Privacy Mode: {'Enabled' if pm.privacy_mode else 'Disabled'}")
+
+                    if pm.local_skills:
+                        print("\n   Local Skills:")
+                        for sid, skill in list(pm.local_skills.items())[:5]:
+                            print(f"     • {sid[:8]}... : {skill.abstract_solution[:50]}...")
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+
             elif cmd == "clear":
                 print("\033[H\033[J", end="")
 
@@ -257,6 +333,116 @@ Available Commands:
             print("\nUse 'exit' to quit.")
         except Exception as e:
             print(f"Error: {e}")
+
+
+async def run_p2p_node(port: int = 9999, enable_planetary: bool = True):
+    """
+    Spin up as a P2P network node.
+
+    This allows your Farnsworth instance to:
+    - Discover other nodes on the local network
+    - Share knowledge via the Decentralized Knowledge Graph (DKG)
+    - Contribute to and benefit from Planetary Memory
+    - Participate in distributed task auctions
+    """
+    print("\n🌐 Farnsworth P2P Node")
+    print("=" * 50)
+
+    import os
+
+    # Check if isolated mode is enabled
+    if os.getenv("FARNSWORTH_ISOLATED", "").lower() == "true":
+        print_status("P2P Node", "error", "Cannot start: FARNSWORTH_ISOLATED=true")
+        print("\n⚠️  To enable P2P networking, set FARNSWORTH_ISOLATED=false in your .env")
+        return
+
+    try:
+        from farnsworth.core.swarm.p2p import SwarmFabric
+        from farnsworth.core.swarm.dkg import DecentralizedKnowledgeGraph
+        from farnsworth.core.memory.planetary.akashic import PlanetaryMemory
+        from farnsworth.memory.memory_system import MemorySystem
+
+        # Initialize memory system for planetary integration
+        memory = MemorySystem(data_dir=str(PROJECT_ROOT / "data"))
+        await memory.initialize()
+        print_status("Memory System", "ok", "Initialized")
+
+        # Initialize Planetary Memory
+        planetary = None
+        if enable_planetary:
+            planetary = PlanetaryMemory(use_p2p=True)
+            print_status("Planetary Memory", "ok", "Enabled (Akashic Record)")
+        else:
+            print_status("Planetary Memory", "warning", "Disabled")
+
+        # Initialize P2P Swarm Fabric
+        fabric = SwarmFabric(port=port)
+        print_status("P2P Fabric", "ok", f"Node ID: {fabric.node_id}")
+        print_status("TCP Server", "loading", f"Port {port}")
+        print_status("UDP Discovery", "loading", "Port 8888 (broadcast)")
+
+        print("\n" + "=" * 50)
+        print(f"🚀 Node '{fabric.node_id}' is now LIVE on port {port}")
+        print("=" * 50)
+        print("\nCapabilities:")
+        print("  • CV  - Computer Vision")
+        print("  • NLP - Natural Language Processing")
+        print("  • P2P - Peer-to-Peer Networking")
+        print("\nListening for peers...")
+        print("Press Ctrl+C to shutdown gracefully.\n")
+
+        # Start the fabric (this runs forever)
+        await fabric.start()
+
+    except KeyboardInterrupt:
+        print("\n\n🛑 Shutting down P2P node...")
+        print_status("P2P Node", "ok", "Gracefully terminated")
+    except ImportError as e:
+        print_status("P2P Node", "error", f"Missing dependency: {e}")
+        print("\nMake sure all P2P dependencies are installed.")
+    except Exception as e:
+        print_status("P2P Node", "error", str(e))
+
+
+async def run_node_with_dashboard(port: int = 9999):
+    """Run P2P node with live status dashboard."""
+    import os
+
+    if os.getenv("FARNSWORTH_ISOLATED", "").lower() == "true":
+        print_status("P2P Node", "error", "Cannot start: FARNSWORTH_ISOLATED=true")
+        return
+
+    try:
+        from farnsworth.core.swarm.p2p import SwarmFabric
+
+        fabric = SwarmFabric(port=port)
+
+        print("\n🌐 Farnsworth P2P Node Dashboard")
+        print("=" * 60)
+        print(f"  Node ID:    {fabric.node_id}")
+        print(f"  TCP Port:   {port}")
+        print(f"  UDP Port:   8888 (discovery)")
+        print("=" * 60)
+
+        # Status update task
+        async def status_loop():
+            while True:
+                await asyncio.sleep(30)
+                peers = len(fabric.peers)
+                dkg_nodes = len(fabric.dkg.nodes)
+                dkg_edges = len(fabric.dkg.edges)
+                print(f"\r📊 Peers: {peers} | DKG: {dkg_nodes} nodes, {dkg_edges} edges | Messages seen: {len(fabric.seen_messages)}", end="", flush=True)
+
+        # Start status loop in background
+        asyncio.create_task(status_loop())
+
+        # Start the fabric
+        await fabric.start()
+
+    except KeyboardInterrupt:
+        print("\n\n🛑 Node shutdown complete.")
+    except Exception as e:
+        print_status("P2P Node", "error", str(e))
 
 
 async def run_all_services():
@@ -282,8 +468,16 @@ Examples:
   python main.py --ui         Streamlit dashboard only
   python main.py --cli        Interactive CLI mode
   python main.py --setup      First-time setup wizard
+  python main.py --node       Spin up as P2P network node
+  python main.py --node --port 9999 --dashboard   Node with live stats
 
-For more info: https://github.com/your-repo/farnsworth
+P2P Node Options:
+  --node                      Enable P2P networking mode
+  --port PORT                 Custom TCP port (default: 9999)
+  --no-planetary              Disable Planetary Memory sharing
+  --dashboard                 Show live node status updates
+
+For more info: https://github.com/timowhite88/Farnsworth
         """
     )
 
@@ -291,6 +485,10 @@ For more info: https://github.com/your-repo/farnsworth
     parser.add_argument("--ui", action="store_true", help="Run Streamlit UI only")
     parser.add_argument("--cli", action="store_true", help="Run interactive CLI")
     parser.add_argument("--setup", action="store_true", help="Run setup wizard")
+    parser.add_argument("--node", action="store_true", help="Spin up as P2P network node")
+    parser.add_argument("--port", type=int, default=9999, help="Port for P2P node (default: 9999)")
+    parser.add_argument("--no-planetary", action="store_true", help="Disable Planetary Memory sharing")
+    parser.add_argument("--dashboard", action="store_true", help="Show live node dashboard")
     parser.add_argument("--no-banner", action="store_true", help="Skip banner")
     parser.add_argument("--data-dir", type=str, default="./data", help="Data directory")
 
@@ -301,6 +499,11 @@ For more info: https://github.com/your-repo/farnsworth
 
     if args.setup:
         asyncio.run(run_setup_wizard())
+    elif args.node:
+        if args.dashboard:
+            asyncio.run(run_node_with_dashboard(port=args.port))
+        else:
+            asyncio.run(run_p2p_node(port=args.port, enable_planetary=not args.no_planetary))
     elif args.mcp:
         asyncio.run(run_mcp_server())
     elif args.ui:

@@ -23,6 +23,14 @@ from enum import Enum
 
 from loguru import logger
 
+# Try to import Nexus for signal handling
+try:
+    from farnsworth.core.nexus import nexus, SignalType
+    NEXUS_AVAILABLE = True
+except ImportError:
+    NEXUS_AVAILABLE = False
+
+
 class MemoryScope(Enum):
     LOCAL_ONLY = "local_only"       # Never leaves machine
     TEAM_SHARED = "team_shared"     # Shared with specific team pool
@@ -48,8 +56,36 @@ class PlanetaryMemory:
     def __init__(self, use_p2p: bool = False):
         self.use_p2p = use_p2p
         self.local_skills: Dict[str, SkillVector] = {}
-        self.global_cache: Dict[str, SkillVector] = {} # Skills learned from others
+        self.global_cache: Dict[str, SkillVector] = {}  # Skills learned from others
         self.privacy_mode = True
+        self._setup_signal_handlers()
+
+    def _setup_signal_handlers(self):
+        """Register handlers to receive skills from P2P network."""
+        if not NEXUS_AVAILABLE:
+            return
+
+        def on_skill_received(signal):
+            """Handle incoming planetary skill from P2P."""
+            payload = signal.payload
+            if payload.get("event") == "planetary_skill_received":
+                skill_data = payload.get("skill", {})
+                if skill_data and skill_data.get("id"):
+                    # Reconstruct SkillVector from data
+                    skill = SkillVector(
+                        id=skill_data["id"],
+                        problem_hash=skill_data.get("problem_hash", ""),
+                        vector=skill_data.get("vector", []),
+                        abstract_solution=skill_data.get("abstract_solution", ""),
+                        confidence_score=skill_data.get("confidence_score", 0.5),
+                        author_signature=skill_data.get("author_signature", ""),
+                        created_at=skill_data.get("created_at", "")
+                    )
+                    # Add to global cache
+                    self.global_cache[skill.id] = skill
+                    logger.info(f"Planetary: Cached skill {skill.id[:8]}... from network")
+
+        nexus.subscribe(SignalType.EXTERNAL_EVENT, on_skill_received)
 
     async def share_skill(self, problem: str, solution: str, embedding: List[float]) -> Optional[str]:
         """
@@ -97,10 +133,34 @@ class PlanetaryMemory:
         return results
 
     async def _broadcast_to_swarm(self, skill: SkillVector):
-        """Mock P2P broadcast."""
-        # Farnsworth P2P protocol integration would go here
-        # For now, we simulate receiving it back to verify flow
-        self.global_cache[skill.id] = skill
+        """Broadcast skill to P2P swarm network."""
+        try:
+            from farnsworth.core.swarm.p2p import swarm_fabric
+
+            # Serialize skill for transmission
+            skill_data = {
+                "id": skill.id,
+                "problem_hash": skill.problem_hash,
+                "vector": skill.vector,
+                "abstract_solution": skill.abstract_solution,
+                "confidence_score": skill.confidence_score,
+                "author_signature": skill.author_signature,
+                "created_at": skill.created_at
+            }
+
+            # Broadcast via P2P fabric
+            await swarm_fabric.broadcast_skill(skill_data)
+
+            # Also cache locally (in case we receive our own broadcast back)
+            self.global_cache[skill.id] = skill
+
+        except ImportError:
+            logger.debug("P2P fabric not available, using local cache only")
+            self.global_cache[skill.id] = skill
+        except Exception as e:
+            logger.warning(f"Planetary broadcast failed: {e}")
+            # Fallback to local cache
+            self.global_cache[skill.id] = skill
 
     def _privacy_check(self, text: str) -> bool:
         """Simple PII regex check."""
