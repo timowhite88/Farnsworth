@@ -1,235 +1,76 @@
-# Farnsworth Roadmap
+# 🚀 Farnsworth Roadmap: The Spatio-Temporal Era
 
-> The future of your Claude Companion AI
+> "I've invented a machine that makes you read the Roadmap in my voice!" - Professor Farnsworth
 
-This document outlines planned features and improvements for Farnsworth. Features are organized by priority and estimated timeline.
-
----
-
-## Current Version: 1.2.0
-
-### Completed Features ✅
-
-**v0.1.0 - Initial Release**
-- [x] MemGPT-style hierarchical memory system
-- [x] Multi-backend LLM support (Ollama, llama.cpp, BitNet)
-- [x] Agent swarm with specialists (Code, Reasoning, Research, Creative)
-- [x] Genetic evolution for self-improvement
-- [x] MCP server for Claude Code integration
-- [x] Streamlit dashboard
-- [x] Basic multimodal support (images, audio, documents)
-
-**v0.2.0 - Enhanced Memory**
-- [x] Episodic Memory Timeline (`farnsworth/memory/episodic_memory.py`)
-- [x] Semantic Memory Layers (`farnsworth/memory/semantic_layers.py`)
-- [x] Memory Sharing/Export/Import (`farnsworth/memory/memory_sharing.py`)
-- [x] Enhanced Knowledge Graph v2 (`farnsworth/memory/knowledge_graph_v2.py`)
-- [x] Hybrid Search v2 (`farnsworth/rag/hybrid_search_v2.py`)
-- [x] Context Compression (`farnsworth/rag/context_compression.py`)
-
-**v0.3.0 - Advanced Agents**
-- [x] Planner Agent (`farnsworth/agents/planner_agent.py`)
-- [x] Critic Agent (`farnsworth/agents/critic_agent.py`)
-- [x] Web Agent (`farnsworth/agents/web_agent.py`)
-- [x] File System Agent (`farnsworth/agents/filesystem_agent.py`)
-- [x] Agent Debates (`farnsworth/agents/agent_debates.py`)
-- [x] Specialization Learning (`farnsworth/agents/specialization_learning.py`)
-- [x] Hierarchical Teams (`farnsworth/agents/hierarchical_teams.py`)
-
-**v0.4.0 - Multimodal & Collaboration**
-- [x] Vision Module - CLIP/BLIP (`farnsworth/integration/vision.py`)
-- [x] Voice Module - Whisper/TTS (`farnsworth/integration/voice.py`)
-- [x] Docker Deployment (`docker/Dockerfile`, `docker/docker-compose.yml`)
-- [x] Shared Memory Pools (`farnsworth/collaboration/shared_memory.py`)
-- [x] Multi-User Support (`farnsworth/collaboration/multi_user.py`)
-- [x] Permission System (`farnsworth/collaboration/permissions.py`)
-- [x] Collaborative Sessions (`farnsworth/collaboration/sessions.py`)
-
-**v0.5.0 - Proactive Intelligence**
-- [x] Anticipatory Suggestions
-- [x] Task Automation & Scheduling
-- [x] Context Awareness
-- [x] Video Summarization
-
-**v1.0.0 - Production Release**
-- [x] Performance Optimization (sub-100ms recall)
-- [x] Reliability & Health Monitoring
-- [x] Horizontal Scaling & Sharding
-- [x] Comprehensive Documentation & SDK
-
-**v1.1.0 - Conversation Export**
-- [x] Conversation Export (`farnsworth/memory/conversation_export.py`)
-  - Export to JSON, Markdown, HTML, or plain text
-  - Filter by date range and tags
-  - Include memories, conversations, and knowledge graph
-- [x] `farnsworth_export` MCP tool
-- [x] `farnsworth_list_exports` MCP tool
-- [x] `farnsworth://exports/list` resource endpoint
-
-**v1.2.0 - Project Tracking**
-- [x] Project Tracking (`farnsworth/memory/project_tracking.py`)
-  - Automatic project detection from conversations via LLM
-  - Task management with dependencies and blocking
-  - Milestone tracking with progress calculation
-  - Cross-project linking and knowledge transfer
-  - Semantic similarity search for related projects
-- [x] MCP Tools:
-  - `farnsworth_project_create` - Create new projects
-  - `farnsworth_project_update` - Update project status/details
-  - `farnsworth_project_list` - List projects with filters
-  - `farnsworth_project_status` - Get detailed progress report
-  - `farnsworth_project_add_task` - Add tasks to projects
-  - `farnsworth_project_complete_task` - Mark tasks complete
-  - `farnsworth_project_add_milestone` - Add milestones
-  - `farnsworth_project_achieve_milestone` - Mark milestones achieved
-  - `farnsworth_project_link` - Link projects for knowledge transfer
-  - `farnsworth_project_detect` - Auto-detect projects from text
-  - `farnsworth_project_transfer_knowledge` - Transfer learnings between projects
+This document outlines the evolutionary path of Farnsworth, from a memory-boosted assistant to a decentralized, spatio-temporal cognitive partner.
 
 ---
 
-## Upcoming Features
+## 🛰️ Current Focus: Version 2.0.0 (Spatio-Temporal & Collective Intelligence)
 
-### Version 1.3.0 - The Connected Agent (In Progress) 🔌
+We have entered the **Vision and Social** era. Farnsworth no longer just thinks; it *sees* action over time and *collaborates* across machines.
 
-- [x] **FCP Engine (Farnsworth Cognitive Projection)** (`farnsworth/core/fcp.py`)
-  - [x] Holographic State Projection (`VISION.md`, `FOCUS.md`, `HORIZON.md`)
-  - [x] Dynamic XML context injection via Resonance
-  - [x] Nexus Event Bus (`farnsworth/core/nexus.py`)
-
-- [x] **Omni-Channel Messaging** (`farnsworth/interfaces/messaging/`)
-  - [x] Messaging Bridge architecture (`base.py`)
-  - [x] Discord Adapter (`discord_adapter.py`)
-  - [ ] Slack/Telegram Adapters
-  - [ ] "ChatOps" command handling
-
-### Version 1.8.0 - Personal Assistant Features (In Progress) 📅
-
-- [x] **Meeting Assistant** (`farnsworth/core/cognition/meeting_assistant.py`)
-  - [x] Context Recall & Briefing Generation
-  - [x] Automated Action Item Extraction
-
-- [x] **Learning Co-Pilot** (`farnsworth/core/learning/paths.py`)
-  - [x] Skill Tree Tracking & Recommendations
-  - [x] Spaced Repetition Engine (SM-2 Algorithm)
-
-
-### Version 1.4.0 - Advanced Multimodal 👁️
-
-- [ ] **Screenshot Analysis**
-  - UI element recognition
-  - Error message extraction
-  - Visual debugging assistance
-
-- [ ] **Diagram Understanding**
-  - Architecture diagram parsing
-  - Flowchart interpretation
-  - Whiteboard content extraction
-
-### Version 1.5.0 - Enterprise Security 🔒
-
-- [ ] **Encryption at Rest**
-  - AES-256 encrypted memory storage
-  - Secure key management
-  - Optional hardware security module support
-
-- [ ] **Cloud Deployment**
-  - One-click AWS deployment
-  - Azure/GCP templates
-  - Managed hosting option
+- [x] **Video v2.0: Duo-Stream Analysis** (`farnsworth/integration/video.py`)
+  - [x] Visual Saliency Event Detection (Temporal Change delta)
+  - [x] Audio-Visual Narrative Synthesis (Whisper + CLIP correlation)
+- [x] **P2P Swarm Fabric** (`farnsworth/core/swarm/p2p.py`)
+  - [x] Peer Discovery & Node Health (mDNS/UDP Broadcast)
+  - [x] Distributed Task Auction (DTA) logic for hybrid compute
+- [ ] **Decentralized Knowledge Graph**
+  - Federated edge updates between trust pools
+  - Cross-node concept verification
+- [ ] **Planetary Memory**
+  - Global shared vector cache (encrypted & anonymized)
+- [ ] **3D Scene Reconstruction**
+  - Building spatial mental models from video keyframes
 
 ---
 
-## Future Explorations (2026+)
+## ✅ Completed Milestones
 
-### Experimental Features 🔬
+### Version 1.9.0 - Connected Ecosystem �
+- [x] **External Framework**: GitHub, Notion, Calendar, Office365, X (Twitter)
+- [x] **Auth Manager**: Secure credential storage via Keyring
+- [x] **Universal AI Gateway**: Hybrid model routing (Grok/Gemini/Ollama)
+- [x] **n8n Bridge**: Workflow-based extensibility
+- [x] **IDE Integrations**: VS Code LSP & Cursor `.cursorrules` generation
 
-- [ ] **Federated Learning**
-  - Learn from multiple users without sharing data
-  - Privacy-preserving improvement
-  - Collective intelligence without central data
+### Version 1.8.0 - Personal Assistant 📅
+- [x] **Meeting Assistant**: Context recall, briefing generation, action extraction
+- [x] **Learning Co-Pilot**: Spaced repetition (SM-2) & Skill Trees
 
-### Version 1.5.0 - Advanced Cognition (In Progress) 🧠
+### Version 1.4 - 1.7 - Advanced Cognition & Vision 🧠👁️
+- [x] **Theory of Mind (v1.6)**: Predictive Coding simulation of user intent
+- [x] **Visual Intelligence (v1.7)**: Visual Debugger & Diagram Parsing
+- [x] **Continual Learning (v1.5)**: Experience Replay & Elastic Consolidation
+- [x] **Causal Reasoning (v1.5)**: Causal graphs, interventions, and counterfactuals
+- [x] **Neural OS Interface (v1.4)**: Neuromorphic Core & Agentic OS Bridge
 
-- [x] **Continual Learning** (`farnsworth/core/learning/continual.py`)
-  - [x] Experience Replay Buffer (prevent catastrophic forgetting)
-  - [x] Elastic Concept Consolidation (protect core skills)
-  - [x] Concept Drift Detection
+### Version 1.3.0 - The Neural Event Bus ⚡
+- [x] **FCP Engine**: Holographic State Projection
+- [x] **The Nexus**: Asynchronous Neural Event Bus
+- [x] **Omni-Channel Bridge**: Discord/Slack architecture
 
-- [x] **Causal Reasoning** (`farnsworth/core/reasoning/causal.py`)
-  - [x] Causal Graph Engine (DAG construction)
-  - [x] Intervention Modeling (Do-calculus simulation)
-  - [x] Counterfactual Generator ("What if?" analysis)
-
-### Version 1.6.0 - Theory of Mind (In Progress) 🎭
-
-- [x] **Mirror Neuron Substrate** (`farnsworth/core/cognition/theory_of_mind.py`)
-  - [x] **Shadow User Simulation** (Predictive Coding / Free Energy Principle)
-  - [x] **Affective Resonance** (Emotional Velocity tracking)
-  - [x] **Synchronization Metric** (Surprise-based adaptive verbosity)
-
-
-### Version 1.7.0 - Visual Intelligence (In Progress) 👁️
-
-- [x] **Visual Debugger** (`farnsworth/integration/visual_debugging.py`)
-  - [x] **UI Element Recognition** (OCR + VQA heuristics)
-  - [x] **Error Message Extraction** (Regex pattern matching on OCR)
-  - [x] **Diagram Parsing** (Heuristic labeling from Architecture diagrams)
-
-### Version 1.9.0 - Connected Ecosystem (In Progress) 🔗
-
-- [x] **External Integrations Framework** (`farnsworth/integration/external/`)
-  - [x] **Auth Manager** (Secure credential storage with Keyring)
-  - [x] **n8n Bridge** (Trigger and monitor workflows)
-  - [x] **Universal AI Gateway** (Hybrid Local/Cloud model routing for Grok/Gemini/OpenAI)
-  - [x] **GitHub** (PyGithub integration for Issues/PRs)
-  - [x] **Notion** (AsyncClient for Knowledge Base sync)
-  - [x] **Google Calendar** (OAuth2 integration for scheduling)
-  - [x] **Office 365** (Outlook/OneDrive via Microsoft Graph)
-  - [x] **X (Twitter)** (Tweepy integration for social monitoring)
-  - [x] **Universal AI Gateway** (Hybrid Local/Cloud model routing for Grok/Gemini/OpenAI)
-
-- [x] **IDE Integrations** (`farnsworth/integration/ide/`)
-  - [x] **VS Code** (LSP Bridge for diagnostics and code actions)
-  - [x] **Cursor** (Auto-generation of `.cursorrules` from memory)
-
-- [x] **Agent Interoperability**
-  - [x] **Agent Interface** (Standardized API for Antigravity/External Agents)
-  - [x] **MCP Server** (Full Claude/Agent protocol support)
-
-
-### Research Directions 🎓
-
-Want to help build these features? See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Priority Features (Help Wanted!)
-
-These features would have the most impact and we'd love help with:
-
-1. **Cloud Deployment** - AWS/Azure/GCP templates
-2. **Encryption at Rest** - AES-256 encrypted memory storage
-3. **Screenshot Analysis** - UI element recognition, error extraction
-4. **Meeting Preparation** - Briefing documents and follow-up task tracking
-
-### Feature Requests
-
-Have an idea not on this list? Open a GitHub issue with the `feature-request` label!
+### Version 1.0 - 1.2 - Proactive & Project-Centric �
+- [x] **Project Tracking**: Auto-detection of projects and milestones
+- [x] **Conversation Export**: Multi-format export system
+- [x] **Production Release**: Performance (sub-100ms recall) and scalability
 
 ---
 
-## Version History
+## 🧪 Future Explorations (2026+)
 
-| Version | Release Date | Highlights |
-|---------|--------------|------------|
-| 0.1.0   | Jan 2025     | Initial release with MemGPT memory, agent swarm, MCP server |
-| 0.2.0   | Jan 2025     | Enhanced Memory: Episodic timeline, semantic layers, knowledge graph v2 |
-| 0.3.0   | Jan 2025     | Advanced Agents: Planner, Critic, Web, FileSystem; Agent debates & teams |
-| 0.4.0   | Jan 2025     | Multimodal: Vision (CLIP/BLIP), Voice (Whisper/TTS), Docker deployment |
-| 0.5.0   | Jan 2025     | Proactive Intelligence: Anticipatory suggestions, scheduling, context awareness |
-| 1.0.0   | Jan 2025     | Production Release: Performance, reliability, scaling, documentation |
-| 1.1.0   | Jan 2025     | Conversation Export: Export memories/conversations to JSON, MD, HTML, TXT |
-| 1.2.0   | Jan 2025     | Project Tracking: Auto-detection, tasks, milestones, cross-project knowledge transfer |
+- [ ] **Quantum-Inspired Search**: Using superposition logic for multi-path graph traversal
+- [ ] **Emotion-to-Action**: Directly mapping affective states into system priorities
+- [ ] **Biological Interface Support**: Standardized API for neuro-integration (future-proofing)
 
 ---
 
-*"I don't want to live on this planet anymore... without Farnsworth!" - Professor Farnsworth*
+## 🤝 How to Contribute
+
+Want to help? We're looking for specialists in:
+1. **P2P Networking** (libp2p or similar)
+2. **Video Feature Extraction** (SOWT/Flow analysis)
+3. **Cybersecurity** (Zero-knowledge proofs for memory sharing)
+
+*"Good news, everyone! The code is open source!"*
