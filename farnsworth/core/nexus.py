@@ -29,6 +29,7 @@ class SignalType(Enum):
     DECISION_REACHED = "cognitive.decision"
     ANOMALY_DETECTED = "cognitive.anomaly"
     CONFUSION_DETECTED = "cognitive.confusion"
+    MEMORY_CONSOLIDATION = "cognitive.memory_consolidation"
     
     # Task Signals
     TASK_CREATED = "task.created"
