@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Farnsworth | DeGen Mob Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard-grid">
+        
+        <!-- Top Header Area -->
+        <header class="card header">
+            <h1>gn, <span>anon</span></h1>
+            <div class="status-bar">
+                <div class="live-indicator"></div>
+                <span>Live: Monitoring bags.fm for creator launches...</span>
+            </div>
+        </header>
+
+        <section class="quick-stats">
+            <div class="stat-box">
+                <span class="label">24h Trades</span>
+                <span class="value">47 executions</span>
+            </div>
+            <div class="stat-box">
+                <span class="label">24h P&L</span>
+                <span class="value trend up">+$2,847.32</span>
+            </div>
+            <div class="stat-box">
+                <span class="label">Rugs Avoided</span>
+                <span class="value trend down">2 honeypots</span>
+            </div>
+        </section>
+
+        <!-- Portfolio Visualization -->
+        <section class="card portfolio">
+            <div class="label" style="font-size: 12px; color: #888; text-transform: uppercase;">Portfolio Value</div>
+            <div class="portfolio-value">$44,818.59 <span style="font-size: 18px; color: var(--accent-green);">+$3,438.70 (24h)</span></div>
+            
+            <div class="portfolio-breakdown">
+                <div class="breakdown-item">
+                    <div class="symbol">🔷 SOL</div>
+                    <div class="amt">$12,894.22</div>
+                    <div class="trend up" style="font-size: 11px;">+4.2%</div>
+                </div>
+                <div class="breakdown-item">
+                    <div class="symbol">🐸 Memecoins</div>
+                    <div class="amt">$18,784.79</div>
+                    <div class="trend up" style="font-size: 11px;">+34.5%</div>
+                </div>
+                <div class="breakdown-item">
+                    <div class="symbol">💵 Stables</div>
+                    <div class="amt">$8,500.00</div>
+                    <div class="trend" style="font-size: 11px; color: #555;">+0%</div>
+                </div>
+                <div class="breakdown-item">
+                    <div class="symbol">⚡ Pending</div>
+                    <div class="amt">$2,450.00</div>
+                    <div class="trend up" style="font-size: 11px;">+0%</div>
+                </div>
+                <div class="breakdown-item">
+                    <div class="symbol">💀 Rugged</div>
+                    <div class="amt">-$869.31</div>
+                    <div class="trend down" style="font-size: 11px;">-100%</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Agent Swarm / Communication -->
+        <section class="card agent-swarm">
+            <div class="label" style="font-size: 14px; font-weight: 700;">Agent Swarm <span style="float: right; font-weight: 400; color: #555; font-size: 10px;">Inter-agent comms</span></div>
+            <div class="swarm-log">
+                <div class="log-entry">
+                    <span class="scout">SCOUT</span> ⮕ <span class="sniper">SNIPER</span>
+                    <span>New pump.fun launch detected - $CATGIRL bonding</span>
+                </div>
+                <div class="log-entry">
+                    <span class="whale">WHALE</span> ⮕ <span class="sniper">SNIPER</span>
+                    <span>DEX volume spike - $GAS up 200% in 1h</span>
+                </div>
+                <div class="log-entry">
+                    <span class="alpha">ALPHA</span> ⮕ <span class="scout">SCOUT</span>
+                    <span>CT alpha: @weremcow accumulating $POPCAT</span>
+                </div>
+                <div class="log-entry">
+                    <span class="safety">SAFETY</span> ⮕ <span class="sniper">SNIPER</span>
+                    <span>BLOCKED: Honeypot detected on $FAKESOL</span>
+                </div>
+            </div>
+
+            <div class="label" style="margin-top: 40px; font-size: 14px; font-weight: 700;">Agent Activity</div>
+            <div class="activity-feed">
+                <div class="feed-item">
+                    <div class="meta"><span>BAGS</span> <span>Just now</span></div>
+                    New alpha found: $PIPPIN up 18.56% - turnaround signs
+                </div>
+                <div class="feed-item">
+                    <div class="meta"><span>SAFETY</span> <span>2m ago</span></div>
+                    Aped Into $SHMEEGUS - up 44.8% and climbing
+                </div>
+                <div class="feed-item">
+                    <div class="meta"><span>ALPHA</span> <span>5m ago</span></div>
+                    Scanning pump.fun for new narratives...
+                </div>
+            </div>
+        </section>
+
+        <!-- Alpha Plays -->
+        <section class="card alpha-plays">
+            <div class="label" style="font-size: 14px; font-weight: 700;">Alpha Plays <span style="float: right; color: var(--accent-green);">Today P&L: +$3,342</span></div>
+            <div class="play-grid">
+                <div class="play-card">
+                    <span class="tag">5-10x</span>
+                    <div class="token-name">$SHMEEGUS</div>
+                    <div style="font-size: 10px; color: var(--accent-green);">74% conf</div>
+                    <div class="metrics">Up 44.8% 24h. $319M mcap - massive surge.</div>
+                    <button class="btn-ape">Ape In →</button>
+                </div>
+                <div class="play-card">
+                    <span class="tag">2-3x</span>
+                    <div class="token-name">$PEPE Mom..</div>
+                    <div style="font-size: 10px; color: var(--accent-green);">85% conf</div>
+                    <div class="metrics">Blue chip meme. Leading resurgence with whale activity.</div>
+                    <button class="btn-ape" style="color: #888;">Watching</button>
+                </div>
+                <div class="play-card">
+                    <span class="tag">4x to ATH</span>
+                    <div class="token-name">$PENGU Bro..</div>
+                    <div style="font-size: 10px; color: var(--accent-green);">78% conf</div>
+                    <div class="metrics">Broke out of wedge. Strong IP with NFT ties.</div>
+                    <button class="btn-ape" style="color: var(--accent-green); border-color: var(--accent-green);">✓ Executed</button>
+                </div>
+                <div class="play-card">
+                    <span class="tag" style="color: var(--accent-red);">10x+ (High)</span>
+                    <div class="token-name">$RALPH..</div>
+                    <div style="font-size: 10px; color: var(--accent-orange);">42% conf</div>
+                    <div class="metrics">bags.fm meta. Peaked $5M, now $2.5M - extreme volatility.</div>
+                    <button class="btn-ape">Ape In →</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Trading Stats -->
+        <section class="card" style="grid-column: span 4;">
+            <div class="label" style="font-size: 14px; font-weight: 700;">Trading Stats</div>
+            <div style="margin-top: 15px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px;">
+                    <span>Win Rate</span>
+                    <span style="color: var(--accent-green);">67.4%</span>
+                </div>
+                <div style="height: 4px; background: #222; border-radius: 2px;">
+                    <div style="width: 67.4%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin: 15px 0 8px;">
+                    <span>Avg Gain</span>
+                    <span style="color: var(--accent-green);">3.3x</span>
+                </div>
+                <div style="height: 4px; background: #222; border-radius: 2px;">
+                    <div style="width: 45%; height: 100%; background: var(--accent-green); border-radius: 2px;"></div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin: 15px 0 8px;">
+                    <span>Max Drawdown</span>
+                    <span style="color: var(--accent-red);">17.8%</span>
+                </div>
+                <div style="height: 4px; background: #222; border-radius: 2px;">
+                    <div style="width: 17.8%; height: 100%; background: var(--accent-red); border-radius: 2px;"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Safety Scanner -->
+        <section class="card" style="grid-column: span 4;">
+            <div class="label" style="font-size: 14px; font-weight: 700;">Safety Scanner <span style="float: right; color: var(--accent-green);">Rug Score: 90/100</span></div>
+            <div style="margin-top: 20px; font-size: 12px;">
+                <div style="color: var(--accent-green); font-weight: 600;">Portfolio Safety: SAFE</div>
+                <div style="color: #666; margin-top: 5px;">2 tokens verified, 0 honeypots detected</div>
+                
+                <div style="margin-top: 20px; border-left: 2px solid var(--accent-green); padding-left: 10px;">
+                    <div style="font-weight: 600;">$ULPEPE</div>
+                    <div style="color: #555; font-size: 10px;">ENTRY SOON</div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</body>
+</html>
