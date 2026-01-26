@@ -103,15 +103,16 @@ This document outlines planned features and improvements for Farnsworth. Feature
   - [ ] Slack/Telegram Adapters
   - [ ] "ChatOps" command handling
 
-- [ ] **Meeting Preparation**
-  - Recall relevant information before meetings
-  - Generate briefing documents
-  - Follow-up task tracking
+### Version 1.8.0 - Personal Assistant Features (In Progress) 📅
 
-- [ ] **Learning Paths**
-  - Track what you're learning
-  - Suggest next learning steps
-  - Spaced repetition for knowledge retention
+- [x] **Meeting Assistant** (`farnsworth/core/cognition/meeting_assistant.py`)
+  - [x] Context Recall & Briefing Generation
+  - [x] Automated Action Item Extraction
+
+- [x] **Learning Co-Pilot** (`farnsworth/core/learning/paths.py`)
+  - [x] Skill Tree Tracking & Recommendations
+  - [x] Spaced Repetition Engine (SM-2 Algorithm)
+
 
 ### Version 1.4.0 - Advanced Multimodal 👁️
 
