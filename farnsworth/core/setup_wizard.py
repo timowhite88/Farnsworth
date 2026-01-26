@@ -120,6 +120,11 @@ class SetupWizard:
         if self._ask_bool("Enable FULL Solana Trading (Jupiter/Meteora/Pump)?", default=False):
             self.config["SOLANA_PRIVATE_KEY"] = self._ask("Solana Private Key (Base58)")
             self.config["SOLANA_RPC_URL"] = self._ask("Custom Solana RPC URL (Optional)", "https://api.mainnet-beta.solana.com")
+            
+            if self._ask_bool("Enable 'DeGen Mob' Suite (Sniping, Whale Tracking, Rug Checks)?"):
+                self.config["HELIUS_API_KEY"] = self._ask("Helius API Key (Optional but recommended)")
+                self.config["ENABLE_SNIPER"] = "true"
+                self.config["ENABLE_WHALE_WATCH"] = "true"
 
         self.config["ENABLE_PARALLEL_AI"] = "true" if self._ask_bool("Enable Parallel AI (Multi-model consensus)?") else "false"
 

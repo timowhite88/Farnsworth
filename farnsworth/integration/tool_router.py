@@ -507,6 +507,53 @@ class ToolRouter:
             handler=self._handle_trade_evaluation,
         ))
 
+        # --- DeGen Mob Elite Skills ---
+        self.register_tool(ToolDefinition(
+            name="solana_rug_check",
+            description="Perform a security scan on a token mint to detect rugs/honeypots",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "mint_address": {"type": "string", "required": True, "description": "Solana token address"},
+            },
+            capabilities=["security", "solana", "rug_check", "safety"],
+            handler=self._handle_rug_check,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="solana_whale_watch",
+            description="Track real-time activity and rotations of specific whale wallets",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "wallet_address": {"type": "string", "required": True, "description": "Solana wallet to monitor"},
+                "action": {"type": "string", "required": False, "description": "add / list / history"},
+            },
+            capabilities=["whale_tracking", "copy_trading", "alpha"],
+            handler=self._handle_whale_watch,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="solana_snipe_toggle",
+            description="Activate or deactivate the automated launch sniper",
+            category=ToolCategory.ACTION,
+            parameters={
+                "enabled": {"type": "boolean", "required": True, "description": "True to start, False to stop"},
+                "query": {"type": "string", "required": False, "description": "Filters for tokens to snipe"},
+            },
+            capabilities=["sniping", "automation", "hft"],
+            handler=self._handle_snipe_toggle,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="ct_sentiment_swarm",
+            description="Run high-scale sentiment analysis on CT (Twitter) for narrative rotations",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "keywords": {"type": "array", "items": {"type": "string"}, "required": True, "description": "Narratives to track"},
+            },
+            capabilities=["sentiment", "narratives", "twitter", "alpha"],
+            handler=self._handle_ct_swarm,
+        ))
+
     def register_tool(self, tool: ToolDefinition) -> None:
         """
         Register a new tool.
@@ -1158,6 +1205,38 @@ class ToolRouter:
             "volume": {"h24": volume_24h}
         }
         return await trading_cognition.evaluate_token(token_data)
+
+    async def _handle_rug_check(self, mint_address: str) -> dict:
+        """Handle Rug Check."""
+        from farnsworth.integration.solana.degen_mob import degen_mob
+        return await degen_mob.analyze_token_safety(mint_address)
+
+    async def _handle_whale_watch(self, wallet_address: str, action: str = "history") -> dict:
+        """Handle Whale Watching."""
+        from farnsworth.integration.solana.degen_mob import degen_mob
+        if action == "add":
+            degen_mob.add_whale_wallet(wallet_address)
+            return {"status": "added", "wallet": wallet_address}
+        
+        history = await degen_mob.get_whale_recent_activity(wallet_address)
+        return {"wallet": wallet_address, "recent_activity": history}
+
+    async def _handle_snipe_toggle(self, enabled: bool, query: str = None) -> dict:
+        """Handle Sniper Toggle."""
+        from farnsworth.integration.solana.degen_mob import degen_mob
+        if enabled:
+            await degen_mob.start_sniper(query)
+            return {"status": "Sniper STARTED"}
+        else:
+            degen_mob.stop_sniper()
+            return {"status": "Sniper STOPPED"}
+
+    async def _handle_ct_swarm(self, keywords: List[str]) -> dict:
+        """Handle CT Alpha analysis."""
+        from farnsworth.integration.solana.degen_mob import degen_mob
+        await degen_mob.run_alpha_leak_loop(keywords)
+        return {"status": "Alpha swarm dispatched", "tracking": keywords}
+
 
 
 
