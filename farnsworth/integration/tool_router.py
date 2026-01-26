@@ -18,7 +18,7 @@ import asyncio
 import json
 import hashlib
 from datetime import datetime
-from typing import Optional, Any, Callable, Awaitable
+from typing import Optional, Any, Callable, Awaitable, List, Dict
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path

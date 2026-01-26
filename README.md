@@ -42,6 +42,7 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🎬 **Remotion Video** - Programmatic React-based video generation and rendering
 - ⚡ **Parallel AI** - High-reliability consensus via multi-model concurrent dispatch
 - 🧪 **DeGen Mob** - Launch Sniping, Whale Watching, & Rug Detection (Solana)
+- 🖥️ **DeGen Dashboard** - Ultra-premium glassmorphic HUD for real-time swarm visualization
 - 🧠 **Cognitive Trading** - Integrated reasoning & learning for signal accuracy
 - 💰 **Elite Solana Trading** - Jupiter Swaps, Meteora LP management, & Pump.fun execution
 - 📈 **Financial Intelligence** - DexScreener, Polymarket, & Pump.fun/Bags.fm tracking
@@ -96,6 +97,7 @@ Unleash the swarm on the Solana ecosystem:
 - "Start watching this whale wallet for rotations: [WALLET_ADDRESS]"
 - "Activate the launch sniper for AI-themed memecoins."
 - "Run a sentiment swarm on 'AI Agents' vs 'DePIN' narratives."
+- "Show me the trading dashboard."
 
 ### 💰 Elite Solana Trading
 Farnsworth can now manage assets and execute trades (Burner wallet recommended):
