@@ -28,68 +28,74 @@ class SwarmNode:
     latency: float = 0.0
     trust_score: float = 1.0
 
+import socket
+from farnsworth.core.swarm.dkg import DecentralizedKnowledgeGraph
+
 class P2PSwarmProtocol:
-    """
-    Main protocol handler for peer-to-peer agent communication.
-    """
     def __init__(self, node_id: Optional[str] = None):
         self.node_id = node_id or str(uuid.uuid4())[:8]
         self.peers: Dict[str, SwarmNode] = {}
-        self.is_broadcasting = False
-        
-        # Subscribe to internal tasks that might be candidates for delegation
+        self.dkg = DecentralizedKnowledgeGraph(self.node_id)
+        self.port = 8888
         nexus.subscribe(SignalType.TASK_CREATED, self._on_local_task_created)
 
     async def start_discovery(self):
-        """
-        Announce presence and listen for other Farnsworth instances.
-        (Simulated mDNS / UDP Broadcast logic)
-        """
-        logger.info(f"P2P: Node {self.node_id} entering the fabric...")
-        self.is_broadcasting = True
+        """Announce presence and listen for other Farnsworth instances via UDP."""
+        logger.info(f"P2P: Node {self.node_id} entering the fabric on port {self.port}...")
         
-        # In a real impl: 
-        # 1. Start UDP Listener on Port 8888
-        # 2. Broadcast periodic "HELLO" packets
+        # 1. Start Listener
+        loop = asyncio.get_event_loop()
+        transport, protocol = await loop.create_datagram_endpoint(
+            lambda: SwarmProtocol(self),
+            local_addr=('0.0.0.0', self.port)
+        )
         
-        # Mocking peer discovery
-        await asyncio.sleep(1)
-        self._add_peer("node_alpha", ["GPU", "High_VRAM"])
-        logger.info(f"P2P: Discovered peer 'node_alpha' (Capabilities: GPU)")
+        # 2. Start Broadcaster
+        asyncio.create_task(self._broadcast_presence())
 
-    def _add_peer(self, peer_id: str, capabilities: List[str]):
-        self.peers[peer_id] = SwarmNode(id=peer_id, capabilities=capabilities)
-
-    async def _on_local_task_created(self, signal: Signal):
-        """
-        If we have a heavy task and active peers, consider an Auction.
-        """
-        task_data = signal.payload
-        if task_data.get("complexity", 1.0) > 0.8 and self.peers:
-            logger.info("P2P: Heavy task detected. Initiating Swarm Auction...")
-            await self.initiate_auction(task_data)
-
-    async def initiate_auction(self, task: Dict[str, Any]):
-        """
-        Broadcast a task to peers and collect bids.
-        """
-        logger.debug(f"P2P: Auctioning Task: {task.get('title')}")
+    async def _broadcast_presence(self):
+        """Send periodic HELLO packets."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         
-        # 1. Send TASK_OFFER to peers
-        # 2. Wait for BIDs (Bid = {peer_id, price_tokens, confidence_score})
-        # 3. Select winner based on Trust * Confidence / Price
-        
-        # For now, we simulate a mock delegation
-        winner = list(self.peers.keys())[0] if self.peers else None
-        if winner:
-            logger.success(f"P2P: Task won by {winner}. Delegating...")
+        while True:
+            msg = json.dumps({"type": "HELLO", "id": self.node_id, "caps": ["RECONSTRUCTION", "NLP"]})
+            sock.sendto(msg.encode(), ('<broadcast>', self.port))
+            await asyncio.sleep(30)
 
-    async def share_knowledge(self, concept_fragment: Dict[str, Any]):
-        """
-        Federated update. Tell peers "I learned X is better than Y".
-        """
-        # Broadcast weighted update to the swarm knowledge graph
-        pass
+    def _add_peer(self, peer_data: Dict):
+        pid = peer_data["id"]
+        if pid != self.node_id:
+            logger.info(f"P2P: Discovered peer '{pid}'")
+            self.peers[pid] = SwarmNode(id=pid, capabilities=peer_data.get("caps", []))
+
+    async def share_knowledge(self):
+        """Broadcast DKG fragment to all peers."""
+        if not self.peers: return
+        
+        fragment = self.dkg.create_sync_fragment()
+        msg = json.dumps({"type": "DKG_SYNC", "id": self.node_id, "data": fragment})
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.sendto(msg.encode(), ('<broadcast>', self.port))
+        logger.debug("P2P: Knowledge fragment broadcasted.")
+
+class SwarmProtocol(asyncio.DatagramProtocol):
+    def __init__(self, handler: P2PSwarmProtocol):
+        self.handler = handler
+
+    def datagram_received(self, data: bytes, addr: Tuple[str, int]):
+        try:
+            msg = json.loads(data.decode())
+            m_type = msg.get("type")
+            
+            if m_type == "HELLO":
+                self.handler._add_peer(msg)
+            elif m_type == "DKG_SYNC":
+                self.handler.dkg.merge_fragment(msg["data"])
+        except Exception as e:
+            pass
 
 # Global Instance
 swarm_p2p = P2PSwarmProtocol()

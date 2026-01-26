@@ -55,8 +55,22 @@ class Office365Provider(ExternalProvider):
         return True
 
     async def sync(self):
-        # Poll inbox
-        pass
+        """Poll for new emails."""
+        if self.status != ConnectionStatus.CONNECTED:
+            return
+
+        loop = asyncio.get_event_loop()
+        def _get_messages():
+            mailbox = self.account.mailbox()
+            return list(mailbox.get_messages(limit=5))
+
+        messages = await loop.run_in_executor(None, _get_messages)
+        for msg in messages:
+            await nexus.emit(
+                SignalType.EXTERNAL_ALERT,
+                {"provider": "o365", "type": "email", "subject": msg.subject, "from": msg.sender.address},
+                source="o365_provider"
+            )
 
     async def execute_action(self, action: str, params: Dict[str, Any]) -> Any:
         if self.status != ConnectionStatus.CONNECTED:
@@ -80,11 +94,13 @@ class Office365Provider(ExternalProvider):
             return {"status": "sent"}
             
         elif action == "get_calendar":
-            schedule = await loop.run_in_executor(
-                None, lambda: self.account.schedule()
-            )
-            # return schedule.get_events(...)
-            return []
+            def _get_events():
+                schedule = self.account.schedule()
+                calendar = schedule.get_default_calendar()
+                return list(calendar.get_events(limit=params.get('limit', 10)))
+            
+            events = await loop.run_in_executor(None, _get_events)
+            return [{"id": e.object_id, "subject": e.subject, "start": e.start.isoformat()} for e in events]
             
         else:
             raise ValueError(f"Unknown action: {action}")

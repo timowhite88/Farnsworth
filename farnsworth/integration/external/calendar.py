@@ -72,7 +72,39 @@ class CalendarProvider(ExternalProvider):
         return events_result.get('items', [])
 
     async def execute_action(self, action: str, params: Dict[str, Any]) -> Any:
+        if not self.service:
+            raise ConnectionError("Google Calendar not connected")
+            
+        loop = asyncio.get_event_loop()
+        
         if action == "schedule_event":
-            # Implementation of insert
-            pass
-        return {}
+            event = {
+                'summary': params.get('summary'),
+                'location': params.get('location', ''),
+                'description': params.get('description', ''),
+                'start': {
+                    'dateTime': params.get('start_time'), # ISO format e.g. 2026-01-25T20:00:00Z
+                    'timeZone': params.get('timezone', 'UTC'),
+                },
+                'end': {
+                    'dateTime': params.get('end_time'),
+                    'timeZone': params.get('timezone', 'UTC'),
+                },
+                'attendees': [{'email': e} for e in params.get('attendees', [])],
+            }
+            
+            res = await loop.run_in_executor(
+                None, 
+                lambda: self.service.events().insert(calendarId='primary', body=event).execute()
+            )
+            return {"id": res.get('id'), "htmlLink": res.get('htmlLink')}
+            
+        elif action == "delete_event":
+            event_id = params.get('event_id')
+            await loop.run_in_executor(
+                None,
+                lambda: self.service.events().delete(calendarId='primary', eventId=event_id).execute()
+            )
+            return {"status": "deleted"}
+
+        raise ValueError(f"Unknown action: {action}")

@@ -188,10 +188,12 @@ class FarnsworthMCPServer:
                     self._project_tracker.llm_fn = self._model_manager.generate
 
             # --- ACTIVATE COGNITIVE ENGINES (v1.4 - v1.9) ---
+            from farnsworth.core.learning.synergy import create_synergy_engine
+            self._synergy_engine = create_synergy_engine(self._project_tracker)
+            
             # Importing these modules triggers their Nexus subscriptions
             import farnsworth.core.neuromorphic.engine
             import farnsworth.core.learning.continual
-            import farnsworth.core.learning.synergy
             import farnsworth.core.reasoning.causal
             import farnsworth.core.cognition.theory_of_mind
             import farnsworth.os_integration.bridge
