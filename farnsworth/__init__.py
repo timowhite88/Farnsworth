@@ -5,7 +5,7 @@ A modular, self-evolving companion AI that runs entirely locally with zero-cost 
 Features MemGPT-style memory paging, LangGraph agent swarms, and genetic evolution.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0-alpha"
 __author__ = "Farnsworth Team"
 
 from farnsworth.core.nexus import nexus, Signal, SignalType
