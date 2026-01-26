@@ -566,12 +566,17 @@ class ModelManager:
 
         return False
 
-    async def generate(self, prompt: str, system: Optional[str] = None, **kwargs) -> str:
+    async def generate(self, prompt: str, system: Optional[str] = None, config: Optional[GenerationConfig] = None) -> str:
         """
         Unified generation interface.
 
         Automatically selects and loads the best model if none works.
         """
+        # Combine system prompt if provided
+        full_prompt = prompt
+        if system:
+            full_prompt = f"System: {system}\n\nUser: {prompt}"
+
         if not self.loaded_backends:
             # Auto-load a general model
             best_model = self.get_best_model_for_task("general")
@@ -581,9 +586,9 @@ class ModelManager:
                 return "Error: No models available."
 
         # Use the first loaded backend (or valid one)
-        # TODO: Implement smarter routing based on task
         for backend in self.loaded_backends.values():
-            return await backend.generate(prompt, system, **kwargs)
+            result = await backend.generate(full_prompt, config)
+            return result.text
         
         return "Error: Generation failed."
 
