@@ -445,7 +445,7 @@ Farnsworth is not just an agent; it is a **Neuromorphic Cognitive Architecture**
 
 ---
 
-### Supported Models (Jan 2025)
+### Supported Models (Jan 2026)
 
 | Model | Params | RAM | Strengths |
 |-------|--------|-----|-----------|
