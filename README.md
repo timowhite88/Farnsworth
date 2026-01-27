@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.7.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -47,8 +47,34 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v2.1.0 (The Skill Swarm)
+## ✨ What's New in v2.8.0 (The "Swarm Node" Release)
 
+### P2P Network Node
+- 🌐 **Spin Up as a Node** - Run `python main.py --node` to join the global Farnsworth network
+- 🔗 **Peer Discovery** - Automatic mDNS/UDP discovery of nearby Farnsworth nodes
+- 🌍 **Planetary Memory Sharing** - Contribute to and benefit from the Akashic Record
+- 📡 **Task Auctions** - Distribute heavy tasks across the swarm for parallel processing
+- 📊 **Live Dashboard** - `--dashboard` flag shows real-time peer and DKG stats
+
+### Token Saving Mode (API Cost Optimization)
+- 💰 **Daily Budget Tracking** - Set token limits, get warnings at 80%/90% thresholds
+- 🗜️ **Context Compression** - Smart/extractive/truncate strategies to reduce input tokens
+- 📦 **Response Caching** - LRU cache with TTL for common responses (skip redundant API calls)
+- 🐝 **Swarm Offloading** - Route simple queries to local models, reserve API for complex tasks
+
+### Productivity Suite
+- 📝 **Quick Notes** - Fast note capture with tags (`note "Meeting notes #work"`)
+- 📋 **Snippet Manager** - Code snippet storage with template variables
+- 🍅 **Focus Timer** - Pomodoro-style timer with session tracking and stats
+- 📊 **Daily Summary** - Auto-generated activity digests with LLM insights
+- 🎭 **Context Profiles** - Switch between Work/Personal/Creative/Technical modes
+
+### Previous Releases
+
+<details>
+<summary>v2.1.0 - v2.7.0 (Click to expand)</summary>
+
+#### v2.1.0 - The Skill Swarm
 - 🦝 **Grok X Search** - Real-time X (Twitter) search and deep thinking via xAI
 - 🎬 **Remotion Video** - Programmatic React-based video generation and rendering
 - ⚡ **Parallel AI** - High-reliability consensus via multi-model concurrent dispatch
@@ -67,7 +93,8 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🧙 **Granular Setup Wizard** - Step-by-step feature control (`python main.py --setup`)
 - 🎥 **Video v2.1** - Advanced Spatio-Temporal Flow Analysis (Optical Flow)
 - 🧠 **Synergy Engine** - Automated cross-domain learning (GitHub -> Memory -> Projects)
-### Update v2.7.0 - The "Cognitive Productivity" Suite
+
+#### v2.7.0 - The "Cognitive Productivity" Suite
 - 💤 **Dream Catcher (Sleep Learning)** - Farnsworth performs "offline memory consolidation" while idling, hallucinating questions it *should* have been asked to refine its own knowledge base.
 - 🏙️ **The Holodeck** - A 3D WebGL visualization of your codebase topology (Buildings = Classes, Height = LoC, Color = Complexity).
 - 🤫 **Cone of Silence (Focus Mode)** - System-level blocking of distraction sites (X/Reddit) during deep work sessions.
@@ -100,12 +127,13 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - ♾️ **Continual Learning (v1.5)** - Experience Replay & Elastic Consolidation
 - 🔮 **Causal Reasoning (v1.5)** - Causal graphs, interventions, and counterfactuals
 
-### Previously Added
+#### Previously Added
 - 🖼️ **Multimodal** - Vision (CLIP/BLIP) & Voice (Whisper) support
 - 📦 **Docker Support** - One-command deployment with GPU support
 - 👥 **Team Collaboration** - Shared memory pools, multi-user sessions
 - 🔍 **Advanced RAG** - Hybrid search with semantic layers
 
+</details>
 
 ---
 
@@ -137,6 +165,39 @@ Farnsworth can now manage assets and execute trades (Burner wallet recommended):
 
 ### 🧩 Systematic Reasoning
 - "Explain quantum tunneling using the Sequential Thinking tool."
+
+---
+
+## 🌐 P2P Network Node
+
+Turn your Farnsworth into a node in the global swarm:
+
+```bash
+# Basic node
+python main.py --node
+
+# Custom port with live dashboard
+python main.py --node --port 9999 --dashboard
+
+# Node without Planetary Memory sharing
+python main.py --node --no-planetary
+```
+
+### What Happens When You Run a Node
+
+| Capability | Description |
+|------------|-------------|
+| **Peer Discovery** | Automatically finds other Farnsworth nodes on your network via UDP broadcast |
+| **Knowledge Sharing** | Syncs the Decentralized Knowledge Graph (DKG) with peers |
+| **Planetary Memory** | Contributes anonymized skills to the global Akashic Record |
+| **Task Auctions** | Can bid on or delegate heavy computation tasks |
+
+### Node Dashboard
+
+When using `--dashboard`, you see live stats:
+```
+📊 Peers: 3 | DKG: 127 nodes, 89 edges | Messages seen: 1,247
+```
 
 ---
 
@@ -199,6 +260,28 @@ high_vram:   # 8GB+ VRAM: Full swarm with verification
 ---
 
 ## ⚡ Quick Start
+
+### 🤖 Install via Claude Code (Recommended)
+
+**Just paste this to Claude:**
+```
+Clone and set up Farnsworth from https://github.com/timowhite88/Farnsworth -
+it's a companion AI system with persistent memory, model swarms, and P2P networking.
+After cloning, run the setup wizard and help me configure it.
+```
+
+Claude will:
+1. Clone the repository
+2. Install dependencies
+3. Run the setup wizard (`python main.py --setup`)
+4. Help you configure Claude Desktop's MCP settings
+
+**Or give Claude a direct command:**
+```
+git clone https://github.com/timowhite88/Farnsworth.git && cd Farnsworth && pip install -r requirements.txt && python main.py --setup
+```
+
+---
 
 ### 📦 Option 1: One-Line Install (Recommended)
 
@@ -351,6 +434,44 @@ Farnsworth learns from your feedback and improves automatically:
 - **User Avatar** - Builds a model of your preferences
 - **LoRA Evolution** - Adapts model weights to your usage
 
+### 💰 Token Saving Mode (NEW v2.8.0)
+
+Reduce API costs by up to 70%:
+
+- **Daily Budget** - Set token limits with warnings at 80%/90%
+- **Response Cache** - Skip API calls for repeated queries
+- **Context Compression** - Smart summarization of long contexts
+- **Swarm Offloading** - Route simple tasks to local models
+
+### 🎭 Context Profiles (NEW v2.8.0)
+
+Switch between different working modes:
+
+| Profile | Personality | Use Case |
+|---------|-------------|----------|
+| 💼 Work | Formal, detailed | Professional tasks |
+| 🏠 Personal | Casual, normal | Personal projects |
+| 🎨 Creative | Casual, high-temp | Brainstorming, writing |
+| 🔧 Technical | Technical, precise | Debugging, architecture |
+
+```bash
+# CLI commands
+farnsworth> profiles        # List all profiles
+farnsworth> switch work     # Switch to Work profile
+farnsworth> profile         # Show current profile
+```
+
+### 🍅 Productivity Tools (NEW v2.8.0)
+
+Built-in productivity features:
+
+| Tool | Description |
+|------|-------------|
+| **Quick Notes** | Fast capture with tags: `note "idea #project"` |
+| **Snippet Manager** | Store and reuse code snippets with templates |
+| **Focus Timer** | Pomodoro timer with session tracking |
+| **Daily Summary** | Auto-generated activity digests |
+
 ### 🔍 Smart Retrieval (RAG 2.0)
 
 Self-refining retrieval that gets better at finding relevant information:
@@ -422,9 +543,14 @@ Once connected, Claude has access to these tools:
 | `farnsworth_voice(audio, task)` | Process audio (transcribe, diarize) |
 | `farnsworth_collaborate(action, ...)` | Team collaboration operations |
 | `farnsworth_swarm(prompt, strategy)` | Multi-model collaborative inference |
-| `farnsworth_project_create(name, desc)` | **NEW:** Create and track projects |
-| `farnsworth_project_status(id)` | **NEW:** Get project progress and tasks |
-| `farnsworth_project_detect(text)` | **NEW:** Auto-detect projects from conversations |
+| `farnsworth_project_create(name, desc)` | Create and track projects |
+| `farnsworth_project_status(id)` | Get project progress and tasks |
+| `farnsworth_project_detect(text)` | Auto-detect projects from conversations |
+| `farnsworth_token_status()` | **NEW:** Get token budget and cache stats |
+| `farnsworth_quick_note(content, tags)` | **NEW:** Add a quick note |
+| `farnsworth_focus_start(task)` | **NEW:** Start focus timer session |
+| `farnsworth_daily_summary()` | **NEW:** Generate daily activity summary |
+| `farnsworth_switch_profile(id)` | **NEW:** Switch context profile |
 
 ---
 
@@ -445,6 +571,15 @@ docker-compose -f docker/docker-compose.yml --profile ollama --profile chromadb 
 # Development mode (hot reload + debugger)
 docker-compose -f docker/docker-compose.yml --profile dev up -d
 ```
+
+### Docker Ports
+
+| Port | Service |
+|------|---------|
+| 8000 | MCP Server |
+| 8501 | Streamlit UI |
+| 8888/udp | P2P Discovery |
+| 9999 | P2P Swarm Fabric |
 
 See [docker/docker-compose.yml](docker/docker-compose.yml) for all options.
 

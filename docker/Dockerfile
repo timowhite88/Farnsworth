@@ -23,7 +23,7 @@ FROM python:3.11-slim as runtime
 # Labels
 LABEL org.opencontainers.image.title="Farnsworth"
 LABEL org.opencontainers.image.description="Self-Evolving Companion AI for Claude Code"
-LABEL org.opencontainers.image.version="2.1.0-alpha"
+LABEL org.opencontainers.image.version="2.8.0"
 LABEL org.opencontainers.image.source="https://github.com/timowhite88/Farnsworth"
 
 # Environment variables

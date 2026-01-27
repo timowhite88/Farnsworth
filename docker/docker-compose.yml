@@ -190,6 +190,37 @@ services:
     networks:
       - farnsworth-network
 
+  # ============ P2P Node Service ============
+  node:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    image: farnsworth:node
+    container_name: farnsworth-node
+    restart: unless-stopped
+    profiles:
+      - node
+
+    ports:
+      - "8888:8888/udp" # P2P Discovery
+      - "9999:9999" # P2P Swarm Fabric
+
+    volumes:
+      - farnsworth-data:/data
+      - farnsworth-config:/config
+      - farnsworth-models:/models
+
+    environment:
+      - FARNSWORTH_LOG_LEVEL=INFO
+      - FARNSWORTH_ISOLATED=false
+      - FARNSWORTH_P2P_PORT=9999
+
+    command: [ "python", "main.py", "--node", "--dashboard" ]
+
+    networks:
+      - farnsworth-network
+
   # ============ Development Service ============
   dev:
     build:

@@ -12,11 +12,15 @@
 4. [Using with Claude Code](#using-with-claude-code)
 5. [Memory System](#memory-system)
 6. [Agent Swarm](#agent-swarm)
-7. [Evolution & Learning](#evolution--learning)
-8. [Dashboard UI](#dashboard-ui)
-9. [Configuration](#configuration)
-10. [Troubleshooting](#troubleshooting)
-11. [FAQ](#faq)
+7. [P2P Network Node](#p2p-network-node)
+8. [Token Saving Mode](#token-saving-mode)
+9. [Productivity Tools](#productivity-tools)
+10. [Context Profiles](#context-profiles)
+11. [Evolution & Learning](#evolution--learning)
+12. [Dashboard UI](#dashboard-ui)
+13. [Configuration](#configuration)
+14. [Troubleshooting](#troubleshooting)
+15. [FAQ](#faq)
 
 ---
 
@@ -54,6 +58,26 @@ All processing happens locally - your data never leaves your machine.
 - **Claude Code** (installed and working)
 - **8GB RAM minimum** (16GB recommended)
 - **Windows 10+, macOS 11+, or Linux**
+
+### Option A: Install via Claude (Easiest)
+
+Just paste this to Claude Code:
+
+```
+Clone and set up Farnsworth from https://github.com/timowhite88/Farnsworth -
+it's a companion AI system with persistent memory and P2P networking.
+Run the setup wizard after cloning.
+```
+
+Or give Claude a direct command:
+
+```bash
+git clone https://github.com/timowhite88/Farnsworth.git && cd Farnsworth && pip install -r requirements.txt && python main.py --setup
+```
+
+Claude will handle the entire installation process.
+
+### Option B: Manual Installation
 
 ### Step 1: Clone the Repository
 
@@ -303,6 +327,245 @@ If you do not want your agent to communicate with others:
 2. Select **YES** for "Enable ISOLATED MODE"
 3. This hard-disables all UDP discovery and TCP swarm listening.
 
+---
+
+## P2P Network Node
+
+### Running as a Node
+
+Transform your Farnsworth instance into a P2P network participant:
+
+```bash
+# Basic node startup
+python main.py --node
+
+# Custom port with live dashboard
+python main.py --node --port 9999 --dashboard
+
+# Without Planetary Memory sharing
+python main.py --node --no-planetary
+```
+
+### Node Capabilities
+
+| Feature | Description |
+|---------|-------------|
+| **Peer Discovery** | UDP broadcast on port 8888 finds nearby nodes |
+| **Knowledge Sharing** | DKG syncs facts across trusted peers |
+| **Planetary Memory** | Anonymized skill sharing (opt-out with `--no-planetary`) |
+| **Task Auctions** | Distribute compute-heavy tasks to idle peers |
+
+### CLI Commands
+
+Once in CLI mode (`python main.py --cli`):
+
+```
+farnsworth> node start     # Start P2P node in background
+farnsworth> node status    # Show peers, DKG stats
+farnsworth> node stop      # Stop the node
+farnsworth> planetary      # Show Planetary Memory stats
+```
+
+### Network Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Your Farnsworth Node                      │
+│                                                             │
+│  ┌──────────┐   UDP 8888   ┌──────────────────────────┐    │
+│  │ Discovery│ ◄──────────► │  Peer Nodes (LAN/WAN)    │    │
+│  └──────────┘              └──────────────────────────┘    │
+│       │                                                     │
+│       ▼                                                     │
+│  ┌──────────┐   TCP 9999   ┌──────────────────────────┐    │
+│  │ Gossip   │ ◄──────────► │  Knowledge Exchange      │    │
+│  │ Protocol │              │  - DKG Sync              │    │
+│  └──────────┘              │  - Skill Broadcast       │    │
+│                            │  - Task Auctions         │    │
+│                            └──────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Token Saving Mode
+
+### Overview
+
+Reduce API costs by up to 70% with intelligent token management:
+
+- **Budget Tracking** - Daily limits with warnings
+- **Response Caching** - Skip redundant API calls
+- **Context Compression** - Reduce input tokens
+- **Swarm Offloading** - Use local models for simple tasks
+
+### CLI Commands
+
+```
+farnsworth> tokens    # Show budget status and usage
+farnsworth> cache     # Show response cache stats
+```
+
+### Budget Tracking
+
+Set daily token limits in your `.env`:
+
+```bash
+FARNSWORTH_DAILY_TOKEN_LIMIT=100000
+FARNSWORTH_BUDGET_WARNING=0.8  # Warn at 80%
+```
+
+When you approach limits, Farnsworth will:
+1. Warn you at 80% and 90% thresholds
+2. Automatically enable compression
+3. Prefer cached responses
+4. Route to local models when possible
+
+### Context Compression
+
+Three compression strategies:
+
+| Strategy | Description | Token Reduction |
+|----------|-------------|-----------------|
+| **Smart** | Summarize with local LLM | 50-70% |
+| **Extractive** | Keep key sentences only | 30-50% |
+| **Truncate** | Simple length limit | Fixed |
+
+### Response Caching
+
+Common responses are cached with TTL:
+
+```
+📦 Response Cache
+   Entries: 47 / 100
+   TTL: 24 hours
+
+   Recent hits: "What is X?" → cached 2h ago
+```
+
+---
+
+## Productivity Tools
+
+### Quick Notes
+
+Capture ideas instantly with tagging:
+
+```bash
+# CLI
+farnsworth> note "Meeting notes from standup #work #team"
+farnsworth> notes        # List recent notes
+
+# Tags are extracted from #hashtags
+farnsworth> note "Great API design idea #api #architecture"
+```
+
+Notes are stored locally and searchable via memory recall.
+
+### Snippet Manager
+
+Store and reuse code snippets:
+
+```bash
+farnsworth> snippets     # List all snippets
+
+# Snippets support template variables:
+# {{ name }}, {{ date }}, etc.
+```
+
+Create snippets through the dashboard or by asking Claude.
+
+### Focus Timer (Pomodoro)
+
+Built-in Pomodoro-style productivity timer:
+
+```bash
+farnsworth> focus start     # Start 25-minute work session
+farnsworth> focus stop      # Stop current session
+farnsworth> focus           # Show timer status
+```
+
+Timer features:
+- 25-minute work sessions (configurable)
+- 5-minute short breaks
+- 15-minute long breaks (every 4 sessions)
+- Session history and statistics
+- Optional callbacks for notifications
+
+### Daily Summary
+
+Auto-generated productivity reports:
+
+```bash
+farnsworth> summary    # Generate today's summary
+```
+
+Summaries include:
+- Key accomplishments (from memory)
+- Focus time statistics
+- Task completion count
+- AI-generated insights
+- Suggested priorities for tomorrow
+
+---
+
+## Context Profiles
+
+### What Are Profiles?
+
+Context profiles let you switch between different working modes, each with its own:
+
+- Memory pool (isolated or shared)
+- Personality style (formal, casual, technical)
+- Temperature settings
+- Domain keywords for auto-detection
+
+### Default Profiles
+
+| Profile | Icon | Personality | Best For |
+|---------|------|-------------|----------|
+| **Work** | 💼 | Formal, detailed | Professional tasks |
+| **Personal** | 🏠 | Casual, normal | Personal projects |
+| **Creative** | 🎨 | Casual, high-temp (0.9) | Brainstorming, writing |
+| **Technical** | 🔧 | Technical, precise (0.5) | Debugging, code review |
+
+### CLI Commands
+
+```bash
+farnsworth> profiles       # List all profiles
+farnsworth> profile        # Show current active profile
+farnsworth> switch work    # Switch to Work profile
+farnsworth> switch creative # Switch to Creative profile
+```
+
+### Profile Settings
+
+Each profile controls:
+
+```yaml
+# Example: Technical Profile
+id: technical
+name: Technical
+personality: technical    # technical, formal, casual
+verbosity: detailed       # minimal, normal, detailed
+temperature: 0.5          # Lower = more deterministic
+memory_pool: technical    # Separate memory namespace
+code_preference: true     # Include code examples
+domain_keywords:
+  - debug
+  - error
+  - code
+  - api
+  - architecture
+```
+
+### Auto-Detection
+
+Profiles can auto-activate based on keywords in your messages:
+
+- Mention "debug" or "error" → Technical profile suggested
+- Mention "brainstorm" or "idea" → Creative profile suggested
+- Mention "meeting" or "deadline" → Work profile suggested
 
 ---
 
@@ -735,6 +998,39 @@ A: The system keeps the best configurations and only applies improvements that p
 
 **Q: Can I reset evolution?**
 A: Yes, delete `data/evolution/` to start fresh.
+
+### P2P Networking
+
+**Q: Is my data shared when running as a node?**
+A: Only if you enable Planetary Memory. Use `--no-planetary` to disable sharing. DKG facts are shared with peers but can be controlled via trust settings.
+
+**Q: Can I run a node behind NAT/firewall?**
+A: Yes, for LAN discovery. For WAN connectivity, you may need to forward ports 8888/UDP and 9999/TCP.
+
+**Q: How do I find other nodes?**
+A: Nodes are discovered automatically via UDP broadcast on your local network. For remote nodes, you can manually add peers in the config.
+
+### Token Saving
+
+**Q: How much can I save on API costs?**
+A: Typically 40-70% depending on your usage patterns. Caching repeated queries and context compression provide the biggest savings.
+
+**Q: Does compression affect response quality?**
+A: Minimally. Smart compression uses summarization to preserve key information. For critical tasks, compression can be disabled.
+
+**Q: Can I set different budgets for different profiles?**
+A: Not yet, but this is planned for v2.9.0.
+
+### Productivity Tools
+
+**Q: Where are my notes stored?**
+A: In `data/notes/` as JSON files. They're also indexed in memory for semantic search.
+
+**Q: Can I export my focus timer stats?**
+A: Yes, they're stored in `data/focus/focus_history.json`.
+
+**Q: Do profiles sync between machines?**
+A: Not automatically, but you can export/import profiles via the CLI or copy the `data/profiles/` directory.
 
 ---
 
