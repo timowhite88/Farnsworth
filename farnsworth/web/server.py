@@ -240,6 +240,338 @@ def is_safe_input(text: str) -> tuple[bool, str]:
             return False, f"Blocked pattern detected. This is a chat interface, not a code execution environment."
     return True, ""
 
+
+# ============================================
+# INTELLIGENT CRYPTO QUERY PARSER
+# ============================================
+
+class CryptoQueryParser:
+    """
+    Parses natural language to detect crypto/token queries and contract addresses.
+    Automatically triggers appropriate tools.
+    """
+
+    # Solana address pattern (base58, 32-44 chars)
+    SOLANA_ADDRESS_PATTERN = r'\b[1-9A-HJ-NP-Za-km-z]{32,44}\b'
+
+    # Ethereum address pattern (0x + 40 hex chars)
+    ETH_ADDRESS_PATTERN = r'\b0x[a-fA-F0-9]{40}\b'
+
+    # Natural language patterns for different intents
+    INTENT_PATTERNS = {
+        'price_check': [
+            r'(?i)(?:what(?:\'s| is) (?:the )?price (?:of |for )?)',
+            r'(?i)(?:how much is )',
+            r'(?i)(?:price (?:of |for )?)',
+            r'(?i)(?:check (?:the )?price)',
+            r'(?i)(?:\$?\d+(?:\.\d+)?\s*(?:usd|dollars?)?\s*(?:of|worth|in)\s+)',
+        ],
+        'rug_check': [
+            r'(?i)(?:is .* (?:safe|legit|a rug|rugged|honeypot))',
+            r'(?i)(?:rug (?:check|scan|test))',
+            r'(?i)(?:check (?:if )?.*(?:safe|rug|scam))',
+            r'(?i)(?:scan (?:for )?(?:rug|scam|honeypot))',
+            r'(?i)(?:safety (?:check|scan|analysis))',
+            r'(?i)(?:is this (?:token |coin )?safe)',
+        ],
+        'token_info': [
+            r'(?i)(?:what is |tell me about |info (?:on |about )?|lookup |look up )',
+            r'(?i)(?:search (?:for )?)',
+            r'(?i)(?:find (?:token |coin )?)',
+            r'(?i)(?:show me )',
+        ],
+        'whale_track': [
+            r'(?i)(?:whale (?:track|watch|activity|alert))',
+            r'(?i)(?:track (?:this )?wallet)',
+            r'(?i)(?:what(?:\'s| is) (?:this )?wallet doing)',
+            r'(?i)(?:wallet activity)',
+        ],
+        'market_sentiment': [
+            r'(?i)(?:market (?:sentiment|mood|fear|greed))',
+            r'(?i)(?:fear (?:and |& )?greed)',
+            r'(?i)(?:how(?:\'s| is) the market)',
+            r'(?i)(?:market (?:feeling|vibes))',
+        ]
+    }
+
+    # Common token name patterns
+    TOKEN_NAMES = [
+        r'(?i)\b(sol|solana)\b',
+        r'(?i)\b(btc|bitcoin)\b',
+        r'(?i)\b(eth|ethereum)\b',
+        r'(?i)\b(bonk|wif|dogwifhat|jup|jupiter|ray|raydium|orca)\b',
+        r'(?i)\b(usdc|usdt|tether)\b',
+        r'(?i)\$([a-zA-Z]{2,10})\b',  # $TICKER format
+    ]
+
+    @classmethod
+    def parse(cls, message: str) -> dict:
+        """
+        Parse a message for crypto-related queries.
+        Returns: {
+            'has_crypto_query': bool,
+            'intent': str or None,
+            'addresses': list of detected addresses,
+            'token_mentions': list of token names,
+            'query': extracted query string
+        }
+        """
+        import re
+        result = {
+            'has_crypto_query': False,
+            'intent': None,
+            'addresses': [],
+            'token_mentions': [],
+            'query': None,
+            'original': message
+        }
+
+        # Detect Solana addresses
+        sol_addresses = re.findall(cls.SOLANA_ADDRESS_PATTERN, message)
+        eth_addresses = re.findall(cls.ETH_ADDRESS_PATTERN, message)
+        result['addresses'] = sol_addresses + eth_addresses
+
+        # Detect token mentions
+        for pattern in cls.TOKEN_NAMES:
+            matches = re.findall(pattern, message)
+            result['token_mentions'].extend(matches)
+
+        # Detect intent
+        for intent, patterns in cls.INTENT_PATTERNS.items():
+            for pattern in patterns:
+                if re.search(pattern, message):
+                    result['intent'] = intent
+                    result['has_crypto_query'] = True
+                    break
+            if result['intent']:
+                break
+
+        # If we found addresses but no intent, default to token_info
+        if result['addresses'] and not result['intent']:
+            result['intent'] = 'token_info'
+            result['has_crypto_query'] = True
+
+        # Extract the query (token name or address)
+        if result['addresses']:
+            result['query'] = result['addresses'][0]
+        elif result['token_mentions']:
+            result['query'] = result['token_mentions'][0]
+        else:
+            # Try to extract token name from message
+            # Remove common prefixes
+            cleaned = re.sub(r'(?i)^(what(?:\'s| is) (?:the )?price (?:of |for )?)', '', message)
+            cleaned = re.sub(r'(?i)^(is |check |scan |search |find |lookup |look up )', '', cleaned)
+            cleaned = re.sub(r'(?i)(safe|legit|a rug|rugged|honeypot|\?|!|\.)+$', '', cleaned)
+            cleaned = cleaned.strip()
+            if cleaned and len(cleaned) < 50:
+                result['query'] = cleaned
+
+        return result
+
+    @classmethod
+    async def execute_tool(cls, parsed: dict) -> dict:
+        """Execute the appropriate tool based on parsed intent."""
+        intent = parsed.get('intent')
+        query = parsed.get('query')
+        addresses = parsed.get('addresses', [])
+
+        if not intent or not query:
+            return None
+
+        result = {
+            'tool_used': intent,
+            'query': query,
+            'success': False,
+            'data': None,
+            'formatted': ''
+        }
+
+        try:
+            if intent == 'price_check' or intent == 'token_info':
+                # Use DexScreener for token lookup
+                result['data'] = await cls._token_lookup(query)
+                result['success'] = True
+                result['formatted'] = cls._format_token_info(result['data'], query)
+
+            elif intent == 'rug_check':
+                address = addresses[0] if addresses else query
+                result['data'] = await cls._rug_check(address)
+                result['success'] = True
+                result['formatted'] = cls._format_rug_check(result['data'], address)
+
+            elif intent == 'whale_track':
+                address = addresses[0] if addresses else query
+                result['data'] = await cls._whale_track(address)
+                result['success'] = True
+                result['formatted'] = cls._format_whale_track(result['data'], address)
+
+            elif intent == 'market_sentiment':
+                result['data'] = await cls._market_sentiment()
+                result['success'] = True
+                result['formatted'] = cls._format_sentiment(result['data'])
+
+        except Exception as e:
+            logger.error(f"Crypto tool error: {e}")
+            result['error'] = str(e)
+
+        return result
+
+    @classmethod
+    async def _token_lookup(cls, query: str) -> dict:
+        """Look up token info via DexScreener."""
+        try:
+            from farnsworth.integration.financial.dexscreener import DexScreenerClient
+            client = DexScreenerClient()
+            return await client.search_pairs(query)
+        except ImportError:
+            # Fallback to direct API call
+            import httpx
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    url = f"https://api.dexscreener.com/latest/dex/search?q={query}"
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        return resp.json()
+            except Exception as e:
+                logger.warning(f"DexScreener API call failed: {e}")
+            return {"pairs": [], "demo": True}
+
+    @classmethod
+    async def _rug_check(cls, address: str) -> dict:
+        """Check token for rug risks."""
+        try:
+            from farnsworth.integration.solana.degen_mob import DeGenMob
+            degen = DeGenMob()
+            return await degen.analyze_token_safety(address)
+        except ImportError:
+            return {
+                "address": address,
+                "demo": True,
+                "message": "Full rug detection requires local Farnsworth install"
+            }
+
+    @classmethod
+    async def _whale_track(cls, address: str) -> dict:
+        """Track whale wallet."""
+        try:
+            from farnsworth.integration.solana.degen_mob import DeGenMob
+            degen = DeGenMob()
+            return await degen.get_whale_recent_activity(address)
+        except ImportError:
+            return {
+                "address": address,
+                "demo": True,
+                "message": "Whale tracking requires local Farnsworth install"
+            }
+
+    @classmethod
+    async def _market_sentiment(cls) -> dict:
+        """Get market sentiment."""
+        try:
+            from farnsworth.integration.financial.market_sentiment import MarketSentiment
+            sentiment = MarketSentiment()
+            return await sentiment.get_fear_and_greed()
+        except ImportError:
+            return {"index": 50, "classification": "Neutral", "demo": True}
+
+    @classmethod
+    def _format_token_info(cls, data: dict, query: str) -> str:
+        """Format token info for chat display."""
+        pairs = data.get('pairs', [])
+        if not pairs:
+            return f"🔍 No trading pairs found for **{query}**. Try a contract address or different name."
+
+        # Get first/best pair
+        pair = pairs[0]
+        name = pair.get('baseToken', {}).get('name', query)
+        symbol = pair.get('baseToken', {}).get('symbol', '???')
+        price = pair.get('priceUsd', 'N/A')
+        price_change = pair.get('priceChange', {}).get('h24', 0)
+        volume = pair.get('volume', {}).get('h24', 0)
+        liquidity = pair.get('liquidity', {}).get('usd', 0)
+        dex = pair.get('dexId', 'Unknown')
+
+        change_emoji = '📈' if float(price_change or 0) >= 0 else '📉'
+
+        return f"""🪙 **{name}** (${symbol})
+
+💰 **Price:** ${price}
+{change_emoji} **24h Change:** {price_change}%
+📊 **24h Volume:** ${volume:,.0f}
+💧 **Liquidity:** ${liquidity:,.0f}
+🏪 **DEX:** {dex}
+
+_{len(pairs)} trading pair(s) found_"""
+
+    @classmethod
+    def _format_rug_check(cls, data: dict, address: str) -> str:
+        """Format rug check results."""
+        if data.get('demo'):
+            return f"""🔍 **Rug Check** for `{address[:8]}...{address[-4:]}`
+
+⚠️ Full safety analysis requires local Farnsworth install with Solana dependencies.
+
+**Quick Tips:**
+- Check if mint authority is revoked
+- Look for locked liquidity
+- Verify contract is open source
+- Check holder distribution"""
+
+        # Real data formatting
+        score = data.get('rug_score', 'N/A')
+        mint_auth = data.get('mint_authority', 'Unknown')
+        freeze_auth = data.get('freeze_authority', 'Unknown')
+
+        return f"""🔍 **Rug Check Results**
+
+📍 **Address:** `{address[:8]}...{address[-4:]}`
+🎯 **Rug Score:** {score}
+🔑 **Mint Authority:** {mint_auth}
+❄️ **Freeze Authority:** {freeze_auth}
+
+{data.get('recommendation', '')}"""
+
+    @classmethod
+    def _format_whale_track(cls, data: dict, address: str) -> str:
+        """Format whale tracking results."""
+        if data.get('demo'):
+            return f"""🐋 **Whale Tracker** for `{address[:8]}...{address[-4:]}`
+
+⚠️ Real-time whale tracking requires local Farnsworth install.
+
+Use the full desktop app for:
+- Transaction monitoring
+- Wallet copying alerts
+- Large movement notifications"""
+
+        return f"""🐋 **Whale Activity**
+
+📍 **Wallet:** `{address[:8]}...{address[-4:]}`
+💰 **Total Value:** {data.get('total_value', 'N/A')}
+⏰ **Last Active:** {data.get('last_active', 'N/A')}
+
+**Recent Transactions:**
+{chr(10).join(data.get('recent_transactions', ['No recent activity'])[:5])}"""
+
+    @classmethod
+    def _format_sentiment(cls, data: dict) -> str:
+        """Format market sentiment."""
+        index = data.get('index', data.get('value', 50))
+        classification = data.get('classification', 'Neutral')
+
+        emoji = '😨' if index < 25 else '😰' if index < 45 else '😐' if index < 55 else '😊' if index < 75 else '🤑'
+
+        return f"""🌡️ **Market Sentiment**
+
+{emoji} **Fear & Greed Index:** {index}/100
+📊 **Classification:** {classification}
+
+{"⚠️ Extreme fear often signals buying opportunities" if index < 25 else "⚠️ Extreme greed often signals selling opportunities" if index > 75 else "Market is relatively balanced"}"""
+
+
+# Global parser instance
+crypto_parser = CryptoQueryParser()
+
 # Get paths
 WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
@@ -934,8 +1266,50 @@ SWARM_PERSONAS = {
 
 
 async def generate_swarm_responses(message: str, history: List[dict] = None):
-    """Generate responses from multiple swarm models."""
+    """Generate responses from multiple swarm models with crypto query detection."""
     responses = []
+
+    # Check for crypto queries FIRST
+    parsed = crypto_parser.parse(message)
+
+    if parsed['has_crypto_query']:
+        # Execute the crypto tool
+        tool_result = await crypto_parser.execute_tool(parsed)
+
+        if tool_result and tool_result.get('success'):
+            # Add a special "tool response" from the swarm
+            responses.append({
+                "bot_name": "Swarm-Mind",
+                "emoji": "🐝",
+                "content": f"🔧 *The swarm detected a {parsed['intent'].replace('_', ' ')} query!*\n\n{tool_result['formatted']}",
+                "color": "#f59e0b",
+                "is_tool_response": True
+            })
+
+            # Still let some bots comment on the result
+            import random
+            if random.random() > 0.5:
+                comment_bot = random.choice(["Farnsworth", "DeepSeek", "Phi"])
+                persona = SWARM_PERSONAS[comment_bot]
+
+                if OLLAMA_AVAILABLE:
+                    try:
+                        comment_prompt = f"User asked about {parsed['query']}. Give a brief 1-2 sentence comment about crypto trading or this token. Be {persona['style'][:50]}..."
+                        comment_response = ollama.chat(
+                            model=PRIMARY_MODEL,
+                            messages=[{"role": "user", "content": comment_prompt}],
+                            options={"temperature": 0.8, "num_predict": 80}
+                        )
+                        responses.append({
+                            "bot_name": comment_bot,
+                            "emoji": persona["emoji"],
+                            "content": comment_response["message"]["content"],
+                            "color": persona["color"]
+                        })
+                    except:
+                        pass
+
+            return responses
 
     # Build context from recent history
     context_messages = []
@@ -1276,7 +1650,7 @@ async def index(request: Request):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """Handle chat messages with security validation."""
+    """Handle chat messages with security validation and crypto query detection."""
     try:
         if not request.message:
             raise HTTPException(status_code=400, detail="Message is required")
@@ -1291,6 +1665,31 @@ async def chat(request: ChatRequest):
                 "demo_mode": DEMO_MODE
             })
 
+        # Check for crypto/token queries
+        parsed = crypto_parser.parse(request.message)
+
+        if parsed['has_crypto_query']:
+            # Execute the appropriate crypto tool
+            tool_result = await crypto_parser.execute_tool(parsed)
+
+            if tool_result and tool_result.get('success'):
+                # Combine tool result with AI commentary
+                ai_intro = generate_ai_response(
+                    f"User asked about {parsed['intent']} for {parsed['query']}. Provide brief commentary.",
+                    []
+                )
+                response = f"{ai_intro}\n\n{tool_result['formatted']}"
+
+                return JSONResponse({
+                    "response": response,
+                    "demo_mode": DEMO_MODE,
+                    "features_available": True,
+                    "training_mode": is_training_mode_active(),
+                    "tool_used": tool_result['tool_used'],
+                    "crypto_query": True
+                })
+
+        # Regular chat response
         response = generate_ai_response(
             request.message,
             request.history or []

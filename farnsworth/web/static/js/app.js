@@ -512,6 +512,12 @@ ${trainingIntro}Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, y
 - 🤔 **Thinking** - Step-by-step reasoning
 ${isTraining ? '- 🐝 **Swarm Chat** - Train with the community!' : ''}
 
+**🪙 Crypto Tools - Just Ask Naturally:**
+- "What's the price of SOL?" or "Check $BONK"
+- "Is this safe?" + paste a contract address
+- "Rug check 9crfy4udr..." (paste any CA)
+- "How's the market?" for sentiment
+
 Try the sidebar panels or ask me anything! Now, what shall we work on? *rubs hands excitedly*`;
 
     addMessage(welcomeMsg, 'assistant');
@@ -1926,10 +1932,13 @@ function addSwarmWelcomeMessage() {
                     <span>System learns in real-time</span>
                 </div>
                 <div class="swarm-feature">
-                    <span class="feature-icon">🌍</span>
-                    <span>Knowledge shared to Planetary Memory</span>
+                    <span class="feature-icon">🪙</span>
+                    <span>Ask about any token or CA!</span>
                 </div>
             </div>
+            <p class="swarm-crypto-hint">
+                <strong>🔍 Try:</strong> "Price of $SOL" • "Is this safe? [paste CA]" • "Rug check [address]"
+            </p>
             <p class="swarm-bots">
                 <strong>Active Bots:</strong>
                 🧠 Farnsworth • 🔮 DeepSeek • ⚡ Phi • 🐝 Swarm-Mind

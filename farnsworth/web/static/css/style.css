@@ -2428,12 +2428,42 @@ body:has(.training-banner.active) .chat-section {
     font-size: 1.2rem;
 }
 
+.swarm-crypto-hint {
+    margin-top: 1rem;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(139, 92, 246, 0.1));
+    border-radius: 8px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    font-size: 0.85rem;
+    color: var(--warning);
+}
+
+.swarm-crypto-hint strong {
+    color: var(--text-primary);
+}
+
 .swarm-bots {
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid var(--glass-border);
     font-size: 0.9rem;
     color: var(--text-muted);
+}
+
+/* Crypto tool response styling */
+.message.bot .message-bubble.tool-response {
+    border-left: 3px solid var(--warning);
+    background: linear-gradient(135deg, var(--glass-bg), rgba(245, 158, 11, 0.05));
+}
+
+.crypto-result {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.crypto-result strong {
+    color: var(--warning);
 }
 
 /* Swarm Messages */
