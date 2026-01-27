@@ -402,6 +402,27 @@ embeddings:
 
 # Hardware profiles for automatic model selection
 hardware_profiles:
+  # MAX EVERYTHING - For users with massive hardware
+  max:
+    description: "MAX MODE: Unlimited resources, best quality, all features"
+    models:
+      - "minimax-m2"
+      - "phi-4-mini-reasoning"
+      - "deepseek-r1-7b"
+      - "phi-4-mini"
+      - "phi-4-multimodal"
+      - "qwen3-4b"
+      - "deepseek-r1-1.5b"
+    embedding: "nomic-embed-text"
+    swarm_enabled: true
+    swarm_strategy: "parallel_vote"
+    max_parallel: 8
+    enable_cloud: true
+    enable_multimodal: true
+    enable_speculation: true
+    context_window: 128000
+    notes: "Uses ALL available models including cloud APIs for maximum quality"
+
   # Under 4GB total RAM
   minimal:
     description: "Minimal hardware (< 4GB RAM)"
@@ -653,6 +674,42 @@ swarm:
         role: "speed"
     enable_verification: true
     max_parallel: 5
+
+  # MAX EVERYTHING - Ultimate swarm for massive hardware
+  max:
+    description: "MAXIMUM POWER - All models, parallel voting, cloud + local"
+    strategy: "parallel_vote"
+    use_local_only: false
+    enable_cloud: true
+    models:
+      - id: "minimax-m2"
+        role: "coding"
+        weight: 1.0
+        cloud: true
+      - id: "phi-4-mini-reasoning"
+        role: "reasoning"
+        weight: 1.0
+      - id: "deepseek-r1-7b"
+        role: "reasoning"
+        weight: 0.95
+      - id: "phi-4-mini"
+        role: "quality"
+        weight: 0.9
+      - id: "qwen3-4b"
+        role: "generalist"
+        weight: 0.85
+      - id: "deepseek-r1-1.5b"
+        role: "speed-reasoning"
+        weight: 0.8
+      - id: "phi-4-multimodal"
+        role: "multimodal"
+        weight: 0.8
+    enable_verification: true
+    verification_model: "phi-4-mini-reasoning"
+    max_parallel: 8
+    voting_threshold: 0.6
+    context_window: 128000
+    notes: "Run ALL models in parallel, vote on best response, verify with reasoning model"
 
 # Speculative decoding pairs (draft + target)
 speculative_decoding:

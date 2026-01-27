@@ -449,6 +449,8 @@ Farnsworth is not just an agent; it is a **Neuromorphic Cognitive Architecture**
 
 | Model | Params | RAM | Strengths |
 |-------|--------|-----|-----------|
+| **MiniMax-M2** ☁️ | 230B (10B active) | API | SOTA coding, SWE-Bench, agentic |
+| **MiniMax-M2.1** ☁️ | 230B (10B active) | API | Multi-language code, office automation |
 | **Phi-4-mini-reasoning** | 3.8B | 6GB | Rivals o1-mini in math/reasoning |
 | **Phi-4-mini** | 3.8B | 6GB | GPT-3.5 class, 128K context |
 | **DeepSeek-R1-1.5B** | 1.5B | 4GB | o1-style reasoning, MIT license |
@@ -460,6 +462,8 @@ Farnsworth is not just an agent; it is a **Neuromorphic Cognitive Architecture**
 | **Gemma-3n-E2B** | 2B eff | 4GB | Multimodal (text/image/audio) |
 | **Phi-4-multimodal** | 5.6B | 8GB | Vision + speech + reasoning |
 
+☁️ = Cloud API (requires `DEEPINFRA_API_KEY` or `MINIMAX_API_KEY`)
+
 ### Hardware Profiles
 
 Farnsworth auto-configures based on your hardware:
@@ -470,7 +474,65 @@ cpu_only:    # 8GB+ RAM, no GPU: BitNet, SmolLM2
 low_vram:    # 2-4GB VRAM: DeepSeek-R1, Qwen3-0.6B
 medium_vram: # 4-8GB VRAM: Phi-4-mini, Qwen3-4B
 high_vram:   # 8GB+ VRAM: Full swarm with verification
+max:         # UNLIMITED: All models + cloud APIs + max parallel
 ```
+
+### 🚀 MAX MODE (For Massive Hardware)
+
+If you have powerful hardware (16GB+ VRAM, 32GB+ RAM) and want maximum quality:
+
+```bash
+# Set in .env
+FARNSWORTH_HARDWARE_PROFILE=max
+DEEPINFRA_API_KEY=your_key_here  # For MiniMax M2 coding model
+```
+
+**MAX Mode Features:**
+| Feature | Description |
+|---------|-------------|
+| **8 parallel models** | All models run simultaneously |
+| **Cloud + Local** | MiniMax M2 + local swarm combined |
+| **128K context** | Full context window support |
+| **Parallel voting** | Best-of-N response selection |
+| **Multimodal** | Vision + audio enabled |
+| **Speculative decoding** | 2-3x faster inference |
+
+**MAX Swarm Models:**
+- `minimax-m2` - 230B MoE coding specialist (cloud)
+- `phi-4-mini-reasoning` - Math/logic expert (local)
+- `deepseek-r1-7b` - Chain-of-thought reasoning (local)
+- `phi-4-mini` - General quality (local)
+- `phi-4-multimodal` - Vision + audio (local)
+- `qwen3-4b` - Multilingual generalist (local)
+
+### Token-Saving Mode (Default)
+
+For most users, Farnsworth uses **local-first inference** to save tokens:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Query arrives                                          │
+│       │                                                 │
+│       ▼                                                 │
+│  ┌─────────────┐                                       │
+│  │ Local Swarm │ ◄── qwen3-0.6b, deepseek-r1, phi-4   │
+│  │ (FREE)      │                                       │
+│  └──────┬──────┘                                       │
+│         │                                               │
+│         ▼                                               │
+│  Confidence > 40%? ───YES───► Return Response          │
+│         │                                               │
+│         NO (Complex task)                              │
+│         │                                               │
+│         ▼                                               │
+│  ┌─────────────┐                                       │
+│  │ Cloud Model │ ◄── MiniMax M2 (API call)            │
+│  │ (API cost)  │                                       │
+│  └─────────────┘                                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Memory operations always use tiny local models** (qwen3-0.6b, tinyllama) to preserve context window.
 
 ---
 
