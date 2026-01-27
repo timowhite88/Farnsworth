@@ -2,18 +2,30 @@
 # https://smithery.ai
 
 name: farnsworth
-version: 2.8.0
+version: 2.9.0
 description: |
-  Farnsworth - Your Claude Companion AI with superpowers: persistent memory,
-  model swarms, multimodal understanding, P2P networking, and self-evolution.
+  Farnsworth - Your Claude Companion AI with superpowers!
 
-  Give Claude infinite memory, specialist agents, Solana trading tools,
-  and distributed knowledge sharing.
+  Give Claude Code capabilities it doesn't have on its own:
+  - Persistent Memory: Claude remembers your preferences forever
+  - Model Swarm: 12+ models collaborate via PSO optimization
+  - Multimodal: Vision (CLIP/BLIP) + Voice (Whisper) understanding
+  - Self-Evolution: Learns from feedback via genetic optimization
+  - P2P Networking: Join the global Farnsworth swarm
+  - Solana Trading: DeGen Mob suite for whale watching, rug detection, trading
+  - Productivity: Notes, focus timer, context profiles, daily summaries
+
+  All processing runs locally on your machine. Your data never leaves your computer.
+
+  Live Demo: https://ai.farnsworth.cloud
+
+  "Good news, everyone!" - Professor Farnsworth
 
 author: timowhite88
-license: MIT
+license: Dual (Free + Commercial)
 repository: https://github.com/timowhite88/Farnsworth
-homepage: https://github.com/timowhite88/Farnsworth
+homepage: https://ai.farnsworth.cloud
+documentation: https://github.com/timowhite88/Farnsworth/blob/main/docs/USER_GUIDE.md
 
 # Server configuration
 startCommand:
@@ -66,16 +78,35 @@ categories:
 keywords:
   - memory
   - persistent memory
+  - infinite memory
   - agents
   - swarm
+  - model swarm
   - solana
   - trading
+  - defi
+  - degen
+  - whale watching
   - p2p
+  - peer-to-peer
   - evolution
+  - self-improvement
   - vision
+  - image understanding
   - voice
+  - transcription
   - productivity
   - knowledge graph
+  - RAG
+  - retrieval
+  - multimodal
+  - local AI
+  - privacy
+  - offline
+  - claude companion
+  - claude code
+  - farnsworth
+  - futurama
 
 # Tools provided by this server
 tools:
@@ -129,6 +160,24 @@ tools:
 
   - name: farnsworth_switch_profile
     description: Switch context profile (Work, Personal, Creative, Technical)
+
+  - name: farnsworth_export
+    description: Export conversations and memories to JSON, Markdown, HTML, or text
+
+  - name: farnsworth_browse
+    description: Intelligent web browsing with goal-directed navigation
+
+  - name: farnsworth_token_status
+    description: Check token budget, cache stats, and API cost savings
+
+  - name: farnsworth_rug_check
+    description: Scan Solana tokens for rug pull risks
+
+  - name: farnsworth_whale_watch
+    description: Monitor whale wallets for large transactions
+
+  - name: farnsworth_collaborate
+    description: Team collaboration with shared memory pools
 
 # Resources provided
 resources:
