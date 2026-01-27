@@ -465,17 +465,17 @@ hardware_profiles:
 task_routing:
   code:
     description: "Programming and debugging"
-    primary: "minimax-m2"
-    secondary: "deepseek-r1-1.5b"
-    fallback: "phi-4-mini"
-    cloud_primary: "minimax-m2"
-    local_primary: "deepseek-r1-1.5b"
-    swarm_models:
-      - "minimax-m2"
+    primary: "deepseek-r1-1.5b"  # Local first - saves tokens
+    secondary: "phi-4-mini"
+    fallback: "qwen3-4b"
+    # Cloud escalation only for complex multi-file tasks
+    escalation_model: "minimax-m2"
+    escalation_threshold: 0.5  # Low confidence triggers cloud
+    swarm_models:  # All local for swarm operations
       - "deepseek-r1-1.5b"
       - "phi-4-mini"
       - "qwen3-4b"
-    notes: "MiniMax M2 excels at SWE-Bench, multi-file editing, and complex debugging"
+    notes: "Local models for swarm/memory, MiniMax M2 only for complex escalation"
 
   reasoning:
     description: "Logic and analysis"
@@ -530,11 +530,13 @@ task_routing:
     fallback: "qwen3-0.6b"
 
 # Model swarm configurations
+# ALL SWARMS USE LOCAL MODELS ONLY - saves tokens/context
 swarm:
   # Default swarm for general use
   default:
-    description: "Balanced swarm for general tasks"
+    description: "Balanced local swarm - saves tokens"
     strategy: "mixture_of_experts"
+    use_local_only: true
     models:
       - id: "deepseek-r1-1.5b"
         role: "reasoning"
@@ -550,11 +552,33 @@ swarm:
         weight: 0.7
     enable_verification: true
     max_parallel: 3
+    # Cloud escalation for low-confidence results
+    cloud_escalation:
+      enabled: true
+      threshold: 0.4
+      model: "minimax-m2"
+
+  # Memory/context operations - ultra lightweight
+  memory:
+    description: "For memory retrieval, context building, summarization"
+    strategy: "fastest_first"
+    use_local_only: true
+    models:
+      - id: "qwen3-0.6b"
+        role: "summarize"
+        weight: 1.0
+      - id: "tinyllama-1.1b"
+        role: "speed"
+        weight: 0.9
+    enable_verification: false
+    max_parallel: 2
+    notes: "Tiny models for memory ops - preserves context window"
 
   # Speed-optimized swarm
   fast:
     description: "Speed-optimized with fast escalation"
     strategy: "fastest_first"
+    use_local_only: true
     models:
       - id: "bitnet-2b"
         role: "speed"
