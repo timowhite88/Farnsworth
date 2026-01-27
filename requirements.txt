@@ -62,3 +62,11 @@ pyannote.audio>=3.1.0
 solana>=0.30.0
 solders>=0.18.0
 base58>=2.1.0
+
+# --- Health Tracking ---
+pillow>=10.0.0
+python-dateutil>=2.8.0
+websockets>=12.0
+
+# --- n8n Integration ---
+requests>=2.31.0

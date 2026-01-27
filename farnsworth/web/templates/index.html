@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Farnsworth AI · Neural Interface</title>
+    <title>Farnsworth AI - Neural Interface</title>
 
     <!-- SEO Meta Tags -->
     <meta name="description" content="Give Claude superpowers: persistent memory, model swarms, Solana trading, and self-evolution. Your AI companion that remembers everything.">
@@ -13,7 +13,7 @@
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://ai.farnsworth.cloud/">
-    <meta property="og:title" content="Farnsworth AI · Your Claude Companion">
+    <meta property="og:title" content="Farnsworth AI - Your Claude Companion">
     <meta property="og:description" content="Give Claude superpowers: persistent memory, model swarms, Solana trading, P2P networking, and self-evolution. All processing runs locally.">
     <meta property="og:image" content="https://ai.farnsworth.cloud/static/images/og-image.png">
     <meta property="og:image:width" content="1200">
@@ -24,7 +24,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@timowhite88">
     <meta name="twitter:creator" content="@timowhite88">
-    <meta name="twitter:title" content="Farnsworth AI · Your Claude Companion">
+    <meta name="twitter:title" content="Farnsworth AI - Your Claude Companion">
     <meta name="twitter:description" content="Give Claude superpowers: persistent memory, model swarms, Solana trading, P2P networking, and self-evolution. All processing runs locally.">
     <meta name="twitter:image" content="https://ai.farnsworth.cloud/static/images/og-image.png">
     <meta name="twitter:image:alt" content="Farnsworth AI - Neural Interface with cosmic background and glowing brain">
@@ -37,6 +37,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+
+    <!-- Chart.js for health metrics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <!-- Cosmic Background -->
@@ -60,7 +63,7 @@
 
             <div class="gate-content glass-panel">
                 <div class="gate-header">
-                    <span class="gate-label">NEURAL INTERFACE v2.8</span>
+                    <span class="gate-label">NEURAL INTERFACE v3.0</span>
                     <h1 class="gate-title">
                         <span class="title-glow">Farnsworth</span>
                         <span class="title-sub">Companion AI</span>
@@ -114,8 +117,8 @@
                     <div class="demo-notice">
                         <span class="notice-icon">⚠️</span>
                         <p>
-                            <strong>Limited Demo Interface</strong><br>
-                            For full capabilities, <a href="https://github.com/timowhite88/Farnsworth" target="_blank">install Farnsworth locally</a>
+                            <strong>Full Feature Interface</strong><br>
+                            Memory, Notes, Health, Focus Timer, and more!
                         </p>
                     </div>
                 </div>
@@ -123,11 +126,16 @@
         </div>
     </section>
 
-    <!-- Main Chat Interface -->
+    <!-- Main Application Interface -->
     <section id="chat-app" class="chat-section hidden">
         <!-- Header -->
         <header class="app-header glass-panel">
             <div class="header-left">
+                <button id="sidebar-toggle" class="sidebar-toggle-btn" title="Toggle Sidebar">
+                    <span class="hamburger">
+                        <span></span><span></span><span></span>
+                    </span>
+                </button>
                 <div class="brand">
                     <div class="brand-orb">
                         <div class="mini-orb"></div>
@@ -135,10 +143,21 @@
                     <div class="brand-text">
                         <span class="brand-name">Farnsworth</span>
                         <span class="brand-status">
-                            <span class="status-dot"></span>
-                            Neural Link Active
+                            <span class="status-dot" id="connection-dot"></span>
+                            <span id="connection-status-text">Connecting...</span>
                         </span>
                     </div>
+                </div>
+            </div>
+
+            <div class="header-center">
+                <!-- Profile Switcher -->
+                <div class="profile-switcher">
+                    <button class="profile-btn active" data-profile="default" title="Default">🧠</button>
+                    <button class="profile-btn" data-profile="work" title="Work Mode">💼</button>
+                    <button class="profile-btn" data-profile="creative" title="Creative Mode">🎨</button>
+                    <button class="profile-btn" data-profile="health" title="Health Mode">🏥</button>
+                    <button class="profile-btn" data-profile="trading" title="Trading Mode">📈</button>
                 </div>
             </div>
 
@@ -153,182 +172,339 @@
                     <span class="voice-off">🔇</span>
                 </button>
 
-                <button id="tools-toggle" class="control-btn" title="Available Tools">🛠️</button>
+                <button id="live-dashboard-btn" class="control-btn" onclick="window.open('/live', '_blank')" title="Live Dashboard">📊</button>
             </div>
         </header>
 
-        <!-- Chat Area -->
-        <main class="chat-main">
-            <div class="messages-container" id="messages">
-                <!-- Welcome Message injected by JS -->
-            </div>
-
-            <div id="typing-indicator" class="typing-indicator hidden">
-                <div class="typing-avatar">🧠</div>
-                <div class="typing-content">
-                    <span class="typing-name">Farnsworth</span>
-                    <div class="typing-dots">
-                        <span></span><span></span><span></span>
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Left Sidebar - Features -->
+            <aside id="left-sidebar" class="sidebar left-sidebar glass-panel">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">💾</span>
+                        Memory
+                    </h3>
+                    <div class="memory-controls">
+                        <div class="memory-input-group">
+                            <textarea id="memory-input" placeholder="Store something in memory..." rows="2"></textarea>
+                            <button id="remember-btn" class="action-btn primary">Remember</button>
+                        </div>
+                        <div class="memory-search-group">
+                            <input type="text" id="memory-search" placeholder="Search memories...">
+                            <button id="recall-btn" class="action-btn">Recall</button>
+                        </div>
+                        <div id="memory-results" class="memory-results"></div>
                     </div>
                 </div>
-            </div>
-        </main>
 
-        <!-- Input Area -->
-        <footer class="chat-footer">
-            <div class="input-container glass-panel">
-                <div class="input-row">
-                    <button id="mic-btn" class="mic-button" title="Voice Input (Click to speak)">
-                        <span class="mic-icon">🎤</span>
-                        <span class="mic-listening">🔴</span>
-                    </button>
-                    <textarea
-                        id="user-input"
-                        placeholder="Ask Farnsworth anything... or click 🎤 to speak"
-                        rows="1"
-                        maxlength="500"
-                    ></textarea>
-                    <button id="send-btn" class="send-button" disabled>
-                        <span>Send</span>
-                        <span class="send-arrow">➤</span>
-                    </button>
-                </div>
-                <div class="input-meta">
-                    <span class="char-counter"><span id="char-count">0</span>/500</span>
-                    <span class="demo-badge">🧪 Demo Mode · Limited Features</span>
-                </div>
-            </div>
-        </footer>
-
-        <!-- Tools Sidebar -->
-        <aside id="tools-sidebar" class="tools-sidebar glass-panel hidden">
-            <div class="sidebar-header">
-                <h3>🛠️ Neural Toolkit</h3>
-                <button class="close-sidebar" onclick="toggleSidebar()">✕</button>
-            </div>
-            <div class="sidebar-body">
-                <div class="tools-section">
-                    <h4 class="tools-section-title">🎯 Holder Tools</h4>
-                    <div class="tools-grid">
-                        <div class="tool-card available clickable" onclick="openWhaleTracker()">
-                            <div class="tool-icon">🐋</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Whale Tracker</span>
-                                <span class="tool-desc">Track wallet activity</span>
-                            </div>
-                            <span class="tool-badge available">✓</span>
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">📝</span>
+                        Quick Notes
+                    </h3>
+                    <div class="notes-controls">
+                        <div class="note-input-group">
+                            <input type="text" id="note-input" placeholder="Quick note...">
+                            <button id="add-note-btn" class="action-btn primary">+</button>
                         </div>
-                        <div class="tool-card available clickable" onclick="openRugCheck()">
-                            <div class="tool-icon">🔍</div>
-                            <div class="tool-info">
+                        <div id="notes-list" class="notes-list"></div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">💻</span>
+                        Snippets
+                    </h3>
+                    <div class="snippets-controls">
+                        <button id="new-snippet-btn" class="action-btn full-width">+ New Snippet</button>
+                        <div id="snippets-list" class="snippets-list"></div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Chat Area -->
+            <main class="chat-main">
+                <div class="messages-container" id="messages">
+                    <!-- Welcome Message injected by JS -->
+                </div>
+
+                <div id="typing-indicator" class="typing-indicator hidden">
+                    <div class="typing-avatar">🧠</div>
+                    <div class="typing-content">
+                        <span class="typing-name">Farnsworth</span>
+                        <div class="typing-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="chat-footer">
+                    <div class="input-container glass-panel">
+                        <div class="quick-actions">
+                            <button class="quick-action-btn" data-action="remember" title="Remember">💾</button>
+                            <button class="quick-action-btn" data-action="recall" title="Recall">🔍</button>
+                            <button class="quick-action-btn" data-action="think" title="Deep Think">🤔</button>
+                            <button class="quick-action-btn" data-action="tools" title="Tools">🛠️</button>
+                        </div>
+                        <div class="input-row">
+                            <button id="mic-btn" class="mic-button" title="Voice Input (Click to speak)">
+                                <span class="mic-icon">🎤</span>
+                                <span class="mic-listening">🔴</span>
+                            </button>
+                            <textarea
+                                id="user-input"
+                                placeholder="Ask Farnsworth anything... or click 🎤 to speak"
+                                rows="1"
+                                maxlength="2000"
+                            ></textarea>
+                            <button id="send-btn" class="send-button" disabled>
+                                <span>Send</span>
+                                <span class="send-arrow">➤</span>
+                            </button>
+                        </div>
+                        <div class="input-meta">
+                            <span class="char-counter"><span id="char-count">0</span>/2000</span>
+                            <span class="feature-badge" id="feature-badge">🧠 Full Features Active</span>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Right Sidebar - Tools & Widgets -->
+            <aside id="right-sidebar" class="sidebar right-sidebar glass-panel">
+                <!-- Focus Timer Widget -->
+                <div class="sidebar-section widget-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">⏱️</span>
+                        Focus Timer
+                    </h3>
+                    <div class="focus-timer-widget">
+                        <div class="timer-display">
+                            <span id="timer-minutes">25</span>:<span id="timer-seconds">00</span>
+                        </div>
+                        <div class="timer-task" id="timer-task">Ready to focus</div>
+                        <div class="timer-controls">
+                            <button id="timer-start" class="timer-btn start">Start</button>
+                            <button id="timer-stop" class="timer-btn stop hidden">Stop</button>
+                            <button id="timer-reset" class="timer-btn reset">Reset</button>
+                        </div>
+                        <div class="timer-presets">
+                            <button class="preset-btn active" data-minutes="25">25m</button>
+                            <button class="preset-btn" data-minutes="45">45m</button>
+                            <button class="preset-btn" data-minutes="60">60m</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Health Summary Widget -->
+                <div class="sidebar-section widget-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">🏥</span>
+                        Health Summary
+                    </h3>
+                    <div class="health-widget">
+                        <div class="health-score">
+                            <div class="score-ring" id="wellness-ring">
+                                <svg viewBox="0 0 100 100">
+                                    <circle class="score-bg" cx="50" cy="50" r="40"/>
+                                    <circle class="score-fill" cx="50" cy="50" r="40" id="wellness-circle"/>
+                                </svg>
+                                <span class="score-value" id="wellness-score">--</span>
+                            </div>
+                            <span class="score-label">Wellness</span>
+                        </div>
+                        <div class="health-metrics">
+                            <div class="metric-item">
+                                <span class="metric-icon">❤️</span>
+                                <span class="metric-value" id="heart-rate">--</span>
+                                <span class="metric-label">BPM</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-icon">👟</span>
+                                <span class="metric-value" id="steps-count">--</span>
+                                <span class="metric-label">Steps</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-icon">😴</span>
+                                <span class="metric-value" id="sleep-hours">--</span>
+                                <span class="metric-label">Sleep</span>
+                            </div>
+                        </div>
+                        <button id="health-details-btn" class="action-btn full-width">View Details</button>
+                    </div>
+                </div>
+
+                <!-- Trading Tools Widget -->
+                <div class="sidebar-section widget-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">📊</span>
+                        Trading Tools
+                    </h3>
+                    <div class="trading-widget">
+                        <div class="tool-buttons">
+                            <button class="tool-btn" onclick="openWhaleTracker()">
+                                <span class="tool-icon">🐋</span>
+                                <span class="tool-name">Whale Track</span>
+                            </button>
+                            <button class="tool-btn" onclick="openRugCheck()">
+                                <span class="tool-icon">🔍</span>
                                 <span class="tool-name">Rug Check</span>
-                                <span class="tool-desc">Token safety scan</span>
-                            </div>
-                            <span class="tool-badge available">✓</span>
-                        </div>
-                        <div class="tool-card available clickable" onclick="openTokenScanner()">
-                            <div class="tool-icon">📊</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Token Scanner</span>
-                                <span class="tool-desc">DexScreener data</span>
-                            </div>
-                            <span class="tool-badge available">✓</span>
-                        </div>
-                        <div class="tool-card available clickable" onclick="openMarketSentiment()">
-                            <div class="tool-icon">📈</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Market Mood</span>
-                                <span class="tool-desc">Fear & Greed</span>
-                            </div>
-                            <span class="tool-badge available">✓</span>
+                            </button>
+                            <button class="tool-btn" onclick="openTokenScanner()">
+                                <span class="tool-icon">📈</span>
+                                <span class="tool-name">Token Scan</span>
+                            </button>
+                            <button class="tool-btn" onclick="openMarketSentiment()">
+                                <span class="tool-icon">🌡️</span>
+                                <span class="tool-name">Sentiment</span>
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                <div class="tools-section">
-                    <h4 class="tools-section-title">🧠 Core Features</h4>
-                    <div class="tools-grid">
-                        <div class="tool-card available">
-                            <div class="tool-icon">💾</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Memory</span>
-                                <span class="tool-desc">Store & recall</span>
-                            </div>
-                            <span class="tool-badge available">✓</span>
+                <!-- System Status Widget -->
+                <div class="sidebar-section widget-section">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">⚡</span>
+                        System Status
+                    </h3>
+                    <div class="status-widget">
+                        <div class="status-item">
+                            <span class="status-label">Memory</span>
+                            <span class="status-indicator" id="status-memory">⏳</span>
                         </div>
-                        <div class="tool-card available">
-                            <div class="tool-icon">🗣️</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Voice I/O</span>
-                                <span class="tool-desc">Speak & Listen</span>
-                            </div>
-                            <span class="tool-badge available">✓</span>
+                        <div class="status-item">
+                            <span class="status-label">Notes</span>
+                            <span class="status-indicator" id="status-notes">⏳</span>
                         </div>
-                        <div class="tool-card limited">
-                            <div class="tool-icon">🤖</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Agents</span>
-                                <span class="tool-desc">Delegation</span>
-                            </div>
-                            <span class="tool-badge limited">~</span>
+                        <div class="status-item">
+                            <span class="status-label">Health</span>
+                            <span class="status-indicator" id="status-health">⏳</span>
                         </div>
-                        <div class="tool-card limited">
-                            <div class="tool-icon">👁️</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Vision</span>
-                                <span class="tool-desc">Image analysis</span>
-                            </div>
-                            <span class="tool-badge limited">~</span>
+                        <div class="status-item">
+                            <span class="status-label">Tools</span>
+                            <span class="status-indicator" id="status-tools">⏳</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Thinking</span>
+                            <span class="status-indicator" id="status-thinking">⏳</span>
                         </div>
                     </div>
                 </div>
-
-                <div class="tools-section">
-                    <h4 class="tools-section-title">🔒 Install Locally</h4>
-                    <div class="tools-grid">
-                        <div class="tool-card locked">
-                            <div class="tool-icon">💰</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Trading</span>
-                                <span class="tool-desc">Jupiter swaps</span>
-                            </div>
-                            <span class="tool-badge locked">🔒</span>
-                        </div>
-                        <div class="tool-card locked">
-                            <div class="tool-icon">🐝</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Swarm</span>
-                                <span class="tool-desc">Multi-model</span>
-                            </div>
-                            <span class="tool-badge locked">🔒</span>
-                        </div>
-                        <div class="tool-card locked">
-                            <div class="tool-icon">🌐</div>
-                            <div class="tool-info">
-                                <span class="tool-name">P2P Network</span>
-                                <span class="tool-desc">Planetary memory</span>
-                            </div>
-                            <span class="tool-badge locked">🔒</span>
-                        </div>
-                        <div class="tool-card locked">
-                            <div class="tool-icon">🧬</div>
-                            <div class="tool-info">
-                                <span class="tool-name">Evolution</span>
-                                <span class="tool-desc">Self-improve</span>
-                            </div>
-                            <span class="tool-badge locked">🔒</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="sidebar-footer">
-                <p>Unlock all capabilities</p>
-                <a href="https://github.com/timowhite88/Farnsworth" target="_blank" class="install-link">
-                    Install Locally →
-                </a>
-            </div>
-        </aside>
+            </aside>
+        </div>
     </section>
+
+    <!-- Modal Container -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div id="modal-container" class="modal-container glass-panel">
+            <div class="modal-header">
+                <h3 id="modal-title">Modal Title</h3>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div id="modal-content" class="modal-content">
+                <!-- Dynamic modal content -->
+            </div>
+            <div id="modal-footer" class="modal-footer">
+                <!-- Dynamic modal actions -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Thinking Visualization Modal -->
+    <div id="thinking-modal" class="modal-overlay hidden">
+        <div class="modal-container glass-panel thinking-modal">
+            <div class="modal-header">
+                <h3>🤔 Sequential Thinking</h3>
+                <button class="modal-close" onclick="closeThinkingModal()">✕</button>
+            </div>
+            <div class="thinking-content">
+                <div class="thinking-input">
+                    <textarea id="thinking-problem" placeholder="Describe a problem to analyze step-by-step..." rows="3"></textarea>
+                    <button id="start-thinking-btn" class="action-btn primary">Analyze</button>
+                </div>
+                <div id="thinking-steps" class="thinking-steps">
+                    <!-- Steps will be rendered here -->
+                </div>
+                <div id="thinking-conclusion" class="thinking-conclusion hidden">
+                    <!-- Conclusion will be rendered here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Snippet Editor Modal -->
+    <div id="snippet-modal" class="modal-overlay hidden">
+        <div class="modal-container glass-panel snippet-modal">
+            <div class="modal-header">
+                <h3>💻 Code Snippet</h3>
+                <button class="modal-close" onclick="closeSnippetModal()">✕</button>
+            </div>
+            <div class="snippet-content">
+                <input type="text" id="snippet-desc" placeholder="Description..." class="snippet-field">
+                <select id="snippet-lang" class="snippet-field">
+                    <option value="python">Python</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="rust">Rust</option>
+                    <option value="go">Go</option>
+                    <option value="bash">Bash</option>
+                    <option value="sql">SQL</option>
+                    <option value="html">HTML</option>
+                    <option value="css">CSS</option>
+                    <option value="json">JSON</option>
+                    <option value="other">Other</option>
+                </select>
+                <textarea id="snippet-code" placeholder="Paste your code here..." rows="10" class="snippet-code"></textarea>
+                <input type="text" id="snippet-tags" placeholder="Tags (comma separated)..." class="snippet-field">
+                <button id="save-snippet-btn" class="action-btn primary full-width">Save Snippet</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Health Details Modal -->
+    <div id="health-modal" class="modal-overlay hidden">
+        <div class="modal-container glass-panel health-modal">
+            <div class="modal-header">
+                <h3>🏥 Health Dashboard</h3>
+                <button class="modal-close" onclick="closeHealthModal()">✕</button>
+            </div>
+            <div class="health-dashboard-content">
+                <div class="health-charts">
+                    <div class="chart-container">
+                        <h4>Heart Rate (7 days)</h4>
+                        <canvas id="heart-rate-chart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h4>Daily Steps (7 days)</h4>
+                        <canvas id="steps-chart"></canvas>
+                    </div>
+                </div>
+                <div class="health-insights" id="health-insights">
+                    <!-- AI insights will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tool Input Modals -->
+    <div id="tool-modal" class="modal-overlay hidden">
+        <div class="modal-container glass-panel tool-modal">
+            <div class="modal-header">
+                <h3 id="tool-modal-title">Tool</h3>
+                <button class="modal-close" onclick="closeToolModal()">✕</button>
+            </div>
+            <div id="tool-modal-content" class="tool-modal-content">
+                <!-- Dynamic tool form -->
+            </div>
+            <div id="tool-modal-result" class="tool-modal-result hidden">
+                <!-- Tool result display -->
+            </div>
+        </div>
+    </div>
 
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>

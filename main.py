@@ -7,6 +7,8 @@ A self-evolving AI companion that integrates with Claude Code to provide:
 - Specialist agent delegation
 - Self-improvement through evolution
 - Visual dashboard for transparency
+- Health tracking and insights
+- Workflow automation with n8n integration
 
 This transforms Claude from a stateless assistant into a learning,
 adapting companion that remembers you and improves over time.
@@ -16,6 +18,8 @@ Usage:
     python main.py --mcp              # MCP server only (for Claude Code)
     python main.py --ui               # Streamlit dashboard only
     python main.py --cli              # Interactive CLI mode
+    python main.py --user             # User-friendly CLI mode (NEW!)
+    python main.py --health           # Start health dashboard (NEW!)
     python main.py --setup            # First-time setup wizard
     python main.py --node             # Spin up as P2P network node
     python main.py --node --port 9999 # Custom port for P2P node
@@ -617,6 +621,43 @@ async def run_node_with_dashboard(port: int = 9999):
         print_status("P2P Node", "error", str(e))
 
 
+async def run_user_cli_mode():
+    """Run user-friendly CLI mode."""
+    print("\n User-Friendly CLI Mode")
+
+    try:
+        from farnsworth.cli.user_cli import run_user_cli
+        await run_user_cli(data_dir=str(PROJECT_ROOT / "data"))
+    except ImportError as e:
+        print_status("User CLI", "error", f"Import error: {e}")
+        print("\nMake sure all dependencies are installed.")
+    except Exception as e:
+        print_status("User CLI", "error", str(e))
+
+
+async def run_health_dashboard():
+    """Run the health tracking dashboard."""
+    print_status("Health Dashboard", "loading", "Starting on port 8081...")
+
+    try:
+        from farnsworth.health.dashboard.server import app
+        import uvicorn
+
+        config = uvicorn.Config(
+            app,
+            host="0.0.0.0",
+            port=8081,
+            log_level="info",
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+    except ImportError as e:
+        print_status("Health Dashboard", "error", f"Import error: {e}")
+        print("\nMake sure health module dependencies are installed.")
+    except Exception as e:
+        print_status("Health Dashboard", "error", str(e))
+
+
 async def run_all_services():
     """Run all Farnsworth services."""
     print_status("Starting Services", "info", "")
@@ -656,6 +697,8 @@ For more info: https://github.com/timowhite88/Farnsworth
     parser.add_argument("--mcp", action="store_true", help="Run MCP server only")
     parser.add_argument("--ui", action="store_true", help="Run Streamlit UI only")
     parser.add_argument("--cli", action="store_true", help="Run interactive CLI")
+    parser.add_argument("--user", action="store_true", help="Run user-friendly CLI (recommended for beginners)")
+    parser.add_argument("--health", action="store_true", help="Run health dashboard on port 8081")
     parser.add_argument("--setup", action="store_true", help="Run setup wizard")
     parser.add_argument("--node", action="store_true", help="Spin up as P2P network node")
     parser.add_argument("--port", type=int, default=9999, help="Port for P2P node (default: 9999)")
@@ -671,6 +714,10 @@ For more info: https://github.com/timowhite88/Farnsworth
 
     if args.setup:
         asyncio.run(run_setup_wizard())
+    elif args.user:
+        asyncio.run(run_user_cli_mode())
+    elif args.health:
+        asyncio.run(run_health_dashboard())
     elif args.node:
         if args.dashboard:
             asyncio.run(run_node_with_dashboard(port=args.port))

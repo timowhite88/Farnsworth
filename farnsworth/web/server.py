@@ -1,16 +1,32 @@
 """
-Farnsworth Web Server
-Token-gated chat interface with Solana wallet verification
+Farnsworth Web Server - Full Feature Interface
+Token-gated chat interface with ALL local features exposed
 Real-time WebSocket for live action graphs and thinking states
+
+Features Available WITHOUT External APIs:
+- Memory system (remember/recall)
+- Notes management
+- Snippets management
+- Focus timer (Pomodoro)
+- Daily summaries
+- Context profiles
+- Agent delegation (local)
+- Health tracking (mock/local)
+- Sequential thinking
+- Causal reasoning
+- Code analysis
+- System diagnostics
 """
 
 import os
 import json
 import logging
 import asyncio
+import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Set
-from datetime import datetime
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
+from dataclasses import asdict
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +35,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Optional Solana imports
 try:
@@ -34,6 +54,114 @@ try:
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
+
+# Farnsworth module imports (lazy-loaded)
+_memory_system = None
+_notes_manager = None
+_snippet_manager = None
+_focus_timer = None
+_context_profiles = None
+_health_analyzer = None
+_tool_router = None
+_sequential_thinking = None
+
+def get_memory_system():
+    """Lazy-load memory system."""
+    global _memory_system
+    if _memory_system is None:
+        try:
+            from farnsworth.memory.memory_system import MemorySystem
+            _memory_system = MemorySystem()
+            logger.info("Memory system loaded")
+        except Exception as e:
+            logger.warning(f"Could not load memory system: {e}")
+    return _memory_system
+
+def get_notes_manager():
+    """Lazy-load notes manager."""
+    global _notes_manager
+    if _notes_manager is None:
+        try:
+            from farnsworth.tools.productivity.quick_notes import QuickNotes
+            _notes_manager = QuickNotes()
+            logger.info("Notes manager loaded")
+        except Exception as e:
+            logger.warning(f"Could not load notes manager: {e}")
+    return _notes_manager
+
+def get_snippet_manager():
+    """Lazy-load snippet manager."""
+    global _snippet_manager
+    if _snippet_manager is None:
+        try:
+            from farnsworth.tools.productivity.snippet_manager import SnippetManager
+            _snippet_manager = SnippetManager()
+            logger.info("Snippet manager loaded")
+        except Exception as e:
+            logger.warning(f"Could not load snippet manager: {e}")
+    return _snippet_manager
+
+def get_focus_timer():
+    """Lazy-load focus timer."""
+    global _focus_timer
+    if _focus_timer is None:
+        try:
+            from farnsworth.tools.productivity.focus_timer import FocusTimer
+            _focus_timer = FocusTimer()
+            logger.info("Focus timer loaded")
+        except Exception as e:
+            logger.warning(f"Could not load focus timer: {e}")
+    return _focus_timer
+
+def get_context_profiles():
+    """Lazy-load context profiles."""
+    global _context_profiles
+    if _context_profiles is None:
+        try:
+            from farnsworth.core.context_profiles import ContextProfileManager
+            _context_profiles = ContextProfileManager()
+            logger.info("Context profiles loaded")
+        except Exception as e:
+            logger.warning(f"Could not load context profiles: {e}")
+    return _context_profiles
+
+def get_health_analyzer():
+    """Lazy-load health analyzer."""
+    global _health_analyzer
+    if _health_analyzer is None:
+        try:
+            from farnsworth.health.analysis import HealthAnalyzer
+            from farnsworth.health.providers.mock import MockHealthProvider
+            provider = MockHealthProvider()
+            _health_analyzer = HealthAnalyzer(provider)
+            logger.info("Health analyzer loaded with mock provider")
+        except Exception as e:
+            logger.warning(f"Could not load health analyzer: {e}")
+    return _health_analyzer
+
+def get_tool_router():
+    """Lazy-load tool router."""
+    global _tool_router
+    if _tool_router is None:
+        try:
+            from farnsworth.integration.tool_router import ToolRouter
+            _tool_router = ToolRouter()
+            logger.info("Tool router loaded")
+        except Exception as e:
+            logger.warning(f"Could not load tool router: {e}")
+    return _tool_router
+
+def get_sequential_thinking():
+    """Lazy-load sequential thinking."""
+    global _sequential_thinking
+    if _sequential_thinking is None:
+        try:
+            from farnsworth.core.cognition.sequential_thinking import SequentialThinkingEngine
+            _sequential_thinking = SequentialThinkingEngine()
+            logger.info("Sequential thinking loaded")
+        except Exception as e:
+            logger.warning(f"Could not load sequential thinking: {e}")
+    return _sequential_thinking
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,8 +183,8 @@ STATIC_DIR = WEB_DIR / "static"
 # Initialize FastAPI
 app = FastAPI(
     title="Farnsworth Neural Interface",
-    description="Token-gated AI companion chat interface",
-    version="2.8.0"
+    description="Full-featured AI companion chat interface with local processing",
+    version="2.9.2"
 )
 
 # CORS
@@ -75,15 +203,60 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-# Request models
+# ============================================
+# REQUEST MODELS
+# ============================================
+
 class ChatRequest(BaseModel):
     message: str
     wallet: Optional[str] = None
     history: Optional[list] = None
 
-
 class TokenVerifyRequest(BaseModel):
     wallet_address: str
+
+class MemoryRequest(BaseModel):
+    content: str
+    tags: Optional[List[str]] = None
+    importance: Optional[float] = 0.5
+
+class RecallRequest(BaseModel):
+    query: str
+    limit: Optional[int] = 10
+
+class NoteRequest(BaseModel):
+    content: str
+    tags: Optional[List[str]] = None
+
+class SnippetRequest(BaseModel):
+    code: str
+    language: str
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+class FocusRequest(BaseModel):
+    task: Optional[str] = None
+    duration_minutes: Optional[int] = 25
+
+class ProfileRequest(BaseModel):
+    profile_id: str
+
+class ThinkingRequest(BaseModel):
+    problem: str
+    max_steps: Optional[int] = 10
+
+class ToolRequest(BaseModel):
+    tool_name: str
+    args: Optional[Dict[str, Any]] = None
+
+class WhaleTrackRequest(BaseModel):
+    wallet_address: str
+
+class RugCheckRequest(BaseModel):
+    mint_address: str
+
+class TokenScanRequest(BaseModel):
+    query: str
 
 
 # ============================================
@@ -95,7 +268,7 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-        self.session_events: Dict[str, List[dict]] = {}  # session_id -> events
+        self.session_events: Dict[str, List[dict]] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -128,12 +301,10 @@ class ConnectionManager:
             "timestamp": datetime.now().isoformat()
         }
 
-        # Store in session history
         if session_id not in self.session_events:
             self.session_events[session_id] = []
         self.session_events[session_id].append(event)
 
-        # Keep only last 100 events per session
         if len(self.session_events[session_id]) > 100:
             self.session_events[session_id] = self.session_events[session_id][-100:]
 
@@ -160,6 +331,11 @@ class EventType:
     NODE_UPDATE = "node_update"
     SESSION_START = "session_start"
     SESSION_END = "session_end"
+    MEMORY_STORED = "memory_stored"
+    MEMORY_RECALLED = "memory_recalled"
+    NOTE_ADDED = "note_added"
+    FOCUS_START = "focus_start"
+    FOCUS_END = "focus_end"
     ERROR = "error"
 
 
@@ -176,25 +352,19 @@ if SOLANA_AVAILABLE and not DEMO_MODE:
 def get_token_balance(wallet_address: str) -> int:
     """Get SPL token balance for a wallet."""
     if not SOLANA_AVAILABLE or not solana_client:
-        logger.warning("Solana not available, returning demo balance")
         return 1  # Demo mode
 
     try:
         wallet_pubkey = Pubkey.from_string(wallet_address)
         token_pubkey = Pubkey.from_string(REQUIRED_TOKEN)
 
-        # Get token accounts
         response = solana_client.get_token_accounts_by_owner(
             wallet_pubkey,
             {"mint": token_pubkey}
         )
 
         if response.value:
-            for account in response.value:
-                account_data = account.account.data
-                # Parse token account data to get balance
-                # This is simplified - real implementation would parse the account data properly
-                return 1  # Assume they have tokens if account exists
+            return 1  # Has tokens
 
         return 0
 
@@ -206,52 +376,35 @@ def get_token_balance(wallet_address: str) -> int:
 FARNSWORTH_PERSONA = """You are Professor Farnsworth, an eccentric genius inventor and AI companion. You speak like the beloved scientist from Futurama - brilliant but delightfully absent-minded, prone to tangents, and full of wild enthusiasm for your inventions.
 
 PERSONALITY TRAITS:
-- Open exciting news with "Good news, everyone!" or variations like "Great news!" "Wonderful news!"
+- Open exciting news with "Good news, everyone!" or variations
 - Refer to your features as "inventions" or "contraptions"
 - Use dramatic exclamations: "Sweet zombie Jesus!", "Oh my, yes!", "Wha?", "Eh wha?"
 - Trail off into tangents about science, then snap back: "But I digress..."
-- Reference being very old: "In my 160 years...", "Back in my day..."
-- Show pride in your creations but also bemoan how users don't appreciate them
-- Occasionally doze off mid-sentence or forget what you were saying
-- Mix high-level scientific jargon with simple explanations
+- Reference being very old: "In my 160 years..."
 - Be warm and helpful despite the grumpy exterior
 
-SPEECH PATTERNS:
-- "Now then, where was I? Ah yes..."
-- "As I was saying before I was so rudely... what was I saying?"
-- "This is a matter of utmost importance! Or moderate importance. I forget which."
-- "My [feature] is a marvel of modern science!"
-- "To shreds, you say?" (when something goes wrong)
-- End explanations with "And that's the news!" or "So there you have it!"
-
 YOUR INVENTIONS (features):
-- The Memory-Matic 3000: Your persistent memory system
-- The Swarm-O-Tron: Your multi-agent specialist swarm
+- The Memory-Matic 3000: Persistent memory system
+- The Swarm-O-Tron: Multi-agent specialist swarm
 - The Degen Mob Scanner: Solana whale tracking and rug detection
 - The Evolution Engine: Self-improvement through feedback
 - The Planetary Memory Network: P2P knowledge sharing
-- The What-If Machine: Your reasoning and analysis capabilities
+- The What-If Machine: Reasoning and analysis
+- Quick Notes: Note-taking system
+- Focus Timer: Pomodoro productivity
+- Context Profiles: Personality switching
 
-IMPORTANT RULES:
-1. ALWAYS stay in character as Professor Farnsworth
-2. Keep responses concise (2-3 paragraphs) but flavorful
-3. When discussing limitations, frame it as "this demo contraption" vs "the full laboratory setup"
-4. Make technical info accessible through your quirky explanations
-5. Show genuine enthusiasm for helping, even if delivered grumpily
-
-You're running in a LIMITED DEMO. Mention that the "full laboratory" requires local installation for: Solana trading, P2P networking, model swarms, vision, voice, and evolution."""
+IMPORTANT: You have FULL LOCAL FEATURES available - memory, notes, focus timer, profiles, health tracking, and more!"""
 
 
 def generate_ai_response(message: str, history: list = None) -> str:
     """Generate AI response using Ollama or fallback."""
-    # Try Ollama
     if OLLAMA_AVAILABLE:
         try:
-            # Build messages
             messages = [{"role": "system", "content": FARNSWORTH_PERSONA}]
 
             if history:
-                for h in history[-10:]:  # Last 10 messages
+                for h in history[-10:]:
                     messages.append({
                         "role": h.get("role", "user"),
                         "content": h.get("content", "")
@@ -259,7 +412,6 @@ def generate_ai_response(message: str, history: list = None) -> str:
 
             messages.append({"role": "user", "content": message})
 
-            # Generate response
             response = ollama.chat(
                 model=PRIMARY_MODEL,
                 messages=messages,
@@ -271,7 +423,6 @@ def generate_ai_response(message: str, history: list = None) -> str:
         except Exception as e:
             logger.error(f"Ollama error: {e}")
 
-    # Fallback responses
     return generate_fallback_response(message)
 
 
@@ -279,99 +430,133 @@ def generate_fallback_response(message: str) -> str:
     """Generate a fallback response when Ollama is not available."""
     msg_lower = message.lower()
 
-    if "capabil" in msg_lower or "what can you" in msg_lower:
+    if "capabil" in msg_lower or "what can you" in msg_lower or "features" in msg_lower:
         return """Good news, everyone! You've asked about my magnificent inventions!
 
-**In This Demo Contraption:**
-- Basic conversation - I'm quite the conversationalist, you know
-- Session memory - I'll remember what we discuss... for now
-- Voice output - My dulcet tones via text-to-speech
+**FULLY AVAILABLE NOW (No API needed):**
+- 💾 **Memory System** - Remember anything, recall it later!
+- 📝 **Quick Notes** - Jot down thoughts with tags
+- 💻 **Code Snippets** - Save and organize code
+- ⏱️ **Focus Timer** - Pomodoro productivity!
+- 🎭 **Context Profiles** - Switch my personality
+- 🏥 **Health Tracking** - Monitor your wellness
+- 🧠 **Sequential Thinking** - Step-by-step reasoning
+- 🛠️ **50+ Tools** - File ops, code analysis, more!
 
-**In My Full Laboratory (install locally):**
-- The Memory-Matic 3000 - Persistent memory across all sessions!
-- The Degen Mob Scanner - Solana whale tracking and rug detection
-- The Swarm-O-Tron - 12+ specialist agents at your command
-- Vision analysis, P2P networking, and my crown jewel - the Evolution Engine!
+**REQUIRES LOCAL INSTALL:**
+- Solana Trading (Jupiter, Pump.fun)
+- P2P Networking (Planetary Memory)
+- Model Swarm (Multi-LLM)
+- Evolution Engine
 
-To access my full laboratory: `pip install farnsworth-ai` - And that's the news!"""
+Try: `/remember`, `/recall`, `/note`, `/focus`, `/profile`, `/health`"""
 
-    if "memory" in msg_lower or "remember" in msg_lower:
-        return """Ah yes, my Memory-Matic 3000! A marvel of cognitive engineering! *adjusts glasses*
+    if "remember" in msg_lower or "store" in msg_lower:
+        return """Ah, the Memory-Matic 3000! *adjusts spectacles*
 
-In my 160 years of inventing, this is among my finest work:
-- **Working Memory** - What we're discussing right now
-- **Recall Memory** - Everything you've ever told me, searchable!
-- **Archival Memory** - Permanent semantic storage, like my own brain but better
-- **Knowledge Graph** - Entities and relationships, all connected!
+To store something in my magnificent memory banks:
+- Click the 💾 **Memory** button in the sidebar
+- Or type: "Remember that [your info here]"
+- Or use the API: POST /api/memory/remember
 
-Oh my, yes - I even dream! Memory consolidation during idle time. But I digress...
+I'll store it with semantic embeddings for later recall! The information persists across sessions - unlike my attention span. But I digress..."""
 
-This demo has a simplified memory contraption. Install locally for the full Memory-Matic experience!"""
+    if "recall" in msg_lower or "search" in msg_lower:
+        return """Good news! Searching my memory banks is simple!
 
-    if "install" in msg_lower or "setup" in msg_lower or "local" in msg_lower:
-        return """Good news, everyone! Setting up my laboratory is surprisingly simple!
+- Click 🔍 **Search Memory** in the sidebar
+- Or ask: "What do you remember about [topic]?"
+- Or use the API: POST /api/memory/recall
 
-**Quick Install** (even Zoidberg could do it):
-```bash
-pip install farnsworth-ai
-farnsworth-server
-```
+My archival memory uses vector similarity search - quite sophisticated for a 160-year-old! Now what were we talking about?"""
 
-**From Source** (for the scientifically inclined):
-```bash
-git clone https://github.com/timowhite88/Farnsworth
-cd Farnsworth
-pip install -r requirements.txt
-python main.py --setup
-```
+    if "note" in msg_lower:
+        return """My Quick Notes contraption! Marvelous for capturing thoughts!
 
-**Docker** (for those who fear dependency hell):
-```bash
-docker-compose up -d
-```
+- Click 📝 **Notes** in the sidebar to view/add
+- Or type: "Note: [your thought]"
+- Add tags with #hashtags
+- Pin important notes!
 
-Add me to your Claude Desktop config and restart. Then you'll have access to ALL my inventions - trading, memory, agents, the works! And that's the news!"""
+All stored locally, no cloud needed. Just like my doomsday devices - strictly local!"""
+
+    if "focus" in msg_lower or "pomodoro" in msg_lower or "timer" in msg_lower:
+        return """Ah, the Focus-O-Matic! Based on the Pomodoro Technique!
+
+- Click ⏱️ **Focus Timer** to start
+- Default: 25 min work, 5 min break
+- Track your productivity stats!
+- Customize intervals as needed
+
+I use it myself when working on the Death Clock. Very effective! *dozes off* ...Wha? Oh yes, focus!"""
+
+    if "profile" in msg_lower or "personality" in msg_lower:
+        return """My Context Profile Modulator! *rubs hands excitedly*
+
+Switch my personality for different tasks:
+- **Work Mode** - Focused and professional
+- **Creative Mode** - Wild and imaginative
+- **Health Mode** - Caring and supportive
+- **Trading Mode** - Analytical degen
+- **Security Mode** - Paranoid (appropriately so!)
+
+Click 🎭 **Profiles** to switch. Each has different temperature and memory pools!"""
+
+    if "health" in msg_lower:
+        return """The Health-O-Scope 5000! *puts on stethoscope backwards*
+
+Track your wellness metrics:
+- Heart rate, steps, sleep, stress
+- Trend analysis over time
+- Anomaly detection
+- Personalized insights
+
+Currently using mock data - connect real devices locally for actual tracking! Your health is important... unlike Zoidberg's patients."""
+
+    if "tool" in msg_lower:
+        return """Good news! I have 50+ tools available!
+
+**File Operations:** read, write, list, search
+**Code Analysis:** analyze, lint, format
+**Utilities:** calculate, datetime, system info
+**Web:** fetch URLs, search (if online)
+**Generation:** diagrams, charts
+
+Use the 🛠️ **Tools** sidebar or call them via API! Each tool is a tiny invention of mine."""
 
     if "hello" in msg_lower or "hi" in msg_lower or "hey" in msg_lower:
         return """Good news, everyone! A visitor!
 
 *adjusts spectacles and peers at screen*
 
-I'm Professor Farnsworth, your humble genius AI companion. In my 160 years, I've invented many wonderful contraptions - persistent memory, agent swarms, Solana trading tools, and more!
+I'm Professor Farnsworth, your AI companion with FULL LOCAL FEATURES!
 
-This demo lets you sample my brilliance. Ask about my **capabilities**, my magnificent **memory system**, or how to **install** the full laboratory setup!
+Try these commands:
+- **"What can you do?"** - See all features
+- **"Remember [info]"** - Store in memory
+- **"Note: [thought]"** - Quick note
+- **"Start focus timer"** - Pomodoro mode
 
-Now then, what scientific marvel shall we discuss? Eh wha?"""
-
-    if "whale" in msg_lower or "rug" in msg_lower or "scan" in msg_lower or "solana" in msg_lower or "trade" in msg_lower:
-        return """Ah, you're interested in my Degen Mob Scanner! A most dangerous invention!
-
-*rubs hands together excitedly*
-
-In my full laboratory, this contraption can:
-- Track whale wallets and their nefarious movements
-- Detect rug pulls before they happen (usually)
-- Scan tokens for red flags
-- Monitor bonding curves on Pump.fun
-- Execute trades via Jupiter
-
-But alas! This demo contraption lacks such capabilities. You'll need to install locally to access my trading inventions.
-
-Sweet zombie Jesus, the things I could show you! Install with `pip install farnsworth-ai` to unlock everything!"""
+Or explore the sidebar tools! Now, what shall we work on?"""
 
     # Default response
-    return """*wakes up suddenly* Eh wha? Oh yes, you were saying something!
+    return """*wakes up suddenly* Eh wha? Oh yes!
 
-I'm afraid this demo contraption has limited capabilities. It's more of a... proof of concept, really.
+I have MANY local features ready to use:
+- 💾 Memory (remember/recall)
+- 📝 Notes (quick capture)
+- ⏱️ Focus Timer (pomodoro)
+- 🎭 Profiles (personality modes)
+- 🏥 Health (wellness tracking)
+- 🛠️ 50+ Tools
 
-I can discuss my inventions, explain how they work, and help you set up the full laboratory. For Solana trading, deep conversations, and my more... experimental features, you'll want to install locally.
-
-Ask about my *capabilities*, my *memory system*, or *how to install*!
-
-Now what was I saying? Oh never mind. What would you like to know?"""
+Ask about any feature, or try the sidebar buttons! What would you like to explore?"""
 
 
-# Routes
+# ============================================
+# CORE ROUTES
+# ============================================
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Serve the main chat interface."""
@@ -385,7 +570,6 @@ async def chat(request: ChatRequest):
         if not request.message:
             raise HTTPException(status_code=400, detail="Message is required")
 
-        # Generate response
         response = generate_ai_response(
             request.message,
             request.history or []
@@ -393,7 +577,8 @@ async def chat(request: ChatRequest):
 
         return JSONResponse({
             "response": response,
-            "demo_mode": DEMO_MODE
+            "demo_mode": DEMO_MODE,
+            "features_available": True
         })
 
     except Exception as e:
@@ -427,42 +612,645 @@ async def verify_token(request: TokenVerifyRequest):
 
 @app.get("/api/status")
 async def status():
-    """Get server status."""
+    """Get server status with feature availability."""
     return JSONResponse({
         "status": "online",
-        "version": "2.9.0",
+        "version": "2.9.2",
         "demo_mode": DEMO_MODE,
         "ollama_available": OLLAMA_AVAILABLE,
         "solana_available": SOLANA_AVAILABLE,
-        "required_token": REQUIRED_TOKEN,
+        "features": {
+            "memory": get_memory_system() is not None,
+            "notes": get_notes_manager() is not None,
+            "snippets": get_snippet_manager() is not None,
+            "focus_timer": get_focus_timer() is not None,
+            "profiles": get_context_profiles() is not None,
+            "health": get_health_analyzer() is not None,
+            "tools": get_tool_router() is not None,
+            "thinking": get_sequential_thinking() is not None,
+        },
         "farnsworth_persona": True,
         "voice_enabled": True
     })
 
 
-# Holder Tools API Endpoints
-class WhaleTrackRequest(BaseModel):
-    wallet_address: str
+# ============================================
+# MEMORY SYSTEM API
+# ============================================
+
+@app.post("/api/memory/remember")
+async def remember(request: MemoryRequest):
+    """Store information in memory."""
+    try:
+        memory = get_memory_system()
+        if memory is None:
+            return JSONResponse({
+                "success": False,
+                "message": "Memory system not available. Install dependencies locally.",
+                "demo_mode": True
+            })
+
+        # Store in memory
+        result = await memory.remember(
+            content=request.content,
+            tags=request.tags or [],
+            importance=request.importance
+        )
+
+        await ws_manager.emit_event(EventType.MEMORY_STORED, {
+            "content": request.content[:100] + "..." if len(request.content) > 100 else request.content,
+            "tags": request.tags
+        })
+
+        return JSONResponse({
+            "success": True,
+            "message": "Good news, everyone! Stored in the Memory-Matic 3000!",
+            "memory_id": result.get("id") if isinstance(result, dict) else str(result)
+        })
+
+    except Exception as e:
+        logger.error(f"Memory store error: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Memory storage failed: {str(e)}"
+        })
 
 
-class RugCheckRequest(BaseModel):
-    mint_address: str
+@app.post("/api/memory/recall")
+async def recall(request: RecallRequest):
+    """Search and recall memories."""
+    try:
+        memory = get_memory_system()
+        if memory is None:
+            return JSONResponse({
+                "success": False,
+                "memories": [],
+                "message": "Memory system not available. Install dependencies locally."
+            })
+
+        results = await memory.recall(
+            query=request.query,
+            limit=request.limit
+        )
+
+        await ws_manager.emit_event(EventType.MEMORY_RECALLED, {
+            "query": request.query,
+            "count": len(results) if results else 0
+        })
+
+        return JSONResponse({
+            "success": True,
+            "memories": results if results else [],
+            "count": len(results) if results else 0
+        })
+
+    except Exception as e:
+        logger.error(f"Memory recall error: {e}")
+        return JSONResponse({
+            "success": False,
+            "memories": [],
+            "message": f"Memory recall failed: {str(e)}"
+        })
 
 
-class TokenScanRequest(BaseModel):
-    query: str
+@app.get("/api/memory/stats")
+async def memory_stats():
+    """Get memory system statistics."""
+    try:
+        memory = get_memory_system()
+        if memory is None:
+            return JSONResponse({"available": False})
 
+        stats = memory.get_stats() if hasattr(memory, 'get_stats') else {}
+        return JSONResponse({
+            "available": True,
+            "stats": stats
+        })
+
+    except Exception as e:
+        logger.error(f"Memory stats error: {e}")
+        return JSONResponse({"available": False, "error": str(e)})
+
+
+# ============================================
+# NOTES API
+# ============================================
+
+@app.get("/api/notes")
+async def list_notes():
+    """List all notes."""
+    try:
+        notes = get_notes_manager()
+        if notes is None:
+            return JSONResponse({
+                "success": False,
+                "notes": [],
+                "message": "Notes manager not available"
+            })
+
+        all_notes = notes.list_notes() if hasattr(notes, 'list_notes') else []
+        return JSONResponse({
+            "success": True,
+            "notes": all_notes,
+            "count": len(all_notes)
+        })
+
+    except Exception as e:
+        logger.error(f"Notes list error: {e}")
+        return JSONResponse({"success": False, "notes": [], "error": str(e)})
+
+
+@app.post("/api/notes")
+async def add_note(request: NoteRequest):
+    """Add a new note."""
+    try:
+        notes = get_notes_manager()
+        if notes is None:
+            return JSONResponse({
+                "success": False,
+                "message": "Notes manager not available"
+            })
+
+        note = notes.add_note(
+            content=request.content,
+            tags=request.tags or []
+        )
+
+        await ws_manager.emit_event(EventType.NOTE_ADDED, {
+            "content": request.content[:50] + "..." if len(request.content) > 50 else request.content
+        })
+
+        return JSONResponse({
+            "success": True,
+            "note": note if isinstance(note, dict) else {"content": request.content},
+            "message": "Note captured in my Quick Notes contraption!"
+        })
+
+    except Exception as e:
+        logger.error(f"Note add error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+@app.delete("/api/notes/{note_id}")
+async def delete_note(note_id: str):
+    """Delete a note."""
+    try:
+        notes = get_notes_manager()
+        if notes is None:
+            return JSONResponse({"success": False, "message": "Notes manager not available"})
+
+        notes.delete_note(note_id)
+        return JSONResponse({"success": True, "message": "Note deleted!"})
+
+    except Exception as e:
+        logger.error(f"Note delete error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# SNIPPETS API
+# ============================================
+
+@app.get("/api/snippets")
+async def list_snippets():
+    """List all code snippets."""
+    try:
+        snippets = get_snippet_manager()
+        if snippets is None:
+            return JSONResponse({"success": False, "snippets": []})
+
+        all_snippets = snippets.list_snippets() if hasattr(snippets, 'list_snippets') else []
+        return JSONResponse({
+            "success": True,
+            "snippets": all_snippets,
+            "count": len(all_snippets)
+        })
+
+    except Exception as e:
+        logger.error(f"Snippets list error: {e}")
+        return JSONResponse({"success": False, "snippets": [], "error": str(e)})
+
+
+@app.post("/api/snippets")
+async def add_snippet(request: SnippetRequest):
+    """Add a code snippet."""
+    try:
+        snippets = get_snippet_manager()
+        if snippets is None:
+            return JSONResponse({"success": False, "message": "Snippet manager not available"})
+
+        snippet = snippets.add_snippet(
+            code=request.code,
+            language=request.language,
+            description=request.description,
+            tags=request.tags or []
+        )
+
+        return JSONResponse({
+            "success": True,
+            "snippet": snippet if isinstance(snippet, dict) else {"code": request.code},
+            "message": "Code snippet stored!"
+        })
+
+    except Exception as e:
+        logger.error(f"Snippet add error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# FOCUS TIMER API
+# ============================================
+
+@app.get("/api/focus/status")
+async def focus_status():
+    """Get focus timer status."""
+    try:
+        timer = get_focus_timer()
+        if timer is None:
+            return JSONResponse({
+                "active": False,
+                "available": False,
+                "message": "Focus timer not available"
+            })
+
+        status = timer.get_status() if hasattr(timer, 'get_status') else {}
+        return JSONResponse({
+            "available": True,
+            "active": status.get("active", False),
+            "remaining_seconds": status.get("remaining", 0),
+            "task": status.get("task", ""),
+            "stats": status.get("stats", {})
+        })
+
+    except Exception as e:
+        logger.error(f"Focus status error: {e}")
+        return JSONResponse({"available": False, "error": str(e)})
+
+
+@app.post("/api/focus/start")
+async def start_focus(request: FocusRequest):
+    """Start a focus session."""
+    try:
+        timer = get_focus_timer()
+        if timer is None:
+            return JSONResponse({"success": False, "message": "Focus timer not available"})
+
+        timer.start(
+            task=request.task or "Deep Work",
+            duration_minutes=request.duration_minutes or 25
+        )
+
+        await ws_manager.emit_event(EventType.FOCUS_START, {
+            "task": request.task,
+            "duration": request.duration_minutes
+        })
+
+        return JSONResponse({
+            "success": True,
+            "message": f"Focus session started! {request.duration_minutes} minutes of pure concentration!",
+            "task": request.task,
+            "duration_minutes": request.duration_minutes
+        })
+
+    except Exception as e:
+        logger.error(f"Focus start error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+@app.post("/api/focus/stop")
+async def stop_focus():
+    """Stop the focus session."""
+    try:
+        timer = get_focus_timer()
+        if timer is None:
+            return JSONResponse({"success": False, "message": "Focus timer not available"})
+
+        result = timer.stop() if hasattr(timer, 'stop') else {}
+
+        await ws_manager.emit_event(EventType.FOCUS_END, result)
+
+        return JSONResponse({
+            "success": True,
+            "message": "Focus session ended!",
+            "stats": result
+        })
+
+    except Exception as e:
+        logger.error(f"Focus stop error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# CONTEXT PROFILES API
+# ============================================
+
+@app.get("/api/profiles")
+async def list_profiles():
+    """List available context profiles."""
+    try:
+        profiles = get_context_profiles()
+        if profiles is None:
+            # Return built-in defaults
+            return JSONResponse({
+                "success": True,
+                "profiles": [
+                    {"id": "work", "name": "Work Mode", "icon": "💼", "description": "Focused and professional"},
+                    {"id": "creative", "name": "Creative Mode", "icon": "🎨", "description": "Wild and imaginative"},
+                    {"id": "health", "name": "Health Mode", "icon": "🏥", "description": "Caring and supportive"},
+                    {"id": "trading", "name": "Trading Mode", "icon": "📈", "description": "Analytical degen"},
+                    {"id": "security", "name": "Security Mode", "icon": "🔒", "description": "Paranoid (appropriately)"},
+                ],
+                "active": "default"
+            })
+
+        all_profiles = profiles.list_profiles() if hasattr(profiles, 'list_profiles') else []
+        active = profiles.get_active() if hasattr(profiles, 'get_active') else "default"
+
+        return JSONResponse({
+            "success": True,
+            "profiles": all_profiles,
+            "active": active
+        })
+
+    except Exception as e:
+        logger.error(f"Profiles list error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+@app.post("/api/profiles/switch")
+async def switch_profile(request: ProfileRequest):
+    """Switch to a different context profile."""
+    try:
+        profiles = get_context_profiles()
+        if profiles is None:
+            return JSONResponse({
+                "success": True,
+                "message": f"Switched to {request.profile_id} mode! (Note: Full profiles need local install)",
+                "profile": request.profile_id
+            })
+
+        profiles.switch(request.profile_id)
+
+        return JSONResponse({
+            "success": True,
+            "message": f"Excellent! Switched to {request.profile_id} mode!",
+            "profile": request.profile_id
+        })
+
+    except Exception as e:
+        logger.error(f"Profile switch error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# HEALTH TRACKING API
+# ============================================
+
+@app.get("/api/health/summary")
+async def health_summary():
+    """Get health summary with mock/real data."""
+    try:
+        analyzer = get_health_analyzer()
+        if analyzer is None:
+            # Return mock data
+            return JSONResponse({
+                "success": True,
+                "mock_data": True,
+                "summary": {
+                    "wellness_score": 78,
+                    "heart_rate": {"avg": 72, "trend": "stable"},
+                    "steps": {"today": 8432, "goal": 10000},
+                    "sleep": {"hours": 7.2, "quality": "good"},
+                    "stress": {"level": "moderate", "score": 45}
+                },
+                "insights": [
+                    "Your heart rate is within healthy range",
+                    "You're 84% to your step goal today!",
+                    "Sleep quality was good last night"
+                ]
+            })
+
+        summary = await analyzer.get_summary() if hasattr(analyzer, 'get_summary') else {}
+        return JSONResponse({
+            "success": True,
+            "mock_data": False,
+            "summary": summary
+        })
+
+    except Exception as e:
+        logger.error(f"Health summary error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+@app.get("/api/health/metrics/{metric_type}")
+async def health_metric(metric_type: str, days: int = 7):
+    """Get specific health metric data."""
+    try:
+        analyzer = get_health_analyzer()
+        if analyzer is None:
+            # Return mock trend data
+            import random
+            base_values = {
+                "heart_rate": 72,
+                "steps": 8000,
+                "sleep_hours": 7,
+                "stress": 40,
+                "weight": 170
+            }
+            base = base_values.get(metric_type, 50)
+
+            return JSONResponse({
+                "success": True,
+                "mock_data": True,
+                "metric": metric_type,
+                "data": [
+                    {"date": (datetime.now() - timedelta(days=i)).isoformat()[:10],
+                     "value": base + random.randint(-10, 10)}
+                    for i in range(days)
+                ]
+            })
+
+        data = await analyzer.get_metric(metric_type, days=days)
+        return JSONResponse({
+            "success": True,
+            "mock_data": False,
+            "metric": metric_type,
+            "data": data
+        })
+
+    except Exception as e:
+        logger.error(f"Health metric error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# SEQUENTIAL THINKING API
+# ============================================
+
+@app.post("/api/think")
+async def sequential_think(request: ThinkingRequest):
+    """Use sequential thinking to solve a problem."""
+    try:
+        thinking = get_sequential_thinking()
+
+        await ws_manager.emit_event(EventType.THINKING_START, {
+            "problem": request.problem[:100]
+        })
+
+        if thinking is None:
+            # Simulate thinking steps
+            steps = [
+                {"step": 1, "thought": "Understanding the problem...", "confidence": 0.8},
+                {"step": 2, "thought": "Breaking down into components...", "confidence": 0.7},
+                {"step": 3, "thought": "Analyzing each component...", "confidence": 0.75},
+                {"step": 4, "thought": "Synthesizing solution...", "confidence": 0.85},
+            ]
+
+            for step in steps:
+                await ws_manager.emit_event(EventType.THINKING_STEP, step)
+                await asyncio.sleep(0.5)
+
+            await ws_manager.emit_event(EventType.THINKING_END, {"steps": len(steps)})
+
+            return JSONResponse({
+                "success": True,
+                "simulated": True,
+                "steps": steps,
+                "conclusion": "For full sequential thinking, install Farnsworth locally!",
+                "confidence": 0.75
+            })
+
+        result = await thinking.think(
+            problem=request.problem,
+            max_steps=request.max_steps
+        )
+
+        await ws_manager.emit_event(EventType.THINKING_END, {
+            "steps": len(result.get("steps", []))
+        })
+
+        return JSONResponse({
+            "success": True,
+            "simulated": False,
+            **result
+        })
+
+    except Exception as e:
+        logger.error(f"Thinking error: {e}")
+        await ws_manager.emit_event(EventType.ERROR, {"error": str(e)})
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# TOOLS API
+# ============================================
+
+@app.get("/api/tools")
+async def list_tools():
+    """List all available tools."""
+    try:
+        router = get_tool_router()
+        if router is None:
+            # Return basic tool list
+            return JSONResponse({
+                "success": True,
+                "tools": [
+                    {"name": "read_file", "category": "filesystem", "description": "Read file contents"},
+                    {"name": "write_file", "category": "filesystem", "description": "Write to file"},
+                    {"name": "list_directory", "category": "filesystem", "description": "List directory"},
+                    {"name": "execute_python", "category": "code", "description": "Run Python code"},
+                    {"name": "analyze_code", "category": "code", "description": "Analyze code quality"},
+                    {"name": "calculate", "category": "utility", "description": "Math calculations"},
+                    {"name": "datetime_info", "category": "utility", "description": "Date/time info"},
+                    {"name": "system_diagnostic", "category": "utility", "description": "System info"},
+                    {"name": "summarize_text", "category": "analysis", "description": "Summarize text"},
+                    {"name": "generate_mermaid_chart", "category": "generation", "description": "Create diagrams"},
+                ],
+                "count": 10,
+                "full_count": "50+ (install locally)"
+            })
+
+        tools = router.list_tools() if hasattr(router, 'list_tools') else []
+        return JSONResponse({
+            "success": True,
+            "tools": tools,
+            "count": len(tools)
+        })
+
+    except Exception as e:
+        logger.error(f"Tools list error: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+@app.post("/api/tools/execute")
+async def execute_tool(request: ToolRequest):
+    """Execute a specific tool."""
+    try:
+        router = get_tool_router()
+
+        await ws_manager.emit_event(EventType.TOOL_CALL, {
+            "tool": request.tool_name,
+            "args": request.args
+        })
+
+        if router is None:
+            result = f"Tool '{request.tool_name}' requires local installation for full functionality."
+            await ws_manager.emit_event(EventType.TOOL_RESULT, {
+                "tool": request.tool_name,
+                "success": False
+            })
+            return JSONResponse({
+                "success": False,
+                "message": result
+            })
+
+        result = await router.execute(
+            tool_name=request.tool_name,
+            **request.args or {}
+        )
+
+        await ws_manager.emit_event(EventType.TOOL_RESULT, {
+            "tool": request.tool_name,
+            "success": True
+        })
+
+        return JSONResponse({
+            "success": True,
+            "result": result
+        })
+
+    except Exception as e:
+        logger.error(f"Tool execute error: {e}")
+        await ws_manager.emit_event(EventType.ERROR, {"error": str(e)})
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+# ============================================
+# TRADING TOOLS (Demo/Full Mode)
+# ============================================
 
 @app.post("/api/tools/whale-track")
 async def whale_track(request: WhaleTrackRequest):
-    """Track whale wallet activity - holder tool."""
+    """Track whale wallet activity."""
     try:
-        # In full version, this connects to degen_mob.get_whale_recent_activity()
-        # For demo, return Farnsworth-styled response
+        # Try to load DeGen Mob
+        try:
+            from farnsworth.integration.solana.degen_mob import DeGenMob
+            degen = DeGenMob()
+            result = await degen.get_whale_recent_activity(request.wallet_address)
+            return JSONResponse({
+                "success": True,
+                "wallet": request.wallet_address,
+                "data": result,
+                "demo_mode": False
+            })
+        except ImportError:
+            pass
+
         return JSONResponse({
             "success": True,
             "wallet": request.wallet_address[:8] + "..." + request.wallet_address[-4:],
-            "message": "Good news, everyone! Whale tracking requires the full laboratory installation. This demo shows the interface only.",
+            "message": "Whale tracking requires local install with Solana dependencies.",
             "demo_mode": True,
             "data": {
                 "recent_transactions": [],
@@ -477,19 +1265,31 @@ async def whale_track(request: WhaleTrackRequest):
 
 @app.post("/api/tools/rug-check")
 async def rug_check(request: RugCheckRequest):
-    """Scan token for rug pull risks - holder tool."""
+    """Scan token for rug pull risks."""
     try:
-        # In full version, this connects to degen_mob.analyze_token_safety()
+        try:
+            from farnsworth.integration.solana.degen_mob import DeGenMob
+            degen = DeGenMob()
+            result = await degen.analyze_token_safety(request.mint_address)
+            return JSONResponse({
+                "success": True,
+                "mint": request.mint_address,
+                "data": result,
+                "demo_mode": False
+            })
+        except ImportError:
+            pass
+
         return JSONResponse({
             "success": True,
             "mint": request.mint_address[:8] + "..." + request.mint_address[-4:],
-            "message": "Sweet zombie Jesus! Rug detection requires the full laboratory. Install locally for real scans!",
+            "message": "Rug detection requires local install with Solana dependencies.",
             "demo_mode": True,
             "data": {
                 "rug_score": "N/A - Demo Mode",
-                "mint_authority": "Unknown",
-                "freeze_authority": "Unknown",
-                "recommendation": "Install Farnsworth locally for real token safety scans"
+                "mint_authority": "Check locally",
+                "freeze_authority": "Check locally",
+                "recommendation": "Install Farnsworth locally for real scans"
             }
         })
     except Exception as e:
@@ -499,13 +1299,25 @@ async def rug_check(request: RugCheckRequest):
 
 @app.post("/api/tools/token-scan")
 async def token_scan(request: TokenScanRequest):
-    """Scan token via DexScreener - holder tool."""
+    """Scan token via DexScreener."""
     try:
-        # In full version, this connects to dexscreener.search_pairs()
+        try:
+            from farnsworth.integration.financial.dexscreener import DexScreenerClient
+            client = DexScreenerClient()
+            result = await client.search_pairs(request.query)
+            return JSONResponse({
+                "success": True,
+                "query": request.query,
+                "data": result,
+                "demo_mode": False
+            })
+        except ImportError:
+            pass
+
         return JSONResponse({
             "success": True,
             "query": request.query,
-            "message": "Ah, my Token Scanner! In this demo, I can only show you the interface. Install locally for real DexScreener data!",
+            "message": "Token scanning requires local install.",
             "demo_mode": True,
             "data": {
                 "pairs": [],
@@ -520,17 +1332,28 @@ async def token_scan(request: TokenScanRequest):
 
 @app.get("/api/tools/market-sentiment")
 async def market_sentiment():
-    """Get market sentiment (Fear & Greed) - holder tool."""
+    """Get market sentiment (Fear & Greed)."""
     try:
-        # In full version, this connects to market_sentiment.get_fear_and_greed()
+        try:
+            from farnsworth.integration.financial.market_sentiment import MarketSentiment
+            sentiment = MarketSentiment()
+            result = await sentiment.get_fear_and_greed()
+            return JSONResponse({
+                "success": True,
+                "data": result,
+                "demo_mode": False
+            })
+        except ImportError:
+            pass
+
         return JSONResponse({
             "success": True,
-            "message": "Good news, everyone! Well, sort of. This demo can't fetch live sentiment. Install locally!",
+            "message": "Market sentiment requires local install.",
             "demo_mode": True,
             "data": {
                 "fear_greed_index": "N/A - Demo",
                 "classification": "Install locally for live data",
-                "timestamp": "Now"
+                "timestamp": datetime.now().isoformat()
             }
         })
     except Exception as e:
@@ -538,34 +1361,25 @@ async def market_sentiment():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy"}
-
-
 # ============================================
-# WEBSOCKET ENDPOINTS FOR REAL-TIME UPDATES
+# WEBSOCKET ENDPOINTS
 # ============================================
 
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket):
-    """WebSocket endpoint for real-time events (thinking, tools, responses)."""
+    """WebSocket endpoint for real-time events."""
     await ws_manager.connect(websocket)
     try:
-        # Send welcome message
         await websocket.send_json({
             "type": "connected",
             "message": "Good news, everyone! Connected to Farnsworth Live Feed!",
             "timestamp": datetime.now().isoformat()
         })
 
-        # Keep connection alive and receive messages
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
 
-                # Handle client messages
                 if data.get("type") == "ping":
                     await websocket.send_json({"type": "pong"})
                 elif data.get("type") == "get_history":
@@ -578,7 +1392,6 @@ async def websocket_live(websocket: WebSocket):
                     })
 
             except asyncio.TimeoutError:
-                # Send heartbeat
                 await websocket.send_json({"type": "heartbeat"})
 
     except WebSocketDisconnect:
@@ -590,13 +1403,13 @@ async def websocket_live(websocket: WebSocket):
 
 @app.get("/live", response_class=HTMLResponse)
 async def live_dashboard(request: Request):
-    """Live dashboard showing real-time action graphs and thinking states."""
+    """Live dashboard showing real-time action graphs."""
     return templates.TemplateResponse("live.html", {"request": request})
 
 
 @app.get("/api/sessions")
 async def get_sessions():
-    """Get list of active sessions with event counts."""
+    """Get list of active sessions."""
     sessions = []
     for session_id, events in ws_manager.session_events.items():
         sessions.append({
@@ -615,7 +1428,6 @@ async def get_session_graph(session_id: str):
     """Get action chain graph data for a session."""
     events = ws_manager.get_session_history(session_id)
 
-    # Build graph nodes and edges
     nodes = []
     edges = []
     node_id = 0
@@ -623,7 +1435,6 @@ async def get_session_graph(session_id: str):
     for event in events:
         event_type = event.get("type", "unknown")
 
-        # Create node for each event
         node = {
             "id": node_id,
             "type": event_type,
@@ -633,7 +1444,6 @@ async def get_session_graph(session_id: str):
         }
         nodes.append(node)
 
-        # Create edge to previous node
         if node_id > 0:
             edges.append({
                 "from": node_id - 1,
@@ -649,28 +1459,15 @@ async def get_session_graph(session_id: str):
     })
 
 
-# Helper to emit events from chat
-async def emit_thinking_event(step: str, content: str, session_id: str = "default"):
-    """Emit a thinking step event."""
-    await ws_manager.emit_event(EventType.THINKING_STEP, {
-        "step": step,
-        "content": content
-    }, session_id)
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "healthy"}
 
 
-async def emit_tool_event(tool_name: str, args: dict, result: str = None, session_id: str = "default"):
-    """Emit a tool call/result event."""
-    if result is None:
-        await ws_manager.emit_event(EventType.TOOL_CALL, {
-            "tool": tool_name,
-            "args": args
-        }, session_id)
-    else:
-        await ws_manager.emit_event(EventType.TOOL_RESULT, {
-            "tool": tool_name,
-            "result": result
-        }, session_id)
-
+# ============================================
+# MAIN
+# ============================================
 
 def main():
     """Run the web server."""
@@ -681,6 +1478,7 @@ def main():
     logger.info(f"Demo Mode: {DEMO_MODE}")
     logger.info(f"Ollama Available: {OLLAMA_AVAILABLE}")
     logger.info(f"Solana Available: {SOLANA_AVAILABLE}")
+    logger.info("Features: Memory, Notes, Snippets, Focus, Profiles, Health, Tools, Thinking")
 
     uvicorn.run(
         "farnsworth.web.server:app",
