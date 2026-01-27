@@ -962,7 +962,7 @@ def generate_swarm_fallback(bot_name: str, message: str) -> str:
         ]
     }
 
-    return random.choice(fallbacks.get(bot_name, ["Processing..."])))
+    return random.choice(fallbacks.get(bot_name, ["Processing..."]))
 
 
 # Event types for real-time updates
