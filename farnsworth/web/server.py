@@ -416,16 +416,54 @@ class CryptoQueryParser:
 
         return result
 
+    # Major tokens - use CoinGecko for accurate prices
+    MAJOR_TOKENS = {
+        'sol': 'solana', 'solana': 'solana',
+        'btc': 'bitcoin', 'bitcoin': 'bitcoin',
+        'eth': 'ethereum', 'ethereum': 'ethereum',
+        'usdc': 'usd-coin', 'usdt': 'tether',
+        'bonk': 'bonk', 'wif': 'dogwifhat', 'jup': 'jupiter-exchange-solana',
+        'ray': 'raydium', 'orca': 'orca'
+    }
+
     @classmethod
     async def _token_lookup(cls, query: str) -> dict:
-        """Look up token info via DexScreener."""
+        """Look up token info via CoinGecko for major tokens, DexScreener for others."""
+        import httpx
+        query_lower = query.lower().strip()
+
+        # Check if it's a major token - use CoinGecko for accurate data
+        if query_lower in cls.MAJOR_TOKENS:
+            coingecko_id = cls.MAJOR_TOKENS[query_lower]
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coingecko_id}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true"
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if coingecko_id in data:
+                            token_data = data[coingecko_id]
+                            return {
+                                "pairs": [{
+                                    "baseToken": {"name": coingecko_id.replace('-', ' ').title(), "symbol": query_lower.upper()},
+                                    "priceUsd": str(token_data.get('usd', 'N/A')),
+                                    "priceChange": {"h24": token_data.get('usd_24h_change', 0)},
+                                    "volume": {"h24": token_data.get('usd_24h_vol', 0)},
+                                    "liquidity": {"usd": token_data.get('usd_market_cap', 0)},
+                                    "dexId": "CoinGecko"
+                                }],
+                                "source": "coingecko"
+                            }
+            except Exception as e:
+                logger.warning(f"CoinGecko API failed: {e}")
+
+        # For other tokens or if CoinGecko fails, use DexScreener
         try:
             from farnsworth.integration.financial.dexscreener import DexScreenerClient
             client = DexScreenerClient()
             return await client.search_pairs(query)
         except ImportError:
             # Fallback to direct API call
-            import httpx
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     url = f"https://api.dexscreener.com/latest/dex/search?q={query}"
@@ -490,16 +528,43 @@ class CryptoQueryParser:
         volume = pair.get('volume', {}).get('h24', 0)
         liquidity = pair.get('liquidity', {}).get('usd', 0)
         dex = pair.get('dexId', 'Unknown')
+        source = data.get('source', 'dexscreener')
 
         change_emoji = '📈' if float(price_change or 0) >= 0 else '📉'
+
+        # Format price change nicely
+        try:
+            change_val = float(price_change or 0)
+            change_str = f"{change_val:+.2f}%"
+        except:
+            change_str = f"{price_change}%"
+
+        # Use Market Cap label for CoinGecko data
+        liq_label = "Market Cap" if source == 'coingecko' else "Liquidity"
+        liq_emoji = "📈" if source == 'coingecko' else "💧"
+
+        # Format large numbers
+        def fmt_num(n):
+            try:
+                n = float(n)
+                if n >= 1_000_000_000:
+                    return f"${n/1_000_000_000:.2f}B"
+                elif n >= 1_000_000:
+                    return f"${n/1_000_000:.2f}M"
+                elif n >= 1_000:
+                    return f"${n/1_000:.2f}K"
+                else:
+                    return f"${n:,.0f}"
+            except:
+                return f"${n}"
 
         return f"""🪙 **{name}** (${symbol})
 
 💰 **Price:** ${price}
-{change_emoji} **24h Change:** {price_change}%
-📊 **24h Volume:** ${volume:,.0f}
-💧 **Liquidity:** ${liquidity:,.0f}
-🏪 **DEX:** {dex}
+{change_emoji} **24h Change:** {change_str}
+📊 **24h Volume:** {fmt_num(volume)}
+{liq_emoji} **{liq_label}:** {fmt_num(liquidity)}
+🏪 **Source:** {dex}
 
 _{len(pairs)} trading pair(s) found_"""
 
