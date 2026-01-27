@@ -10,8 +10,9 @@
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](docker/)
 [![Models](https://img.shields.io/badge/Models-12%2B%20Supported-green.svg)](configs/models.yaml)
+[![Smithery](https://img.shields.io/badge/Smithery-MCP%20Server-blueviolet.svg)](https://smithery.ai/server/farnsworth)
 
-[**Documentation**](docs/USER_GUIDE.md) • [**Roadmap**](ROADMAP.md) • [**Setup Wizard**](farnsworth/core/setup_wizard.py) • [**Isolated Mode**](README.md#isolated-mode)
+[**Documentation**](docs/USER_GUIDE.md) • [**Smithery**](https://smithery.ai/server/farnsworth) • [**Roadmap**](ROADMAP.md) • [**Setup Wizard**](farnsworth/core/setup_wizard.py) • [**Isolated Mode**](README.md#isolated-mode)
 
 </div>
 
@@ -260,6 +261,31 @@ high_vram:   # 8GB+ VRAM: Full swarm with verification
 ---
 
 ## ⚡ Quick Start
+
+### 🔮 Install via Smithery (Easiest)
+
+Install Farnsworth directly from [Smithery](https://smithery.ai):
+
+```bash
+npx @smithery/cli install farnsworth
+```
+
+Or add to your Claude Desktop config manually:
+```json
+{
+  "mcpServers": {
+    "farnsworth": {
+      "command": "npx",
+      "args": ["-y", "@smithery/cli", "run", "farnsworth"],
+      "env": {
+        "SOLANA_RPC_URL": "your-rpc-url-here"
+      }
+    }
+  }
+}
+```
+
+---
 
 ### 🤖 Install via Claude Code (Recommended)
 
