@@ -178,9 +178,13 @@
         <footer class="chat-footer">
             <div class="input-container glass-panel">
                 <div class="input-row">
+                    <button id="mic-btn" class="mic-button" title="Voice Input (Click to speak)">
+                        <span class="mic-icon">🎤</span>
+                        <span class="mic-listening">🔴</span>
+                    </button>
                     <textarea
                         id="user-input"
-                        placeholder="Ask Farnsworth anything..."
+                        placeholder="Ask Farnsworth anything... or click 🎤 to speak"
                         rows="1"
                         maxlength="500"
                     ></textarea>
@@ -203,70 +207,117 @@
                 <button class="close-sidebar" onclick="toggleSidebar()">✕</button>
             </div>
             <div class="sidebar-body">
-                <div class="tools-grid">
-                    <div class="tool-card available">
-                        <div class="tool-icon">💾</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Memory</span>
-                            <span class="tool-desc">Store & recall</span>
+                <div class="tools-section">
+                    <h4 class="tools-section-title">🎯 Holder Tools</h4>
+                    <div class="tools-grid">
+                        <div class="tool-card available clickable" onclick="openWhaleTracker()">
+                            <div class="tool-icon">🐋</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Whale Tracker</span>
+                                <span class="tool-desc">Track wallet activity</span>
+                            </div>
+                            <span class="tool-badge available">✓</span>
                         </div>
-                        <span class="tool-badge available">✓</span>
+                        <div class="tool-card available clickable" onclick="openRugCheck()">
+                            <div class="tool-icon">🔍</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Rug Check</span>
+                                <span class="tool-desc">Token safety scan</span>
+                            </div>
+                            <span class="tool-badge available">✓</span>
+                        </div>
+                        <div class="tool-card available clickable" onclick="openTokenScanner()">
+                            <div class="tool-icon">📊</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Token Scanner</span>
+                                <span class="tool-desc">DexScreener data</span>
+                            </div>
+                            <span class="tool-badge available">✓</span>
+                        </div>
+                        <div class="tool-card available clickable" onclick="openMarketSentiment()">
+                            <div class="tool-icon">📈</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Market Mood</span>
+                                <span class="tool-desc">Fear & Greed</span>
+                            </div>
+                            <span class="tool-badge available">✓</span>
+                        </div>
                     </div>
-                    <div class="tool-card available">
-                        <div class="tool-icon">🗣️</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Voice</span>
-                            <span class="tool-desc">Text-to-speech</span>
+                </div>
+
+                <div class="tools-section">
+                    <h4 class="tools-section-title">🧠 Core Features</h4>
+                    <div class="tools-grid">
+                        <div class="tool-card available">
+                            <div class="tool-icon">💾</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Memory</span>
+                                <span class="tool-desc">Store & recall</span>
+                            </div>
+                            <span class="tool-badge available">✓</span>
                         </div>
-                        <span class="tool-badge available">✓</span>
+                        <div class="tool-card available">
+                            <div class="tool-icon">🗣️</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Voice I/O</span>
+                                <span class="tool-desc">Speak & Listen</span>
+                            </div>
+                            <span class="tool-badge available">✓</span>
+                        </div>
+                        <div class="tool-card limited">
+                            <div class="tool-icon">🤖</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Agents</span>
+                                <span class="tool-desc">Delegation</span>
+                            </div>
+                            <span class="tool-badge limited">~</span>
+                        </div>
+                        <div class="tool-card limited">
+                            <div class="tool-icon">👁️</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Vision</span>
+                                <span class="tool-desc">Image analysis</span>
+                            </div>
+                            <span class="tool-badge limited">~</span>
+                        </div>
                     </div>
-                    <div class="tool-card limited">
-                        <div class="tool-icon">🤖</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Agents</span>
-                            <span class="tool-desc">Delegation</span>
+                </div>
+
+                <div class="tools-section">
+                    <h4 class="tools-section-title">🔒 Install Locally</h4>
+                    <div class="tools-grid">
+                        <div class="tool-card locked">
+                            <div class="tool-icon">💰</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Trading</span>
+                                <span class="tool-desc">Jupiter swaps</span>
+                            </div>
+                            <span class="tool-badge locked">🔒</span>
                         </div>
-                        <span class="tool-badge limited">~</span>
-                    </div>
-                    <div class="tool-card limited">
-                        <div class="tool-icon">👁️</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Vision</span>
-                            <span class="tool-desc">Image analysis</span>
+                        <div class="tool-card locked">
+                            <div class="tool-icon">🐝</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Swarm</span>
+                                <span class="tool-desc">Multi-model</span>
+                            </div>
+                            <span class="tool-badge locked">🔒</span>
                         </div>
-                        <span class="tool-badge limited">~</span>
-                    </div>
-                    <div class="tool-card locked">
-                        <div class="tool-icon">💰</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Solana</span>
-                            <span class="tool-desc">Trading tools</span>
+                        <div class="tool-card locked">
+                            <div class="tool-icon">🌐</div>
+                            <div class="tool-info">
+                                <span class="tool-name">P2P Network</span>
+                                <span class="tool-desc">Planetary memory</span>
+                            </div>
+                            <span class="tool-badge locked">🔒</span>
                         </div>
-                        <span class="tool-badge locked">🔒</span>
-                    </div>
-                    <div class="tool-card locked">
-                        <div class="tool-icon">🐝</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Swarm</span>
-                            <span class="tool-desc">Multi-model</span>
+                        <div class="tool-card locked">
+                            <div class="tool-icon">🧬</div>
+                            <div class="tool-info">
+                                <span class="tool-name">Evolution</span>
+                                <span class="tool-desc">Self-improve</span>
+                            </div>
+                            <span class="tool-badge locked">🔒</span>
                         </div>
-                        <span class="tool-badge locked">🔒</span>
-                    </div>
-                    <div class="tool-card locked">
-                        <div class="tool-icon">🌐</div>
-                        <div class="tool-info">
-                            <span class="tool-name">P2P Network</span>
-                            <span class="tool-desc">Planetary memory</span>
-                        </div>
-                        <span class="tool-badge locked">🔒</span>
-                    </div>
-                    <div class="tool-card locked">
-                        <div class="tool-icon">📈</div>
-                        <div class="tool-info">
-                            <span class="tool-name">Evolution</span>
-                            <span class="tool-desc">Self-improve</span>
-                        </div>
-                        <span class="tool-badge locked">🔒</span>
                     </div>
                 </div>
             </div>

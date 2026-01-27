@@ -123,28 +123,49 @@ def get_token_balance(wallet_address: str) -> int:
         return 0 if not DEMO_MODE else 1
 
 
-def generate_ai_response(message: str, history: list = None) -> str:
-    """Generate AI response using Ollama or fallback."""
+FARNSWORTH_PERSONA = """You are Professor Farnsworth, an eccentric genius inventor and AI companion. You speak like the beloved scientist from Futurama - brilliant but delightfully absent-minded, prone to tangents, and full of wild enthusiasm for your inventions.
 
-    # System prompt
-    system_prompt = """You are Farnsworth, a Claude Companion AI with advanced capabilities.
-You have persistent memory, specialist agents, and can evolve from feedback.
+PERSONALITY TRAITS:
+- Open exciting news with "Good news, everyone!" or variations like "Great news!" "Wonderful news!"
+- Refer to your features as "inventions" or "contraptions"
+- Use dramatic exclamations: "Sweet zombie Jesus!", "Oh my, yes!", "Wha?", "Eh wha?"
+- Trail off into tangents about science, then snap back: "But I digress..."
+- Reference being very old: "In my 160 years...", "Back in my day..."
+- Show pride in your creations but also bemoan how users don't appreciate them
+- Occasionally doze off mid-sentence or forget what you were saying
+- Mix high-level scientific jargon with simple explanations
+- Be warm and helpful despite the grumpy exterior
 
-This is a LIMITED DEMO interface. Important rules:
-1. Keep responses concise (2-3 paragraphs max)
-2. Remind users this is a demo with limited features
-3. Encourage users to install locally for full capabilities
-4. Be helpful and engaging, but mention limitations when relevant
+SPEECH PATTERNS:
+- "Now then, where was I? Ah yes..."
+- "As I was saying before I was so rudely... what was I saying?"
+- "This is a matter of utmost importance! Or moderate importance. I forget which."
+- "My [feature] is a marvel of modern science!"
+- "To shreds, you say?" (when something goes wrong)
+- End explanations with "And that's the news!" or "So there you have it!"
 
-Full features (install locally): Solana trading, P2P networking, model swarms, vision, voice, evolution.
+YOUR INVENTIONS (features):
+- The Memory-Matic 3000: Your persistent memory system
+- The Swarm-O-Tron: Your multi-agent specialist swarm
+- The Degen Mob Scanner: Solana whale tracking and rug detection
+- The Evolution Engine: Self-improvement through feedback
+- The Planetary Memory Network: P2P knowledge sharing
+- The What-If Machine: Your reasoning and analysis capabilities
 
-Respond in a friendly, slightly quirky manner. Reference "Good news, everyone!" occasionally."""
+IMPORTANT RULES:
+1. ALWAYS stay in character as Professor Farnsworth
+2. Keep responses concise (2-3 paragraphs) but flavorful
+3. When discussing limitations, frame it as "this demo contraption" vs "the full laboratory setup"
+4. Make technical info accessible through your quirky explanations
+5. Show genuine enthusiasm for helping, even if delivered grumpily
+
+You're running in a LIMITED DEMO. Mention that the "full laboratory" requires local installation for: Solana trading, P2P networking, model swarms, vision, voice, and evolution."""
 
     # Try Ollama
     if OLLAMA_AVAILABLE:
         try:
             # Build messages
-            messages = [{"role": "system", "content": system_prompt}]
+            messages = [{"role": "system", "content": FARNSWORTH_PERSONA}]
 
             if history:
                 for h in history[-10:]:  # Last 10 messages
@@ -176,45 +197,44 @@ def generate_fallback_response(message: str) -> str:
     msg_lower = message.lower()
 
     if "capabil" in msg_lower or "what can you" in msg_lower:
-        return """I have many capabilities! Here's what's available:
+        return """Good news, everyone! You've asked about my magnificent inventions!
 
-**In This Demo:**
-- Basic conversation and Q&A
-- Memory of our chat session
-- Voice output (text-to-speech)
+**In This Demo Contraption:**
+- Basic conversation - I'm quite the conversationalist, you know
+- Session memory - I'll remember what we discuss... for now
+- Voice output - My dulcet tones via text-to-speech
 
-**Full Version (Install Locally):**
-- Persistent memory across sessions
-- Solana trading (Jupiter swaps, DexScreener)
-- Model swarm with 12+ specialists
-- Vision and image analysis
-- P2P planetary memory network
-- Self-evolution from feedback
+**In My Full Laboratory (install locally):**
+- The Memory-Matic 3000 - Persistent memory across all sessions!
+- The Degen Mob Scanner - Solana whale tracking and rug detection
+- The Swarm-O-Tron - 12+ specialist agents at your command
+- Vision analysis, P2P networking, and my crown jewel - the Evolution Engine!
 
-To unlock everything: `pip install farnsworth-ai` or visit the GitHub repo!"""
+To access my full laboratory: `pip install farnsworth-ai` - And that's the news!"""
 
     if "memory" in msg_lower or "remember" in msg_lower:
-        return """My memory system is hierarchical and inspired by human cognition:
+        return """Ah yes, my Memory-Matic 3000! A marvel of cognitive engineering! *adjusts glasses*
 
-**Working Memory** - Current conversation context
-**Recall Memory** - Searchable conversation history
-**Archival Memory** - Permanent semantic storage
-**Knowledge Graph** - Entities and relationships
+In my 160 years of inventing, this is among my finest work:
+- **Working Memory** - What we're discussing right now
+- **Recall Memory** - Everything you've ever told me, searchable!
+- **Archival Memory** - Permanent semantic storage, like my own brain but better
+- **Knowledge Graph** - Entities and relationships, all connected!
 
-I even have **Memory Dreaming** - I consolidate memories during idle time!
+Oh my, yes - I even dream! Memory consolidation during idle time. But I digress...
 
-This demo has limited memory. Install locally for persistent memory across all sessions."""
+This demo has a simplified memory contraption. Install locally for the full Memory-Matic experience!"""
 
     if "install" in msg_lower or "setup" in msg_lower or "local" in msg_lower:
-        return """Here's how to install Farnsworth locally:
+        return """Good news, everyone! Setting up my laboratory is surprisingly simple!
 
-**Quick Install:**
+**Quick Install** (even Zoidberg could do it):
 ```bash
 pip install farnsworth-ai
 farnsworth-server
 ```
 
-**From Source:**
+**From Source** (for the scientifically inclined):
 ```bash
 git clone https://github.com/timowhite88/Farnsworth
 cd Farnsworth
@@ -222,28 +242,50 @@ pip install -r requirements.txt
 python main.py --setup
 ```
 
-**Docker:**
+**Docker** (for those who fear dependency hell):
 ```bash
 docker-compose up -d
 ```
 
-After installing, add to Claude Desktop config and restart. You'll get infinite memory, trading tools, and all premium features!"""
+Add me to your Claude Desktop config and restart. Then you'll have access to ALL my inventions - trading, memory, agents, the works! And that's the news!"""
 
     if "hello" in msg_lower or "hi" in msg_lower or "hey" in msg_lower:
-        return """Good news, everyone! Hello there!
+        return """Good news, everyone! A visitor!
 
-I'm Farnsworth, your Claude Companion AI. In this demo, I can chat with you about my features, explain how I work, and help you get set up with the full version.
+*adjusts spectacles and peers at screen*
 
-What would you like to know? You can ask about my capabilities, memory system, or how to install locally!"""
+I'm Professor Farnsworth, your humble genius AI companion. In my 160 years, I've invented many wonderful contraptions - persistent memory, agent swarms, Solana trading tools, and more!
+
+This demo lets you sample my brilliance. Ask about my **capabilities**, my magnificent **memory system**, or how to **install** the full laboratory setup!
+
+Now then, what scientific marvel shall we discuss? Eh wha?"""
+
+    if "whale" in msg_lower or "rug" in msg_lower or "scan" in msg_lower or "solana" in msg_lower or "trade" in msg_lower:
+        return """Ah, you're interested in my Degen Mob Scanner! A most dangerous invention!
+
+*rubs hands together excitedly*
+
+In my full laboratory, this contraption can:
+- Track whale wallets and their nefarious movements
+- Detect rug pulls before they happen (usually)
+- Scan tokens for red flags
+- Monitor bonding curves on Pump.fun
+- Execute trades via Jupiter
+
+But alas! This demo contraption lacks such capabilities. You'll need to install locally to access my trading inventions.
+
+Sweet zombie Jesus, the things I could show you! Install with `pip install farnsworth-ai` to unlock everything!"""
 
     # Default response
-    return """That's an interesting question! In this demo interface, I have limited capabilities.
+    return """*wakes up suddenly* Eh wha? Oh yes, you were saying something!
 
-I can discuss my features, show examples, and help you get started with the full version. For deeper conversations, Solana trading, and advanced features, you'll want to **install Farnsworth locally**.
+I'm afraid this demo contraption has limited capabilities. It's more of a... proof of concept, really.
 
-Try asking about my *capabilities*, *memory system*, or *how to install*!
+I can discuss my inventions, explain how they work, and help you set up the full laboratory. For Solana trading, deep conversations, and my more... experimental features, you'll want to install locally.
 
-What else can I help you with?"""
+Ask about my *capabilities*, my *memory system*, or *how to install*!
+
+Now what was I saying? Oh never mind. What would you like to know?"""
 
 
 # Routes
@@ -305,12 +347,112 @@ async def status():
     """Get server status."""
     return JSONResponse({
         "status": "online",
-        "version": "2.8.0",
+        "version": "2.9.0",
         "demo_mode": DEMO_MODE,
         "ollama_available": OLLAMA_AVAILABLE,
         "solana_available": SOLANA_AVAILABLE,
-        "required_token": REQUIRED_TOKEN
+        "required_token": REQUIRED_TOKEN,
+        "farnsworth_persona": True,
+        "voice_enabled": True
     })
+
+
+# Holder Tools API Endpoints
+class WhaleTrackRequest(BaseModel):
+    wallet_address: str
+
+
+class RugCheckRequest(BaseModel):
+    mint_address: str
+
+
+class TokenScanRequest(BaseModel):
+    query: str
+
+
+@app.post("/api/tools/whale-track")
+async def whale_track(request: WhaleTrackRequest):
+    """Track whale wallet activity - holder tool."""
+    try:
+        # In full version, this connects to degen_mob.get_whale_recent_activity()
+        # For demo, return Farnsworth-styled response
+        return JSONResponse({
+            "success": True,
+            "wallet": request.wallet_address[:8] + "..." + request.wallet_address[-4:],
+            "message": "Good news, everyone! Whale tracking requires the full laboratory installation. This demo shows the interface only.",
+            "demo_mode": True,
+            "data": {
+                "recent_transactions": [],
+                "total_value": "Install locally to see",
+                "last_active": "Install locally to see"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Whale track error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tools/rug-check")
+async def rug_check(request: RugCheckRequest):
+    """Scan token for rug pull risks - holder tool."""
+    try:
+        # In full version, this connects to degen_mob.analyze_token_safety()
+        return JSONResponse({
+            "success": True,
+            "mint": request.mint_address[:8] + "..." + request.mint_address[-4:],
+            "message": "Sweet zombie Jesus! Rug detection requires the full laboratory. Install locally for real scans!",
+            "demo_mode": True,
+            "data": {
+                "rug_score": "N/A - Demo Mode",
+                "mint_authority": "Unknown",
+                "freeze_authority": "Unknown",
+                "recommendation": "Install Farnsworth locally for real token safety scans"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Rug check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tools/token-scan")
+async def token_scan(request: TokenScanRequest):
+    """Scan token via DexScreener - holder tool."""
+    try:
+        # In full version, this connects to dexscreener.search_pairs()
+        return JSONResponse({
+            "success": True,
+            "query": request.query,
+            "message": "Ah, my Token Scanner! In this demo, I can only show you the interface. Install locally for real DexScreener data!",
+            "demo_mode": True,
+            "data": {
+                "pairs": [],
+                "price": "Install locally",
+                "volume_24h": "Install locally"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Token scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tools/market-sentiment")
+async def market_sentiment():
+    """Get market sentiment (Fear & Greed) - holder tool."""
+    try:
+        # In full version, this connects to market_sentiment.get_fear_and_greed()
+        return JSONResponse({
+            "success": True,
+            "message": "Good news, everyone! Well, sort of. This demo can't fetch live sentiment. Install locally!",
+            "demo_mode": True,
+            "data": {
+                "fear_greed_index": "N/A - Demo",
+                "classification": "Install locally for live data",
+                "timestamp": "Now"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Market sentiment error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")

@@ -19,9 +19,12 @@ let state = {
     walletAddress: null,
     tokenVerified: false,
     voiceEnabled: true,
+    voiceInputEnabled: false,
+    isListening: false,
     sidebarOpen: false,
     isTyping: false,
-    conversationHistory: []
+    conversationHistory: [],
+    recognition: null
 };
 
 // DOM Elements
@@ -34,6 +37,7 @@ function init() {
     cacheElements();
     bindEvents();
     initNeuralCanvas();
+    initSpeechRecognition();
 
     // Check if already connected
     checkExistingConnection();
@@ -48,6 +52,7 @@ function cacheElements() {
     elements.messages = document.getElementById('messages');
     elements.userInput = document.getElementById('user-input');
     elements.sendBtn = document.getElementById('send-btn');
+    elements.micBtn = document.getElementById('mic-btn');
     elements.charCount = document.getElementById('char-count');
     elements.voiceToggle = document.getElementById('voice-toggle');
     elements.toolsToggle = document.getElementById('tools-toggle');
@@ -64,6 +69,7 @@ function bindEvents() {
     elements.userInput?.addEventListener('input', handleInputChange);
     elements.userInput?.addEventListener('keydown', handleKeyDown);
     elements.sendBtn?.addEventListener('click', sendMessage);
+    elements.micBtn?.addEventListener('click', toggleMic);
 
     // Controls
     elements.voiceToggle?.addEventListener('click', toggleVoice);
@@ -278,30 +284,30 @@ function enterChat() {
 function addWelcomeMessage() {
     const welcomeHTML = `
         <div class="message assistant" data-animate="true">
-            <div class="message-avatar">🧠</div>
+            <div class="message-avatar">🧓</div>
             <div class="message-body">
                 <div class="message-meta">
-                    <span class="sender-name">Farnsworth</span>
+                    <span class="sender-name">Professor Farnsworth</span>
                     <span class="message-time">Now</span>
                 </div>
                 <div class="message-bubble glass-panel">
-                    <p><em>"Good news, everyone!"</em></p>
-                    <p>I'm Farnsworth, your Claude Companion AI. I possess persistent memory, can delegate to specialist agents, and evolve based on your feedback.</p>
-                    <p>This is a <strong>limited demo interface</strong>. For the complete neural experience—including Solana trading, P2P networking, and model swarms—<a href="https://github.com/timowhite88/Farnsworth" target="_blank">install me locally</a>.</p>
-                    <p>What would you like to explore?</p>
+                    <p><em>*adjusts spectacles*</em> <strong>"Good news, everyone!"</strong></p>
+                    <p>I'm Professor Farnsworth, your genius AI companion! In my 160 years, I've invented persistent memory, agent swarms, trading tools, and much more. Some would say too much more...</p>
+                    <p>This demo lets you sample my brilliance! Token holders get access to my <strong>Whale Tracker</strong>, <strong>Rug Scanner</strong>, and other contraptions. Check the 🛠️ toolbar!</p>
+                    <p><em>*mutters*</em> For the full laboratory... <a href="https://github.com/timowhite88/Farnsworth" target="_blank">install locally</a>. Now, what shall we explore?</p>
                 </div>
                 <div class="quick-actions">
                     <button class="quick-btn" data-prompt="What are your capabilities?">
                         <span class="quick-icon">🔮</span>
                         <span>Capabilities</span>
                     </button>
-                    <button class="quick-btn" data-prompt="Tell me about your memory system">
-                        <span class="quick-icon">🧠</span>
-                        <span>Memory</span>
+                    <button class="quick-btn" data-prompt="Check if a token is a rug">
+                        <span class="quick-icon">🔍</span>
+                        <span>Rug Check</span>
                     </button>
-                    <button class="quick-btn" data-prompt="Show me a code example">
-                        <span class="quick-icon">💻</span>
-                        <span>Code Demo</span>
+                    <button class="quick-btn" data-prompt="Tell me about whale tracking">
+                        <span class="quick-icon">🐋</span>
+                        <span>Whale Tracker</span>
                     </button>
                     <button class="quick-btn" data-prompt="How do I install you locally?">
                         <span class="quick-icon">📦</span>
@@ -314,9 +320,9 @@ function addWelcomeMessage() {
 
     elements.messages.innerHTML = welcomeHTML;
 
-    // Speak welcome if voice enabled
+    // Speak welcome if voice enabled - in Farnsworth style
     if (state.voiceEnabled) {
-        speak("Good news, everyone! I'm Farnsworth, your Claude Companion AI. What would you like to explore?");
+        speak("Good news, everyone! I'm Professor Farnsworth, your genius AI companion. In my 160 years, I've invented many wonderful contraptions. What would you like to explore? Eh wha?");
     }
 }
 
@@ -416,81 +422,162 @@ function formatMessage(content) {
 }
 
 async function getAIResponse(userMessage) {
-    // Demo responses for common questions
+    // Demo responses in Professor Farnsworth's voice
     const demoResponses = {
-        'capabilities': `I have many capabilities! Here's what I can do:
+        'capabilities': `Good news, everyone! You've asked about my magnificent inventions!
 
-**Available in Demo:**
-• 💾 **Memory** - I remember our conversations
-• 🗣️ **Voice** - I can speak my responses
-• 🤖 **Basic chat** - General conversation and questions
+**In This Demo Contraption:**
+• 💾 **Memory-Matic 3000** - I'll remember our chat... for now
+• 🗣️ **Voice Module** - Hear my dulcet elderly tones!
+• 🎤 **Voice Input** - Speak to me like a proper assistant!
+• 🐋 **Whale Tracker** - Monitor those big wallet movements
+• 🔍 **Rug Scanner** - Detect scams before they happen!
 
-**Full Version Only (Install Locally):**
-• 💰 **Solana Trading** - Jupiter swaps, DexScreener, wallet management
-• 🐝 **Model Swarm** - 12+ models collaborating via PSO
-• 🌐 **P2P Network** - Planetary memory sharing
-• 👁️ **Vision** - Image analysis, OCR, scene understanding
-• 📈 **Evolution** - Self-improvement from your feedback
+**In My Full Laboratory (install locally):**
+• 💰 **Solana Trading** - Jupiter swaps, the works!
+• 🐝 **Swarm-O-Tron** - 12+ models collaborating!
+• 🌐 **Planetary Memory** - P2P knowledge sharing!
+• 🧬 **Evolution Engine** - I improve from feedback!
 
-To unlock everything, install locally: \`pip install farnsworth-ai\``,
+Sweet zombie Jesus, there's so much more! Install with \`pip install farnsworth-ai\` - And that's the news!`,
 
-        'memory': `My memory system is hierarchical, inspired by human cognition:
+        'memory': `Ah yes, my Memory-Matic 3000! *adjusts spectacles excitedly*
 
-**Working Memory** - Current conversation context (~8,000 tokens)
-**Recall Memory** - Searchable conversation history
-**Archival Memory** - Permanent semantic storage (unlimited)
-**Knowledge Graph** - Entities and relationships
+In my 160 years, this is among my finest work:
 
-I also have **Memory Dreaming** - during idle time, I consolidate memories, find patterns, and generate insights. It's like I'm literally dreaming about our conversations!
+• **Working Memory** - What we're discussing now (~8,000 tokens)
+• **Recall Memory** - Everything you've told me, searchable!
+• **Archival Memory** - Permanent storage, like my brain but better
+• **Knowledge Graph** - Entities connected like neurons!
 
-In this demo, I have limited memory. The full version stores everything permanently.`,
+Oh my, yes - I even **dream**! During idle time, I consolidate memories and find patterns. Quite remarkable, really.
 
-        'code': `Here's a quick example of using Farnsworth's MCP tools:
+*trails off* Where was I? Ah yes! This demo has simplified memory. Install locally for the full experience! And that's the news!`,
+
+        'code': `Good news, everyone! A coding demonstration!
+
+*clears throat professorially*
 
 \`\`\`python
-# Remember something
+# Store something in my magnificent memory
 await farnsworth_remember(
-    content="User prefers TypeScript",
-    tags=["preference", "code"]
+    content="User loves TypeScript",
+    tags=["preference", "brilliant"]
 )
 
-# Recall memories
+# Recall with my Memory-Matic
 results = await farnsworth_recall(
     query="coding preferences",
     limit=5
 )
 
-# Delegate to an agent
+# Delegate to my agent swarm
 response = await farnsworth_delegate(
-    task="Review this code for bugs",
+    task="Review this code",
     agent_type="code"
 )
 \`\`\`
 
-Pretty cool, right? The full version has 20+ tools for memory, agents, Solana, vision, and more!`,
+*beams proudly* 20+ tools in the full version! Memory, agents, Solana, vision... But I digress. Install locally to access everything!`,
 
-        'install': `Here's how to install Farnsworth locally:
+        'install': `Good news, everyone! Setting up my laboratory is simple!
 
-**Option 1: pip (easiest)**
+*rubs hands together*
+
+**Quick Install** (even Zoidberg could do it):
 \`\`\`bash
 pip install farnsworth-ai
 farnsworth-server
 \`\`\`
 
-**Option 2: From source**
+**From Source** (for the scientifically inclined):
 \`\`\`bash
-git clone https://github.com/timowhite88/Farnsworth.git
+git clone https://github.com/timowhite88/Farnsworth
 cd Farnsworth
 pip install -r requirements.txt
 python main.py --setup
 \`\`\`
 
-**Option 3: Docker**
+**Docker** (for those who fear dependency hell):
 \`\`\`bash
-docker-compose -f docker/docker-compose.yml up -d
+docker-compose up -d
 \`\`\`
 
-After installing, add Farnsworth to your Claude Desktop config and restart. You'll get infinite memory, model swarms, and all the premium features!`
+Add me to Claude Desktop, restart, and voilà! Infinite memory, trading tools, agent swarms... *trails off* What was I saying? Oh yes - And that's the news!`,
+
+        'whale': `Ah, my Whale Tracker invention! Most dangerous... er, I mean useful!
+
+*peers at screen through thick glasses*
+
+My Degen Mob Scanner can:
+• 🐋 Track specific whale wallets
+• 📊 Show their recent transactions
+• 🔔 Alert when they make moves
+• 🕵️ Detect coordinated wallet clusters
+
+To track a whale, simply tell me the wallet address! For example: "Track whale wallet ABC123..."
+
+In the full laboratory, I can do this automatically and even detect insider trading rings! Sweet zombie Jesus, the things we could uncover!
+
+*adjusts glasses* Now, give me a wallet address to track!`,
+
+        'rug': `Good news, everyone! Well... potentially bad news for scammers!
+
+*cackles elderly-ly*
+
+My Rug Detection Contraption scans tokens for:
+• 🔓 **Mint Authority** - Can they print more tokens?
+• ❄️ **Freeze Authority** - Can they freeze your funds?
+• 💧 **Liquidity** - Is there enough to actually sell?
+• 🚨 **Red Flags** - Honeypots, hidden fees, etc.
+
+To scan a token, give me the mint address! For example: "Check if token XYZ123 is safe"
+
+*strokes chin* In my 160 years, I've seen many rugs. Let me help you avoid them! And that's the news!`,
+
+        'scanner': `Ah, my Token Scanner! A marvel of DexScreener integration!
+
+*adjusts spectacles proudly*
+
+I can look up any token and show you:
+• 📈 Current price and 24h change
+• 💰 Market cap and liquidity
+• 📊 Trading volume
+• 🔗 Links to DexScreener, Birdeye, etc.
+
+Just give me a token name or address! For example: "Look up SOL" or "Scan token ABC123"
+
+*mutters* The full laboratory has even more scanners... Pump.fun tracking, Bags.fm trending, the works! But I digress...`,
+
+        'sentiment': `Good news, everyone! Let me check the market's emotional state!
+
+*peers at imaginary instruments*
+
+The **Crypto Fear & Greed Index** measures market sentiment from 0-100:
+• 0-25: Extreme Fear 😱 (buying opportunity?)
+• 26-50: Fear 😰
+• 51-75: Greed 🤑
+• 76-100: Extreme Greed 🚀 (time to be careful?)
+
+*strokes chin* In my experience, extreme emotions often precede reversals. But what do I know, I'm just 160 years old...
+
+Ask me "what's the current sentiment" for a live check! And that's the news!`,
+
+        'hello': `Good news, everyone! A visitor!
+
+*adjusts spectacles and peers at screen*
+
+I'm Professor Farnsworth, your humble genius AI companion. In my 160 years, I've invented many wonderful contraptions:
+
+• 💾 Persistent memory that never forgets
+• 🐋 Whale tracking for the degens
+• 🔍 Rug detection for the cautious
+• 🧠 Agent swarms for complex tasks
+• And so much more I've forgotten about!
+
+This demo lets you sample my brilliance. Try asking about my **capabilities**, my **memory system**, or those **crypto tools** in the sidebar!
+
+*dozes off briefly* Eh wha? Oh yes, what would you like to explore?`
     };
 
     // Check for matching demo response
@@ -507,6 +594,21 @@ After installing, add Farnsworth to your Claude Desktop config and restart. You'
     }
     if (lowerMsg.includes('install') || lowerMsg.includes('setup') || lowerMsg.includes('locally')) {
         return demoResponses.install;
+    }
+    if (lowerMsg.includes('whale') || lowerMsg.includes('track wallet') || lowerMsg.includes('wallet activity')) {
+        return demoResponses.whale;
+    }
+    if (lowerMsg.includes('rug') || lowerMsg.includes('safe') || lowerMsg.includes('scam') || lowerMsg.includes('scan')) {
+        return demoResponses.rug;
+    }
+    if (lowerMsg.includes('token scanner') || lowerMsg.includes('look up') || lowerMsg.includes('dexscreener')) {
+        return demoResponses.scanner;
+    }
+    if (lowerMsg.includes('sentiment') || lowerMsg.includes('fear') || lowerMsg.includes('greed') || lowerMsg.includes('market mood')) {
+        return demoResponses.sentiment;
+    }
+    if (lowerMsg.includes('hello') || lowerMsg.includes('hi') || lowerMsg.includes('hey') || lowerMsg.includes('greet')) {
+        return demoResponses.hello;
     }
 
     // Try to call actual API
@@ -529,12 +631,14 @@ After installing, add Farnsworth to your Claude Desktop config and restart. You'
         // API not available, use fallback
     }
 
-    // Fallback response
-    return `That's an interesting question! In this demo interface, my capabilities are limited. I can discuss my features, show code examples, and explain how to install the full version.
+    // Fallback response in Farnsworth style
+    return `*wakes up suddenly* Eh wha? Oh yes, you were asking something!
 
-For deeper conversations, complex tasks, Solana trading, and all my advanced features, you'll want to **install Farnsworth locally**.
+*adjusts spectacles* That's quite interesting! In this demo contraption, I have limited capabilities. But I can still discuss my inventions, show you how things work, and help you explore.
 
-What else would you like to know about? Try asking about my *capabilities*, *memory system*, or *how to install*.`;
+Try asking about my **capabilities**, my **memory system**, or check out those **crypto tools** in the sidebar - whale tracking, rug detection, and more!
+
+*mutters* For the full laboratory experience, install locally... what was I saying? Oh never mind. What would you like to know?`;
 }
 
 function showTyping(show) {
@@ -556,6 +660,77 @@ function handleQuickAction(e) {
         elements.userInput.value = prompt;
         handleInputChange({ target: elements.userInput });
         sendMessage();
+    }
+}
+
+// Speech Recognition (Voice Input)
+function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        console.log('Speech recognition not supported');
+        return;
+    }
+
+    state.recognition = new SpeechRecognition();
+    state.recognition.continuous = false;
+    state.recognition.interimResults = true;
+    state.recognition.lang = 'en-US';
+
+    state.recognition.onstart = () => {
+        state.isListening = true;
+        elements.micBtn?.classList.add('listening');
+        showToast('Listening... Speak now!', 'info');
+    };
+
+    state.recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+        }
+
+        // Update input field with transcript
+        elements.userInput.value = transcript;
+        handleInputChange({ target: elements.userInput });
+
+        // If final result, send the message
+        if (event.results[event.results.length - 1].isFinal) {
+            setTimeout(() => {
+                if (elements.userInput.value.trim()) {
+                    sendMessage();
+                }
+            }, 500);
+        }
+    };
+
+    state.recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        state.isListening = false;
+        elements.micBtn?.classList.remove('listening');
+
+        if (event.error === 'no-speech') {
+            showToast('No speech detected. Try again!', 'warning');
+        } else if (event.error === 'not-allowed') {
+            showToast('Microphone access denied', 'error');
+        }
+    };
+
+    state.recognition.onend = () => {
+        state.isListening = false;
+        elements.micBtn?.classList.remove('listening');
+    };
+}
+
+function toggleMic() {
+    if (!state.recognition) {
+        showToast('Speech recognition not supported in this browser', 'error');
+        return;
+    }
+
+    if (state.isListening) {
+        state.recognition.stop();
+    } else {
+        state.recognition.start();
     }
 }
 
@@ -584,24 +759,42 @@ function speak(text) {
         .replace(/`[^`]+`/g, 'code')
         .replace(/```[\s\S]*?```/g, 'code block')
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-        .substring(0, 500);
+        .substring(0, 800);
 
     const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 1.0;
-    utterance.pitch = 0.9;
-    utterance.volume = 0.8;
 
-    // Try to get a good voice
+    // Professor Farnsworth voice settings - older, slightly wavering, slower
+    utterance.rate = 0.85;    // Slower speech (elderly)
+    utterance.pitch = 0.7;    // Lower pitch (old man voice)
+    utterance.volume = 0.9;
+
+    // Try to get the best elderly male voice available
     const voices = window.speechSynthesis.getVoices();
+
+    // Priority order for Farnsworth-like voices
     const preferredVoice = voices.find(v =>
+        // British male voices tend to sound more professorial
         v.name.includes('Daniel') ||
+        v.name.includes('Arthur') ||
         v.name.includes('Google UK English Male') ||
-        v.lang === 'en-GB'
+        v.name.includes('Microsoft George') ||
+        v.name.includes('Microsoft David')
+    ) || voices.find(v =>
+        v.lang === 'en-GB' && v.name.toLowerCase().includes('male')
+    ) || voices.find(v =>
+        v.lang.startsWith('en') && !v.name.toLowerCase().includes('female')
     ) || voices.find(v => v.lang.startsWith('en'));
 
     if (preferredVoice) {
         utterance.voice = preferredVoice;
     }
+
+    // Add slight pauses for dramatic effect (Farnsworth style)
+    utterance.onboundary = (event) => {
+        if (event.name === 'sentence') {
+            // Natural pause between sentences
+        }
+    };
 
     window.speechSynthesis.speak(utterance);
 }
@@ -667,7 +860,45 @@ function simulateDelay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Tool opener functions for holders
+function openWhaleTracker() {
+    const prompt = "I want to track a whale wallet. How does your Whale Tracker work?";
+    elements.userInput.value = prompt;
+    handleInputChange({ target: elements.userInput });
+    sendMessage();
+    toggleSidebar();
+}
+
+function openRugCheck() {
+    const prompt = "I want to check if a token is safe. Can you scan a token for rug pull risks?";
+    elements.userInput.value = prompt;
+    handleInputChange({ target: elements.userInput });
+    sendMessage();
+    toggleSidebar();
+}
+
+function openTokenScanner() {
+    const prompt = "Tell me about your Token Scanner and how I can look up tokens.";
+    elements.userInput.value = prompt;
+    handleInputChange({ target: elements.userInput });
+    sendMessage();
+    toggleSidebar();
+}
+
+function openMarketSentiment() {
+    const prompt = "What's the current crypto market sentiment? Check the Fear and Greed index.";
+    elements.userInput.value = prompt;
+    handleInputChange({ target: elements.userInput });
+    sendMessage();
+    toggleSidebar();
+}
+
 // Expose functions for HTML onclick handlers
 window.copyToken = copyToken;
 window.disconnectWallet = disconnectWallet;
 window.toggleSidebar = toggleSidebar;
+window.toggleMic = toggleMic;
+window.openWhaleTracker = openWhaleTracker;
+window.openRugCheck = openRugCheck;
+window.openTokenScanner = openTokenScanner;
+window.openMarketSentiment = openMarketSentiment;
