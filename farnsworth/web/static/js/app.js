@@ -47,6 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initApp() {
+    // Check training mode first
+    await checkTrainingMode();
+
     // Check server status
     await checkServerStatus();
 
@@ -66,6 +69,40 @@ async function initApp() {
 
     // Check for existing wallet connection
     checkExistingWallet();
+}
+
+// ============================================
+// TRAINING MODE
+// ============================================
+
+async function checkTrainingMode() {
+    try {
+        const response = await fetch('/api/training-status');
+        const data = await response.json();
+
+        if (data.training_mode) {
+            // Show training banner
+            const banner = document.getElementById('training-banner');
+            if (banner) {
+                banner.classList.add('active');
+                const timer = document.getElementById('training-timer');
+                if (timer && data.remaining) {
+                    timer.textContent = `(${data.remaining} remaining)`;
+                }
+            }
+
+            // Auto-enter chat without wallet verification
+            setTimeout(() => {
+                enterChatInterface('training-user-' + Math.random().toString(36).slice(2, 8));
+                showToast('🧬 Training Mode: Help us improve Farnsworth!', 'success');
+            }, 1500);
+
+            return true;
+        }
+    } catch (error) {
+        console.log('Training mode check failed:', error);
+    }
+    return false;
 }
 
 // ============================================
@@ -449,9 +486,21 @@ function addWelcomeMessage() {
     if (!messagesContainer) return;
     messagesContainer.innerHTML = '';
 
+    // Check if training mode
+    const isTraining = document.getElementById('training-banner')?.classList.contains('active');
+
+    const trainingIntro = isTraining ? `
+🧬 **TRAINING MODE ACTIVE** - Thank you for helping train me!
+
+Your conversations will help improve my responses for everyone. Try the **🐝 Swarm Chat** for community training!
+
+---
+
+` : '';
+
     const welcomeMsg = `Good news, everyone! *adjusts spectacles*
 
-Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, your AI companion with FULL LOCAL FEATURES!
+${trainingIntro}Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, your AI companion with FULL LOCAL FEATURES!
 
 **What you can do right now:**
 - 💾 **Memory** - Store and recall information
@@ -461,6 +510,7 @@ Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, your AI companion
 - 🎭 **Profiles** - Switch my personality
 - 🏥 **Health** - Track your wellness
 - 🤔 **Thinking** - Step-by-step reasoning
+${isTraining ? '- 🐝 **Swarm Chat** - Train with the community!' : ''}
 
 Try the sidebar panels or ask me anything! Now, what shall we work on? *rubs hands excitedly*`;
 
