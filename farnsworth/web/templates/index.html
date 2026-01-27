@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Farnsworth AI · Neural Interface</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+</head>
+<body>
+    <!-- Cosmic Background -->
+    <div class="cosmos">
+        <div class="nebula nebula-1"></div>
+        <div class="nebula nebula-2"></div>
+        <div class="nebula nebula-3"></div>
+        <div class="stars"></div>
+        <canvas id="neural-canvas"></canvas>
+    </div>
+
+    <!-- Token Gate -->
+    <section id="token-gate" class="gate-section">
+        <div class="gate-container">
+            <div class="consciousness-orb">
+                <div class="orb-core"></div>
+                <div class="orb-ring ring-1"></div>
+                <div class="orb-ring ring-2"></div>
+                <div class="orb-ring ring-3"></div>
+            </div>
+
+            <div class="gate-content glass-panel">
+                <div class="gate-header">
+                    <span class="gate-label">NEURAL INTERFACE v2.8</span>
+                    <h1 class="gate-title">
+                        <span class="title-glow">Farnsworth</span>
+                        <span class="title-sub">Companion AI</span>
+                    </h1>
+                </div>
+
+                <div class="gate-body">
+                    <div class="access-badge">
+                        <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                        <span>Token-Gated Access</span>
+                    </div>
+
+                    <p class="gate-description">
+                        Connect your Solana wallet to verify token holdings and access the neural interface.
+                    </p>
+
+                    <div class="token-display">
+                        <div class="token-header">
+                            <span class="token-label">Required Token</span>
+                            <span class="token-amount">Min: 1</span>
+                        </div>
+                        <div class="token-address-box">
+                            <code id="token-addr">9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS</code>
+                            <button class="copy-btn" onclick="copyToken()" title="Copy">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button id="connect-btn" class="connect-button">
+                        <span class="btn-content">
+                            <span class="phantom-icon">👻</span>
+                            <span>Connect Phantom</span>
+                        </span>
+                        <span class="btn-shimmer"></span>
+                    </button>
+
+                    <div id="wallet-status" class="wallet-status hidden">
+                        <div class="status-spinner"></div>
+                        <span class="status-text">Verifying token balance...</span>
+                    </div>
+                </div>
+
+                <div class="gate-footer">
+                    <div class="demo-notice">
+                        <span class="notice-icon">⚠️</span>
+                        <p>
+                            <strong>Limited Demo Interface</strong><br>
+                            For full capabilities, <a href="https://github.com/timowhite88/Farnsworth" target="_blank">install Farnsworth locally</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Chat Interface -->
+    <section id="chat-app" class="chat-section hidden">
+        <!-- Header -->
+        <header class="app-header glass-panel">
+            <div class="header-left">
+                <div class="brand">
+                    <div class="brand-orb">
+                        <div class="mini-orb"></div>
+                    </div>
+                    <div class="brand-text">
+                        <span class="brand-name">Farnsworth</span>
+                        <span class="brand-status">
+                            <span class="status-dot"></span>
+                            Neural Link Active
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <div class="wallet-badge" id="connected-wallet">
+                    <span class="wallet-addr"></span>
+                    <button class="disconnect-btn" onclick="disconnectWallet()" title="Disconnect">✕</button>
+                </div>
+
+                <button id="voice-toggle" class="control-btn active" title="Voice Output">
+                    <span class="voice-on">🔊</span>
+                    <span class="voice-off">🔇</span>
+                </button>
+
+                <button id="tools-toggle" class="control-btn" title="Available Tools">🛠️</button>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <main class="chat-main">
+            <div class="messages-container" id="messages">
+                <!-- Welcome Message injected by JS -->
+            </div>
+
+            <div id="typing-indicator" class="typing-indicator hidden">
+                <div class="typing-avatar">🧠</div>
+                <div class="typing-content">
+                    <span class="typing-name">Farnsworth</span>
+                    <div class="typing-dots">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="chat-footer">
+            <div class="input-container glass-panel">
+                <div class="input-row">
+                    <textarea
+                        id="user-input"
+                        placeholder="Ask Farnsworth anything..."
+                        rows="1"
+                        maxlength="500"
+                    ></textarea>
+                    <button id="send-btn" class="send-button" disabled>
+                        <span>Send</span>
+                        <span class="send-arrow">➤</span>
+                    </button>
+                </div>
+                <div class="input-meta">
+                    <span class="char-counter"><span id="char-count">0</span>/500</span>
+                    <span class="demo-badge">🧪 Demo Mode · Limited Features</span>
+                </div>
+            </div>
+        </footer>
+
+        <!-- Tools Sidebar -->
+        <aside id="tools-sidebar" class="tools-sidebar glass-panel hidden">
+            <div class="sidebar-header">
+                <h3>🛠️ Neural Toolkit</h3>
+                <button class="close-sidebar" onclick="toggleSidebar()">✕</button>
+            </div>
+            <div class="sidebar-body">
+                <div class="tools-grid">
+                    <div class="tool-card available">
+                        <div class="tool-icon">💾</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Memory</span>
+                            <span class="tool-desc">Store & recall</span>
+                        </div>
+                        <span class="tool-badge available">✓</span>
+                    </div>
+                    <div class="tool-card available">
+                        <div class="tool-icon">🗣️</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Voice</span>
+                            <span class="tool-desc">Text-to-speech</span>
+                        </div>
+                        <span class="tool-badge available">✓</span>
+                    </div>
+                    <div class="tool-card limited">
+                        <div class="tool-icon">🤖</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Agents</span>
+                            <span class="tool-desc">Delegation</span>
+                        </div>
+                        <span class="tool-badge limited">~</span>
+                    </div>
+                    <div class="tool-card limited">
+                        <div class="tool-icon">👁️</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Vision</span>
+                            <span class="tool-desc">Image analysis</span>
+                        </div>
+                        <span class="tool-badge limited">~</span>
+                    </div>
+                    <div class="tool-card locked">
+                        <div class="tool-icon">💰</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Solana</span>
+                            <span class="tool-desc">Trading tools</span>
+                        </div>
+                        <span class="tool-badge locked">🔒</span>
+                    </div>
+                    <div class="tool-card locked">
+                        <div class="tool-icon">🐝</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Swarm</span>
+                            <span class="tool-desc">Multi-model</span>
+                        </div>
+                        <span class="tool-badge locked">🔒</span>
+                    </div>
+                    <div class="tool-card locked">
+                        <div class="tool-icon">🌐</div>
+                        <div class="tool-info">
+                            <span class="tool-name">P2P Network</span>
+                            <span class="tool-desc">Planetary memory</span>
+                        </div>
+                        <span class="tool-badge locked">🔒</span>
+                    </div>
+                    <div class="tool-card locked">
+                        <div class="tool-icon">📈</div>
+                        <div class="tool-info">
+                            <span class="tool-name">Evolution</span>
+                            <span class="tool-desc">Self-improve</span>
+                        </div>
+                        <span class="tool-badge locked">🔒</span>
+                    </div>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <p>Unlock all capabilities</p>
+                <a href="https://github.com/timowhite88/Farnsworth" target="_blank" class="install-link">
+                    Install Locally →
+                </a>
+            </div>
+        </aside>
+    </section>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

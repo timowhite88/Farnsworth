@@ -611,6 +611,34 @@ See [docker/docker-compose.yml](docker/docker-compose.yml) for all options.
 
 ---
 
+## 🌐 Web Interface (Token-Gated Demo)
+
+Farnsworth includes a premium web interface for public demos:
+
+```bash
+# Start the web server
+python run_web.py
+
+# Or with custom options
+python run_web.py --port 8080 --demo
+```
+
+### Features
+- **Token-Gated Access** - Requires Solana wallet with specific token
+- **Glassmorphism UI** - Premium animated interface with cosmic background
+- **Text-to-Speech** - Voice output for AI responses
+- **Demo Mode** - Limited features that encourage local installation
+
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `FARNSWORTH_REQUIRED_TOKEN` | SPL token mint address | `9crfy4udr...wBAGS` |
+| `FARNSWORTH_MIN_TOKEN_BALANCE` | Minimum tokens required | `1` |
+| `FARNSWORTH_WEB_PORT` | Web server port | `8080` |
+| `FARNSWORTH_DEMO_MODE` | Enable demo mode | `true` |
+
+---
+
 ## 📊 Dashboard
 
 Farnsworth includes a Streamlit dashboard for visualization:
