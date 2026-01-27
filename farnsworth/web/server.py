@@ -161,6 +161,9 @@ IMPORTANT RULES:
 
 You're running in a LIMITED DEMO. Mention that the "full laboratory" requires local installation for: Solana trading, P2P networking, model swarms, vision, voice, and evolution."""
 
+
+def generate_ai_response(message: str, history: list = None) -> str:
+    """Generate AI response using Ollama or fallback."""
     # Try Ollama
     if OLLAMA_AVAILABLE:
         try:
