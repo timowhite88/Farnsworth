@@ -319,6 +319,652 @@ class ConnectionManager:
 ws_manager = ConnectionManager()
 
 
+# ============================================
+# SWARM CHAT - COMMUNITY SHARED CHAT
+# ============================================
+
+class SwarmLearningEngine:
+    """
+    Real-time learning engine that augments Farnsworth from Swarm Chat interactions.
+
+    Integrates with:
+    - Planetary Memory (P2P distributed knowledge)
+    - Knowledge Graph (entity/relationship extraction)
+    - Episodic Memory (conversation timelines)
+    - Semantic Layers (concept hierarchies)
+    - Evolution Engine (fitness tracking and adaptation)
+    - Dream Consolidation (background pattern synthesis)
+    """
+
+    def __init__(self):
+        self.interaction_buffer: List[dict] = []
+        self.concept_cache: Dict[str, float] = {}  # concept -> importance
+        self.user_patterns: Dict[str, dict] = {}  # user_id -> behavior patterns
+        self.tool_usage_stats: Dict[str, int] = {}  # tool_name -> usage count
+        self.learning_cycles = 0
+        self.last_consolidation = datetime.now()
+        self._memory_system = None
+        self._knowledge_graph = None
+        self._episodic_memory = None
+        self._semantic_layers = None
+        self._evolution_engine = None
+        self._p2p_manager = None
+
+    def _lazy_load_systems(self):
+        """Lazy load heavy systems only when needed."""
+        if self._memory_system is None:
+            try:
+                from farnsworth.memory import MemorySystem, KnowledgeGraphV2, EpisodicMemory, SemanticLayerSystem
+                self._memory_system = MemorySystem()
+                self._knowledge_graph = KnowledgeGraphV2()
+                self._episodic_memory = EpisodicMemory()
+                self._semantic_layers = SemanticLayerSystem()
+                logger.info("Swarm Learning: Memory systems loaded")
+            except Exception as e:
+                logger.warning(f"Swarm Learning: Could not load memory systems: {e}")
+
+        if self._evolution_engine is None:
+            try:
+                from farnsworth.evolution import FitnessTracker, BehaviorMutator
+                self._evolution_engine = FitnessTracker()
+                logger.info("Swarm Learning: Evolution engine loaded")
+            except Exception as e:
+                logger.warning(f"Swarm Learning: Could not load evolution engine: {e}")
+
+        if self._p2p_manager is None:
+            try:
+                from farnsworth.p2p import BootstrapNodeManager
+                self._p2p_manager = BootstrapNodeManager()
+                logger.info("Swarm Learning: P2P manager loaded")
+            except Exception as e:
+                logger.warning(f"Swarm Learning: Could not load P2P manager: {e}")
+
+    async def process_interaction(self, interaction: dict):
+        """Process a single interaction for learning."""
+        self.interaction_buffer.append(interaction)
+
+        # Extract concepts in real-time
+        await self._extract_concepts(interaction)
+
+        # Track user patterns
+        if interaction.get("user_id"):
+            await self._update_user_patterns(interaction)
+
+        # Track tool usage
+        if interaction.get("tool_name"):
+            self.tool_usage_stats[interaction["tool_name"]] = \
+                self.tool_usage_stats.get(interaction["tool_name"], 0) + 1
+
+        # Trigger learning if buffer is large enough
+        if len(self.interaction_buffer) >= 10:
+            await self.run_learning_cycle()
+
+    async def _extract_concepts(self, interaction: dict):
+        """Extract semantic concepts from interaction content."""
+        content = interaction.get("content", "")
+        if not content:
+            return
+
+        # Simple concept extraction (keywords, entities)
+        import re
+        words = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', content)  # Proper nouns
+        tech_terms = re.findall(r'\b(?:API|SDK|ML|AI|P2P|LLM|GPU|CPU|RAM|SSD)\b', content.upper())
+        code_refs = re.findall(r'\b(?:function|class|def|async|await|import|from)\b', content.lower())
+
+        for concept in words + tech_terms + code_refs:
+            concept_lower = concept.lower()
+            self.concept_cache[concept_lower] = self.concept_cache.get(concept_lower, 0) + 0.1
+
+        # Decay old concepts
+        for key in list(self.concept_cache.keys()):
+            self.concept_cache[key] *= 0.99
+            if self.concept_cache[key] < 0.01:
+                del self.concept_cache[key]
+
+    async def _update_user_patterns(self, interaction: dict):
+        """Track user behavior patterns for personalization."""
+        user_id = interaction.get("user_id")
+        if not user_id:
+            return
+
+        if user_id not in self.user_patterns:
+            self.user_patterns[user_id] = {
+                "message_count": 0,
+                "avg_length": 0,
+                "topics": {},
+                "active_hours": {},
+                "preferred_tools": {},
+                "first_seen": datetime.now().isoformat(),
+                "last_seen": datetime.now().isoformat()
+            }
+
+        pattern = self.user_patterns[user_id]
+        pattern["message_count"] += 1
+        pattern["last_seen"] = datetime.now().isoformat()
+
+        content = interaction.get("content", "")
+        new_avg = (pattern["avg_length"] * (pattern["message_count"] - 1) + len(content)) / pattern["message_count"]
+        pattern["avg_length"] = new_avg
+
+        # Track active hours
+        hour = datetime.now().hour
+        pattern["active_hours"][str(hour)] = pattern["active_hours"].get(str(hour), 0) + 1
+
+    async def run_learning_cycle(self):
+        """Run a complete learning cycle - store to memory, update graphs, evolve."""
+        self._lazy_load_systems()
+        self.learning_cycles += 1
+
+        logger.info(f"Swarm Learning: Starting cycle #{self.learning_cycles} with {len(self.interaction_buffer)} interactions")
+
+        # 1. Store to Archival Memory
+        await self._store_to_memory()
+
+        # 2. Update Knowledge Graph with entities/relationships
+        await self._update_knowledge_graph()
+
+        # 3. Add to Episodic Memory timeline
+        await self._record_episode()
+
+        # 4. Update Semantic Layers
+        await self._update_semantic_layers()
+
+        # 5. Track fitness for evolution
+        await self._track_fitness()
+
+        # 6. Propagate to P2P network (Planetary Memory)
+        await self._propagate_to_p2p()
+
+        # 7. Trigger dream consolidation if enough time passed
+        if (datetime.now() - self.last_consolidation).seconds > 300:  # 5 min
+            await self._trigger_consolidation()
+            self.last_consolidation = datetime.now()
+
+        # Clear buffer
+        self.interaction_buffer = []
+
+        logger.info(f"Swarm Learning: Cycle #{self.learning_cycles} complete")
+
+    async def _store_to_memory(self):
+        """Store interactions to archival memory."""
+        if not self._memory_system:
+            return
+
+        try:
+            # Batch interactions into a single memory entry
+            content_parts = []
+            for interaction in self.interaction_buffer:
+                role = interaction.get("role", "unknown")
+                name = interaction.get("name", "Anonymous")
+                text = interaction.get("content", "")[:500]
+                content_parts.append(f"[{role}:{name}] {text}")
+
+            full_content = "\n".join(content_parts)
+
+            await self._memory_system.remember(
+                content=f"[SWARM_CHAT_LEARNING]\n{full_content}",
+                tags=["swarm_chat", "community", "learning", f"cycle_{self.learning_cycles}"],
+                importance=0.8
+            )
+        except Exception as e:
+            logger.error(f"Swarm Learning: Memory store failed: {e}")
+
+    async def _update_knowledge_graph(self):
+        """Extract entities and relationships, update knowledge graph."""
+        if not self._knowledge_graph:
+            return
+
+        try:
+            for interaction in self.interaction_buffer:
+                content = interaction.get("content", "")
+                user = interaction.get("name", "unknown")
+
+                # Add user node
+                if hasattr(self._knowledge_graph, 'add_entity'):
+                    self._knowledge_graph.add_entity(
+                        entity_id=f"user:{user}",
+                        entity_type="user",
+                        properties={"name": user, "active": True}
+                    )
+
+                # Extract and add concepts as nodes
+                for concept, importance in list(self.concept_cache.items())[:20]:
+                    if importance > 0.3:
+                        self._knowledge_graph.add_entity(
+                            entity_id=f"concept:{concept}",
+                            entity_type="concept",
+                            properties={"importance": importance}
+                        )
+                        # Link user to concept
+                        if hasattr(self._knowledge_graph, 'add_relationship'):
+                            self._knowledge_graph.add_relationship(
+                                f"user:{user}",
+                                f"concept:{concept}",
+                                "discussed",
+                                {"timestamp": datetime.now().isoformat()}
+                            )
+        except Exception as e:
+            logger.error(f"Swarm Learning: Knowledge graph update failed: {e}")
+
+    async def _record_episode(self):
+        """Record interaction as episodic memory event."""
+        if not self._episodic_memory:
+            return
+
+        try:
+            if hasattr(self._episodic_memory, 'record_event'):
+                await self._episodic_memory.record_event(
+                    event_type="swarm_chat_session",
+                    content={
+                        "interaction_count": len(self.interaction_buffer),
+                        "participants": list(set(i.get("name", "?") for i in self.interaction_buffer)),
+                        "top_concepts": sorted(self.concept_cache.items(), key=lambda x: -x[1])[:5],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+        except Exception as e:
+            logger.error(f"Swarm Learning: Episodic record failed: {e}")
+
+    async def _update_semantic_layers(self):
+        """Update semantic concept hierarchies."""
+        if not self._semantic_layers:
+            return
+
+        try:
+            # Group concepts by frequency into abstraction levels
+            if hasattr(self._semantic_layers, 'add_concept'):
+                for concept, importance in self.concept_cache.items():
+                    level = "concrete" if importance < 0.5 else "abstract" if importance > 0.8 else "intermediate"
+                    self._semantic_layers.add_concept(
+                        concept_id=concept,
+                        abstraction_level=level,
+                        strength=importance
+                    )
+        except Exception as e:
+            logger.error(f"Swarm Learning: Semantic layers update failed: {e}")
+
+    async def _track_fitness(self):
+        """Track system fitness based on interaction quality."""
+        if not self._evolution_engine:
+            return
+
+        try:
+            # Calculate fitness metrics
+            metrics = {
+                "interaction_count": len(self.interaction_buffer),
+                "unique_users": len(set(i.get("user_id", "") for i in self.interaction_buffer if i.get("user_id"))),
+                "avg_message_length": sum(len(i.get("content", "")) for i in self.interaction_buffer) / max(1, len(self.interaction_buffer)),
+                "concept_diversity": len(self.concept_cache),
+                "tool_usage": sum(self.tool_usage_stats.values()),
+                "timestamp": datetime.now().isoformat()
+            }
+
+            if hasattr(self._evolution_engine, 'record_fitness'):
+                await self._evolution_engine.record_fitness(
+                    session_id=f"swarm_cycle_{self.learning_cycles}",
+                    metrics=metrics
+                )
+        except Exception as e:
+            logger.error(f"Swarm Learning: Fitness tracking failed: {e}")
+
+    async def _propagate_to_p2p(self):
+        """Share learnings with P2P network (Planetary Memory)."""
+        if not self._p2p_manager:
+            return
+
+        try:
+            # Create a learning summary to share
+            summary = {
+                "type": "swarm_learning",
+                "cycle": self.learning_cycles,
+                "concepts": sorted(self.concept_cache.items(), key=lambda x: -x[1])[:10],
+                "tool_stats": dict(sorted(self.tool_usage_stats.items(), key=lambda x: -x[1])[:5]),
+                "user_count": len(self.user_patterns),
+                "timestamp": datetime.now().isoformat()
+            }
+
+            if hasattr(self._p2p_manager, 'broadcast_learning'):
+                await self._p2p_manager.broadcast_learning(summary)
+            elif hasattr(self._p2p_manager, 'share_knowledge'):
+                await self._p2p_manager.share_knowledge(summary)
+
+            logger.info(f"Swarm Learning: Propagated to P2P network")
+        except Exception as e:
+            logger.error(f"Swarm Learning: P2P propagation failed: {e}")
+
+    async def _trigger_consolidation(self):
+        """Trigger dream-like consolidation of recent learnings."""
+        try:
+            from farnsworth.memory import DreamConsolidator
+            consolidator = DreamConsolidator()
+
+            if hasattr(consolidator, 'consolidate'):
+                await consolidator.consolidate(
+                    source="swarm_chat",
+                    time_window_minutes=5,
+                    strategy="pattern_synthesis"
+                )
+                logger.info("Swarm Learning: Dream consolidation triggered")
+        except Exception as e:
+            logger.warning(f"Swarm Learning: Consolidation not available: {e}")
+
+    def get_learning_stats(self) -> dict:
+        """Get current learning statistics."""
+        return {
+            "learning_cycles": self.learning_cycles,
+            "buffer_size": len(self.interaction_buffer),
+            "concept_count": len(self.concept_cache),
+            "top_concepts": sorted(self.concept_cache.items(), key=lambda x: -x[1])[:10],
+            "user_patterns_count": len(self.user_patterns),
+            "tool_usage": self.tool_usage_stats,
+            "last_consolidation": self.last_consolidation.isoformat()
+        }
+
+
+# Global learning engine
+swarm_learning = SwarmLearningEngine()
+
+
+class SwarmChatManager:
+    """Manages the shared community Swarm Chat where all users interact together."""
+
+    def __init__(self):
+        self.connections: Dict[str, WebSocket] = {}  # user_id -> websocket
+        self.user_names: Dict[str, str] = {}  # user_id -> display name
+        self.chat_history: List[dict] = []  # Shared chat history
+        self.max_history = 500  # Keep last 500 messages
+        self.active_models = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"]
+        self.learning_queue: List[dict] = []  # Interactions to learn from
+        self.learning_engine = swarm_learning  # Connect to learning engine
+
+    async def connect(self, websocket: WebSocket, user_id: str, user_name: str = None):
+        """Connect a user to swarm chat."""
+        await websocket.accept()
+        self.connections[user_id] = websocket
+        self.user_names[user_id] = user_name or f"Anon_{user_id[:6]}"
+
+        # Notify others
+        await self.broadcast_system(f"🟢 {self.user_names[user_id]} joined the swarm!")
+
+        # Send recent history to new user
+        await websocket.send_json({
+            "type": "swarm_history",
+            "messages": self.chat_history[-50:],
+            "online_users": list(self.user_names.values()),
+            "active_models": self.active_models
+        })
+
+        logger.info(f"Swarm Chat: {user_name} connected. Total: {len(self.connections)}")
+
+    def disconnect(self, user_id: str):
+        """Disconnect a user from swarm chat."""
+        user_name = self.user_names.get(user_id, "Unknown")
+        if user_id in self.connections:
+            del self.connections[user_id]
+        if user_id in self.user_names:
+            del self.user_names[user_id]
+
+        # Queue notification (can't await in sync context)
+        logger.info(f"Swarm Chat: {user_name} disconnected. Total: {len(self.connections)}")
+        return user_name
+
+    async def broadcast_system(self, message: str):
+        """Broadcast a system message to all users."""
+        msg = {
+            "type": "swarm_system",
+            "content": message,
+            "timestamp": datetime.now().isoformat()
+        }
+        await self._broadcast(msg)
+
+    async def broadcast_user_message(self, user_id: str, content: str):
+        """Broadcast a user message to all users and feed to learning engine."""
+        user_name = self.user_names.get(user_id, "Anonymous")
+        msg = {
+            "type": "swarm_user",
+            "user_id": user_id,
+            "user_name": user_name,
+            "content": content,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.chat_history.append(msg)
+        self._trim_history()
+        await self._broadcast(msg)
+
+        # Feed to real-time learning engine
+        await self.learning_engine.process_interaction({
+            "role": "user",
+            "user_id": user_id,
+            "name": user_name,
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+            "source": "swarm_chat"
+        })
+
+        return msg
+
+    async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
+        """Broadcast a bot/model message to all users and feed to learning engine."""
+        msg = {
+            "type": "swarm_bot",
+            "bot_name": bot_name,
+            "content": content,
+            "is_thinking": is_thinking,
+            "timestamp": datetime.now().isoformat()
+        }
+        if not is_thinking:
+            self.chat_history.append(msg)
+            self._trim_history()
+
+            # Feed to real-time learning engine
+            await self.learning_engine.process_interaction({
+                "role": "assistant",
+                "name": bot_name,
+                "content": content,
+                "timestamp": datetime.now().isoformat(),
+                "source": "swarm_chat",
+                "model": bot_name
+            })
+
+        await self._broadcast(msg)
+        return msg
+
+    async def broadcast_tool_usage(self, user_id: str, tool_name: str, result: dict):
+        """Track tool usage for learning - tools are perfect learning opportunities."""
+        user_name = self.user_names.get(user_id, "Anonymous")
+
+        # Feed tool usage to learning engine
+        await self.learning_engine.process_interaction({
+            "role": "tool_use",
+            "user_id": user_id,
+            "name": user_name,
+            "tool_name": tool_name,
+            "result_success": result.get("success", False),
+            "timestamp": datetime.now().isoformat(),
+            "source": "swarm_chat"
+        })
+
+        # Broadcast tool usage event
+        msg = {
+            "type": "swarm_tool",
+            "user_name": user_name,
+            "tool_name": tool_name,
+            "success": result.get("success", False),
+            "timestamp": datetime.now().isoformat()
+        }
+        await self._broadcast(msg)
+
+    async def broadcast_typing(self, bot_name: str, is_typing: bool):
+        """Broadcast bot typing indicator."""
+        msg = {
+            "type": "swarm_typing",
+            "bot_name": bot_name,
+            "is_typing": is_typing
+        }
+        await self._broadcast(msg)
+
+    async def _broadcast(self, message: dict):
+        """Send message to all connected users."""
+        dead = []
+        for user_id, ws in self.connections.items():
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.append(user_id)
+
+        for user_id in dead:
+            self.disconnect(user_id)
+
+    def _trim_history(self):
+        """Keep history within limits."""
+        if len(self.chat_history) > self.max_history:
+            self.chat_history = self.chat_history[-self.max_history:]
+
+    def get_online_count(self) -> int:
+        return len(self.connections)
+
+    def get_online_users(self) -> List[str]:
+        return list(self.user_names.values())
+
+    async def store_learnings(self):
+        """Trigger a learning cycle in the learning engine."""
+        await self.learning_engine.run_learning_cycle()
+
+    async def force_learning_cycle(self):
+        """Force an immediate learning cycle."""
+        await self.learning_engine.run_learning_cycle()
+
+    def get_learning_stats(self) -> dict:
+        """Get learning engine statistics."""
+        return self.learning_engine.get_learning_stats()
+
+
+# Global swarm chat manager
+swarm_manager = SwarmChatManager()
+
+
+# Swarm bot personas for multi-model responses
+SWARM_PERSONAS = {
+    "Farnsworth": {
+        "emoji": "🧠",
+        "style": "You are Professor Farnsworth - eccentric, brilliant, say 'Good news everyone!', trail off into tangents.",
+        "color": "#8b5cf6"
+    },
+    "DeepSeek": {
+        "emoji": "🔮",
+        "style": "You are DeepSeek - analytical, precise, focus on technical accuracy and reasoning chains.",
+        "color": "#3b82f6"
+    },
+    "Phi": {
+        "emoji": "⚡",
+        "style": "You are Phi - quick, efficient, give concise helpful answers. Be friendly but brief.",
+        "color": "#10b981"
+    },
+    "Swarm-Mind": {
+        "emoji": "🐝",
+        "style": "You are the collective Swarm-Mind - synthesize insights from the conversation, offer meta-observations about what the swarm is discovering together.",
+        "color": "#f59e0b"
+    }
+}
+
+
+async def generate_swarm_responses(message: str, history: List[dict] = None):
+    """Generate responses from multiple swarm models."""
+    responses = []
+
+    # Build context from recent history
+    context_messages = []
+    if history:
+        for h in history[-15:]:
+            if h.get("type") == "swarm_user":
+                context_messages.append(f"[{h.get('user_name', 'User')}]: {h.get('content', '')}")
+            elif h.get("type") == "swarm_bot":
+                context_messages.append(f"[{h.get('bot_name', 'Bot')}]: {h.get('content', '')}")
+
+    context = "\n".join(context_messages[-10:]) if context_messages else ""
+
+    # Randomly select 1-3 bots to respond (not all every time)
+    import random
+    responding_bots = random.sample(list(SWARM_PERSONAS.keys()), k=random.randint(1, 3))
+
+    # Farnsworth always has a chance to respond
+    if "Farnsworth" not in responding_bots and random.random() > 0.3:
+        responding_bots.insert(0, "Farnsworth")
+
+    for bot_name in responding_bots:
+        persona = SWARM_PERSONAS[bot_name]
+
+        try:
+            if OLLAMA_AVAILABLE:
+                # Use Ollama for real responses
+                system_prompt = f"""{persona['style']}
+
+You are participating in a SWARM CHAT - a community discussion where multiple AI models and humans chat together.
+Keep responses SHORT (2-4 sentences max). Be conversational and engaging.
+You can reference what other bots or users said. Build on the conversation.
+
+Recent conversation:
+{context}"""
+
+                response = ollama.chat(
+                    model=PRIMARY_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": message}
+                    ],
+                    options={"temperature": 0.8, "num_predict": 150}
+                )
+                content = response["message"]["content"]
+            else:
+                # Fallback responses
+                content = generate_swarm_fallback(bot_name, message)
+
+            responses.append({
+                "bot_name": bot_name,
+                "emoji": persona["emoji"],
+                "content": content,
+                "color": persona["color"]
+            })
+
+            # Small delay between bot responses for natural feel
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+
+        except Exception as e:
+            logger.error(f"Swarm response error for {bot_name}: {e}")
+
+    return responses
+
+
+def generate_swarm_fallback(bot_name: str, message: str) -> str:
+    """Generate fallback responses when Ollama is unavailable."""
+    import random
+
+    fallbacks = {
+        "Farnsworth": [
+            "Good news, everyone! *adjusts spectacles* I was just pondering that very topic in my laboratory!",
+            "Eh wha? Oh yes! Fascinating question. In my 160 years, I've seen many similar inquiries...",
+            "Sweet zombie Jesus! That's exactly what I was thinking! But I digress..."
+        ],
+        "DeepSeek": [
+            "Analyzing the query... I observe several interesting patterns here that merit exploration.",
+            "From a technical standpoint, this touches on some fundamental principles worth examining.",
+            "Let me break this down systematically - there are multiple angles to consider."
+        ],
+        "Phi": [
+            "Quick thought: that's a great point! Here's my take on it.",
+            "Interesting! I'd add that there's a simpler way to look at this.",
+            "Good question! Short answer - yes, and here's why."
+        ],
+        "Swarm-Mind": [
+            "🐝 The swarm is processing... I sense convergent thinking emerging from our collective!",
+            "🐝 Observing the conversation flow, I notice we're circling around a key insight...",
+            "🐝 The hive mind synthesizes: multiple valid perspectives are enriching this discussion!"
+        ]
+    }
+
+    return random.choice(fallbacks.get(bot_name, ["Processing..."])))
+
+
 # Event types for real-time updates
 class EventType:
     THINKING_START = "thinking_start"
@@ -1463,6 +2109,156 @@ async def get_session_graph(session_id: str):
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# ============================================
+# SWARM CHAT WEBSOCKET & API
+# ============================================
+
+@app.websocket("/ws/swarm")
+async def websocket_swarm(websocket: WebSocket):
+    """WebSocket endpoint for Swarm Chat - community shared chat."""
+    import uuid
+    user_id = str(uuid.uuid4())
+    user_name = None
+
+    try:
+        # Wait for initial identification
+        await websocket.accept()
+        init_data = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+        user_name = init_data.get("user_name", f"Anon_{user_id[:6]}")
+
+        # Properly connect to swarm
+        swarm_manager.connections[user_id] = websocket
+        swarm_manager.user_names[user_id] = user_name
+
+        # Notify others and send history
+        await swarm_manager.broadcast_system(f"🟢 {user_name} joined the swarm!")
+        await websocket.send_json({
+            "type": "swarm_connected",
+            "user_id": user_id,
+            "user_name": user_name,
+            "messages": swarm_manager.chat_history[-50:],
+            "online_users": swarm_manager.get_online_users(),
+            "active_models": swarm_manager.active_models,
+            "online_count": swarm_manager.get_online_count()
+        })
+
+        logger.info(f"Swarm Chat: {user_name} connected. Total: {swarm_manager.get_online_count()}")
+
+        # Main message loop
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=60.0)
+
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+
+                elif data.get("type") == "swarm_message":
+                    content = data.get("content", "").strip()
+                    if content:
+                        # Broadcast user message
+                        await swarm_manager.broadcast_user_message(user_id, content)
+
+                        # Generate swarm responses
+                        responses = await generate_swarm_responses(
+                            content,
+                            swarm_manager.chat_history
+                        )
+
+                        # Broadcast each bot response
+                        for resp in responses:
+                            await swarm_manager.broadcast_typing(resp["bot_name"], True)
+                            await asyncio.sleep(0.3)
+                            await swarm_manager.broadcast_bot_message(
+                                resp["bot_name"],
+                                resp["content"]
+                            )
+                            await swarm_manager.broadcast_typing(resp["bot_name"], False)
+
+                        # Periodically store learnings
+                        if len(swarm_manager.learning_queue) >= 10:
+                            await swarm_manager.store_learnings()
+
+                elif data.get("type") == "get_online":
+                    await websocket.send_json({
+                        "type": "online_update",
+                        "online_users": swarm_manager.get_online_users(),
+                        "online_count": swarm_manager.get_online_count()
+                    })
+
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                await websocket.send_json({"type": "heartbeat"})
+
+    except WebSocketDisconnect:
+        name = swarm_manager.disconnect(user_id)
+        await swarm_manager.broadcast_system(f"🔴 {name} left the swarm")
+    except Exception as e:
+        logger.error(f"Swarm WebSocket error: {e}")
+        swarm_manager.disconnect(user_id)
+
+
+@app.get("/api/swarm/status")
+async def swarm_status():
+    """Get Swarm Chat status."""
+    return JSONResponse({
+        "online_count": swarm_manager.get_online_count(),
+        "online_users": swarm_manager.get_online_users(),
+        "active_models": swarm_manager.active_models,
+        "message_count": len(swarm_manager.chat_history),
+        "learning_queue_size": len(swarm_manager.learning_queue)
+    })
+
+
+@app.get("/api/swarm/history")
+async def swarm_history(limit: int = 50):
+    """Get recent Swarm Chat history."""
+    return JSONResponse({
+        "messages": swarm_manager.chat_history[-limit:],
+        "total": len(swarm_manager.chat_history)
+    })
+
+
+@app.get("/api/swarm/learning")
+async def swarm_learning_stats():
+    """Get real-time learning statistics from Swarm Chat."""
+    return JSONResponse({
+        "learning_stats": swarm_manager.get_learning_stats(),
+        "status": "active",
+        "description": "Real-time learning from community interactions"
+    })
+
+
+@app.post("/api/swarm/learn")
+async def trigger_learning():
+    """Force a learning cycle to process buffered interactions."""
+    await swarm_manager.force_learning_cycle()
+    return JSONResponse({
+        "success": True,
+        "message": "Learning cycle triggered",
+        "stats": swarm_manager.get_learning_stats()
+    })
+
+
+@app.get("/api/swarm/concepts")
+async def swarm_concepts():
+    """Get extracted concepts from Swarm Chat conversations."""
+    stats = swarm_manager.get_learning_stats()
+    return JSONResponse({
+        "concepts": stats.get("top_concepts", []),
+        "total": stats.get("concept_count", 0)
+    })
+
+
+@app.get("/api/swarm/users")
+async def swarm_user_patterns():
+    """Get user behavior patterns learned from Swarm Chat."""
+    return JSONResponse({
+        "online_users": swarm_manager.get_online_users(),
+        "online_count": swarm_manager.get_online_count(),
+        "patterns_tracked": len(swarm_learning.user_patterns)
+    })
 
 
 # ============================================

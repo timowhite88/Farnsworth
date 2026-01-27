@@ -2211,3 +2211,350 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* ============================================
+   SWARM CHAT - COMMUNITY MODE STYLES
+   ============================================ */
+
+/* Chat Mode Toggle */
+.chat-mode-toggle {
+    display: flex;
+    gap: 4px;
+    background: var(--glass-bg);
+    border-radius: 12px;
+    padding: 4px;
+    border: 1px solid var(--glass-border);
+}
+
+.mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s var(--ease-out-expo);
+    position: relative;
+}
+
+.mode-btn:hover {
+    color: var(--text-primary);
+    background: var(--glass-bg-hover);
+}
+
+.mode-btn.active {
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: white;
+    box-shadow: 0 4px 15px var(--primary-glow);
+}
+
+.mode-btn .mode-icon {
+    font-size: 1rem;
+}
+
+.online-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: var(--success);
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.3s var(--ease-out-expo);
+}
+
+.online-badge.active {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Swarm Welcome Message */
+.swarm-welcome {
+    max-width: 600px;
+    margin: 2rem auto;
+    text-align: center;
+}
+
+.swarm-welcome-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 1rem;
+}
+
+.swarm-welcome-header .swarm-icon {
+    font-size: 2.5rem;
+    animation: swarmPulse 2s infinite;
+}
+
+@keyframes swarmPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.swarm-welcome-header h2 {
+    font-size: 1.5rem;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.swarm-welcome-body {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    backdrop-filter: blur(12px);
+}
+
+.swarm-features {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin: 1rem 0;
+}
+
+.swarm-feature {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--glass-bg);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.swarm-feature .feature-icon {
+    font-size: 1.2rem;
+}
+
+.swarm-bots {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--glass-border);
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* Swarm Messages */
+.swarm-message {
+    animation: swarmMessageIn 0.4s var(--ease-out-expo);
+}
+
+.swarm-message.animate-in {
+    animation: swarmMessageIn 0.4s var(--ease-out-expo);
+}
+
+@keyframes swarmMessageIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.swarm-message.bot .message-avatar {
+    background: linear-gradient(135deg, var(--bot-color, var(--primary)), rgba(139, 92, 246, 0.3));
+    box-shadow: 0 0 20px var(--bot-color, var(--primary-glow));
+}
+
+.swarm-bot-msg {
+    border-left: 3px solid var(--bot-color, var(--primary));
+}
+
+.swarm-user-msg {
+    border-left: 3px solid var(--accent);
+}
+
+/* System Messages */
+.swarm-system-message {
+    text-align: center;
+    padding: 8px 16px;
+    margin: 8px 0;
+}
+
+.swarm-system-message .system-content {
+    display: inline-block;
+    padding: 6px 16px;
+    background: var(--glass-bg);
+    border-radius: 20px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    border: 1px solid var(--glass-border);
+}
+
+/* Tool Usage Messages */
+.swarm-tool-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    margin: 8px 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.swarm-tool-message .tool-icon {
+    font-size: 1rem;
+}
+
+.swarm-tool-message .tool-user {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.swarm-tool-message .tool-name {
+    font-family: var(--font-mono);
+    background: var(--glass-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.swarm-tool-message .tool-status.success {
+    color: var(--success);
+}
+
+.swarm-tool-message .tool-status.failed {
+    color: var(--error);
+}
+
+/* Swarm Learning Widget */
+.learning-widget {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.learning-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.learning-stat:last-child {
+    border-bottom: none;
+}
+
+.learning-stat .stat-label {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.learning-stat .stat-value {
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--primary);
+}
+
+.top-concepts {
+    margin-top: 12px;
+}
+
+.top-concepts h4 {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.concept-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    background: var(--glass-bg);
+    border-radius: 6px;
+    margin-bottom: 4px;
+    font-size: 0.8rem;
+}
+
+.concept-item .concept-name {
+    color: var(--text-secondary);
+}
+
+.concept-item .concept-score {
+    color: var(--success);
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+
+/* Swarm Users List */
+.swarm-users {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--glass-border);
+}
+
+.swarm-users h4 {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.swarm-user-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+}
+
+.swarm-user-item .user-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+    animation: dotPulse 2s infinite;
+}
+
+@keyframes dotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.swarm-user-item .user-name {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.no-users {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+/* Responsive Swarm */
+@media (max-width: 768px) {
+    .chat-mode-toggle {
+        order: -1;
+        margin-bottom: 8px;
+    }
+
+    .mode-btn .mode-label {
+        display: none;
+    }
+
+    .swarm-features {
+        grid-template-columns: 1fr;
+    }
+}

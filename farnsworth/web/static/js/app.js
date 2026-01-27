@@ -26,7 +26,16 @@ const state = {
     ws: null,
     wsConnected: false,
     chatHistory: [],
-    features: {}
+    features: {},
+    // Swarm Chat State
+    swarmMode: false,
+    swarmWs: null,
+    swarmConnected: false,
+    swarmUserId: null,
+    swarmUserName: null,
+    swarmOnlineUsers: [],
+    swarmActiveModels: [],
+    swarmTypingBots: new Set()
 };
 
 // ============================================
@@ -288,6 +297,10 @@ function setupEventListeners() {
 
     // Health details
     document.getElementById('health-details-btn')?.addEventListener('click', openHealthModal);
+
+    // Swarm Chat Mode Toggle
+    document.getElementById('personal-chat-btn')?.addEventListener('click', () => switchChatMode(false));
+    document.getElementById('swarm-chat-btn')?.addEventListener('click', () => switchChatMode(true));
 
     // Quick actions
     document.querySelectorAll('.quick-action-btn').forEach(btn => {
@@ -1536,3 +1549,377 @@ window.closeThinkingModal = closeThinkingModal;
 window.closeSnippetModal = closeSnippetModal;
 window.closeHealthModal = closeHealthModal;
 window.deleteNote = deleteNote;
+
+// ============================================
+// SWARM CHAT - COMMUNITY MODE
+// ============================================
+
+function switchChatMode(toSwarm) {
+    state.swarmMode = toSwarm;
+
+    // Update UI
+    document.getElementById('personal-chat-btn')?.classList.toggle('active', !toSwarm);
+    document.getElementById('swarm-chat-btn')?.classList.toggle('active', toSwarm);
+
+    // Toggle learning widget visibility
+    document.getElementById('swarm-learning-widget')?.classList.toggle('hidden', !toSwarm);
+
+    // Clear messages
+    const messagesContainer = document.getElementById('messages');
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+    }
+
+    if (toSwarm) {
+        // Connect to Swarm Chat
+        connectSwarmChat();
+        addSwarmWelcomeMessage();
+    } else {
+        // Disconnect from Swarm
+        disconnectSwarmChat();
+        addWelcomeMessage();
+    }
+
+    showToast(toSwarm ? '🐝 Switched to Swarm Chat - Community Mode!' : '💬 Switched to Personal Chat', 'success');
+}
+
+function connectSwarmChat() {
+    if (state.swarmWs && state.swarmConnected) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/swarm`;
+
+    try {
+        state.swarmWs = new WebSocket(wsUrl);
+
+        state.swarmWs.onopen = () => {
+            // Send identification
+            const userName = state.wallet ?
+                `User_${state.wallet.slice(0, 6)}` :
+                `Anon_${Math.random().toString(36).slice(2, 8)}`;
+
+            state.swarmUserName = userName;
+            state.swarmWs.send(JSON.stringify({
+                type: 'identify',
+                user_name: userName
+            }));
+        };
+
+        state.swarmWs.onmessage = (event) => {
+            handleSwarmMessage(JSON.parse(event.data));
+        };
+
+        state.swarmWs.onclose = () => {
+            state.swarmConnected = false;
+            updateSwarmStatus();
+            // Reconnect if still in swarm mode
+            if (state.swarmMode) {
+                setTimeout(connectSwarmChat, 3000);
+            }
+        };
+
+        state.swarmWs.onerror = (error) => {
+            console.error('Swarm WebSocket error:', error);
+            state.swarmConnected = false;
+        };
+
+    } catch (error) {
+        console.error('Swarm connection failed:', error);
+    }
+}
+
+function disconnectSwarmChat() {
+    if (state.swarmWs) {
+        state.swarmWs.close();
+        state.swarmWs = null;
+    }
+    state.swarmConnected = false;
+    state.swarmOnlineUsers = [];
+    updateSwarmStatus();
+}
+
+function handleSwarmMessage(data) {
+    switch (data.type) {
+        case 'swarm_connected':
+            state.swarmConnected = true;
+            state.swarmUserId = data.user_id;
+            state.swarmOnlineUsers = data.online_users || [];
+            state.swarmActiveModels = data.active_models || [];
+            updateSwarmStatus();
+
+            // Load history
+            if (data.messages) {
+                data.messages.forEach(msg => renderSwarmMessage(msg, false));
+            }
+            showToast(`🐝 Connected to Swarm! ${data.online_count} users online`, 'success');
+            break;
+
+        case 'swarm_user':
+            renderSwarmMessage(data);
+            break;
+
+        case 'swarm_bot':
+            renderSwarmMessage(data);
+            break;
+
+        case 'swarm_system':
+            addSwarmSystemMessage(data.content);
+            break;
+
+        case 'swarm_typing':
+            handleSwarmTyping(data.bot_name, data.is_typing);
+            break;
+
+        case 'swarm_tool':
+            addSwarmToolMessage(data);
+            break;
+
+        case 'online_update':
+            state.swarmOnlineUsers = data.online_users || [];
+            updateSwarmStatus();
+            break;
+
+        case 'heartbeat':
+        case 'pong':
+            break;
+
+        default:
+            console.log('Swarm event:', data);
+    }
+}
+
+function renderSwarmMessage(data, animate = true) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message swarm-message ${data.type === 'swarm_user' ? 'user' : 'bot'}`;
+    if (animate) messageDiv.classList.add('animate-in');
+
+    let avatar, name, content, extraClass = '';
+
+    if (data.type === 'swarm_user') {
+        avatar = '👤';
+        name = data.user_name || 'Anonymous';
+        content = data.content;
+        extraClass = 'swarm-user-msg';
+    } else if (data.type === 'swarm_bot') {
+        // Bot colors and emojis
+        const botStyles = {
+            'Farnsworth': { emoji: '🧠', color: '#8b5cf6' },
+            'DeepSeek': { emoji: '🔮', color: '#3b82f6' },
+            'Phi': { emoji: '⚡', color: '#10b981' },
+            'Swarm-Mind': { emoji: '🐝', color: '#f59e0b' }
+        };
+        const style = botStyles[data.bot_name] || { emoji: '🤖', color: '#6b7280' };
+        avatar = style.emoji;
+        name = data.bot_name;
+        content = data.content;
+        extraClass = 'swarm-bot-msg';
+        messageDiv.style.setProperty('--bot-color', style.color);
+    }
+
+    const time = new Date(data.timestamp || Date.now()).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    messageDiv.innerHTML = `
+        <div class="message-avatar ${extraClass}">${avatar}</div>
+        <div class="message-body">
+            <div class="message-meta">
+                <span class="sender-name">${escapeHtml(name)}</span>
+                <span class="message-time">${time}</span>
+            </div>
+            <div class="message-bubble glass-panel ${extraClass}">
+                ${formatMessage(content || '')}
+            </div>
+        </div>
+    `;
+
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    // Voice for bot messages
+    if (data.type === 'swarm_bot' && state.voiceEnabled && data.bot_name === 'Farnsworth') {
+        speakText(content);
+    }
+}
+
+function addSwarmSystemMessage(content) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'swarm-system-message';
+    msgDiv.innerHTML = `<span class="system-content">${escapeHtml(content)}</span>`;
+    messagesContainer.appendChild(msgDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function addSwarmToolMessage(data) {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'swarm-tool-message';
+    msgDiv.innerHTML = `
+        <span class="tool-icon">🛠️</span>
+        <span class="tool-user">${escapeHtml(data.user_name)}</span>
+        <span class="tool-action">used</span>
+        <span class="tool-name">${escapeHtml(data.tool_name)}</span>
+        <span class="tool-status ${data.success ? 'success' : 'failed'}">${data.success ? '✓' : '✗'}</span>
+    `;
+    messagesContainer.appendChild(msgDiv);
+}
+
+function handleSwarmTyping(botName, isTyping) {
+    if (isTyping) {
+        state.swarmTypingBots.add(botName);
+    } else {
+        state.swarmTypingBots.delete(botName);
+    }
+    updateSwarmTypingIndicator();
+}
+
+function updateSwarmTypingIndicator() {
+    const indicator = document.getElementById('typing-indicator');
+    if (!indicator) return;
+
+    if (state.swarmTypingBots.size > 0) {
+        const bots = Array.from(state.swarmTypingBots);
+        indicator.classList.remove('hidden');
+        indicator.querySelector('.typing-name').textContent = bots.join(', ');
+    } else {
+        indicator.classList.add('hidden');
+    }
+}
+
+function updateSwarmStatus() {
+    // Update online count badge
+    const countBadge = document.getElementById('swarm-online-count');
+    if (countBadge) {
+        countBadge.textContent = state.swarmOnlineUsers.length;
+        countBadge.classList.toggle('active', state.swarmOnlineUsers.length > 0);
+    }
+
+    // Update users list in sidebar
+    const usersList = document.querySelector('#swarm-users-list .user-list');
+    if (usersList) {
+        usersList.innerHTML = state.swarmOnlineUsers.map(user =>
+            `<div class="swarm-user-item">
+                <span class="user-dot"></span>
+                <span class="user-name">${escapeHtml(user)}</span>
+            </div>`
+        ).join('') || '<div class="no-users">No users online</div>';
+    }
+
+    // Fetch learning stats
+    if (state.swarmMode) {
+        fetchSwarmLearningStats();
+    }
+}
+
+async function fetchSwarmLearningStats() {
+    try {
+        const response = await fetch('/api/swarm/learning');
+        const data = await response.json();
+
+        if (data.learning_stats) {
+            const stats = data.learning_stats;
+            const cyclesEl = document.getElementById('learning-cycles');
+            const conceptsEl = document.getElementById('concept-count');
+            const conceptsListEl = document.getElementById('top-concepts');
+
+            if (cyclesEl) cyclesEl.textContent = stats.learning_cycles || 0;
+            if (conceptsEl) conceptsEl.textContent = stats.concept_count || 0;
+
+            if (conceptsListEl && stats.top_concepts) {
+                conceptsListEl.innerHTML = '<h4>🔥 Trending Concepts</h4>' +
+                    stats.top_concepts.slice(0, 5).map(([concept, score]) =>
+                        `<div class="concept-item">
+                            <span class="concept-name">${escapeHtml(concept)}</span>
+                            <span class="concept-score">${(score * 100).toFixed(0)}%</span>
+                        </div>`
+                    ).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch learning stats:', error);
+    }
+}
+
+function addSwarmWelcomeMessage() {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.className = 'swarm-welcome';
+    welcomeDiv.innerHTML = `
+        <div class="swarm-welcome-header">
+            <span class="swarm-icon">🐝</span>
+            <h2>Welcome to Swarm Chat!</h2>
+        </div>
+        <div class="swarm-welcome-body">
+            <p>You're now in <strong>Community Mode</strong> - chat with everyone and our AI swarm!</p>
+            <div class="swarm-features">
+                <div class="swarm-feature">
+                    <span class="feature-icon">👥</span>
+                    <span>Chat with the community</span>
+                </div>
+                <div class="swarm-feature">
+                    <span class="feature-icon">🤖</span>
+                    <span>Multiple AI models respond</span>
+                </div>
+                <div class="swarm-feature">
+                    <span class="feature-icon">🧬</span>
+                    <span>System learns in real-time</span>
+                </div>
+                <div class="swarm-feature">
+                    <span class="feature-icon">🌍</span>
+                    <span>Knowledge shared to Planetary Memory</span>
+                </div>
+            </div>
+            <p class="swarm-bots">
+                <strong>Active Bots:</strong>
+                🧠 Farnsworth • 🔮 DeepSeek • ⚡ Phi • 🐝 Swarm-Mind
+            </p>
+        </div>
+    `;
+    messagesContainer.appendChild(welcomeDiv);
+}
+
+// Override sendMessage to handle swarm mode
+const originalSendMessage = sendMessage;
+sendMessage = async function() {
+    if (state.swarmMode) {
+        await sendSwarmMessage();
+    } else {
+        await originalSendMessage();
+    }
+};
+
+async function sendSwarmMessage() {
+    const input = document.getElementById('user-input');
+    if (!input || !state.swarmWs || !state.swarmConnected) return;
+
+    const message = input.value.trim();
+    if (!message) return;
+
+    // Clear input
+    input.value = '';
+    document.getElementById('char-count').textContent = '0';
+    document.getElementById('send-btn').disabled = true;
+    input.style.height = 'auto';
+
+    // Send to swarm
+    state.swarmWs.send(JSON.stringify({
+        type: 'swarm_message',
+        content: message
+    }));
+}
+
+// Make swarm functions globally available
+window.switchChatMode = switchChatMode;
+window.connectSwarmChat = connectSwarmChat;
+window.disconnectSwarmChat = disconnectSwarmChat;

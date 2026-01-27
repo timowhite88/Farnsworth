@@ -151,6 +151,19 @@
             </div>
 
             <div class="header-center">
+                <!-- Chat Mode Toggle -->
+                <div class="chat-mode-toggle">
+                    <button id="personal-chat-btn" class="mode-btn active" title="Personal Chat">
+                        <span class="mode-icon">💬</span>
+                        <span class="mode-label">Personal</span>
+                    </button>
+                    <button id="swarm-chat-btn" class="mode-btn" title="Swarm Chat - Community">
+                        <span class="mode-icon">🐝</span>
+                        <span class="mode-label">Swarm</span>
+                        <span class="online-badge" id="swarm-online-count">0</span>
+                    </button>
+                </div>
+
                 <!-- Profile Switcher -->
                 <div class="profile-switcher">
                     <button class="profile-btn active" data-profile="default" title="Default">🧠</button>
@@ -391,6 +404,37 @@
                         <div class="status-item">
                             <span class="status-label">Thinking</span>
                             <span class="status-indicator" id="status-thinking">⏳</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Swarm Learning Widget (visible in Swarm mode) -->
+                <div id="swarm-learning-widget" class="sidebar-section widget-section hidden">
+                    <h3 class="sidebar-title">
+                        <span class="title-icon">🧬</span>
+                        Swarm Learning
+                    </h3>
+                    <div class="learning-widget">
+                        <div class="learning-stat">
+                            <span class="stat-label">Learning Cycles</span>
+                            <span class="stat-value" id="learning-cycles">0</span>
+                        </div>
+                        <div class="learning-stat">
+                            <span class="stat-label">Concepts Extracted</span>
+                            <span class="stat-value" id="concept-count">0</span>
+                        </div>
+                        <div class="learning-stat">
+                            <span class="stat-label">Active Bots</span>
+                            <span class="stat-value" id="active-bots">4</span>
+                        </div>
+                        <div class="top-concepts" id="top-concepts">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div class="swarm-users" id="swarm-users-list">
+                            <h4>🐝 Swarm Members</h4>
+                            <div class="user-list">
+                                <!-- Populated dynamically -->
+                            </div>
                         </div>
                     </div>
                 </div>
