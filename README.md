@@ -26,10 +26,12 @@ Experience Farnsworth without installing anything:
 ### **https://ai.farnsworth.cloud**
 
 The live demo features:
+- **Professor Farnsworth Persona** - All responses in his eccentric scientist voice
 - **Token-Gated Access** - Premium glassmorphism interface
-- **Neural Chat Interface** - Talk to Farnsworth AI directly
+- **Voice Input** - Click the 🎤 mic button to speak your queries
+- **Voice Output** - Hear responses in Farnsworth's elderly professor tones
+- **Holder Tools** - Whale Tracker, Rug Check, Token Scanner, Market Mood
 - **Cosmic Background** - Animated nebula and star field
-- **Text-to-Speech** - Voice output for AI responses
 
 > **Note:** The live demo runs in demo mode with limited features. For full capabilities including P2P networking, Solana trading, and local memory, install locally.
 
@@ -232,6 +234,38 @@ When using `--dashboard`, you see live stats:
 📊 Peers: 3 | DKG: 127 nodes, 89 edges | Messages seen: 1,247
 ```
 
+### Connect to the Public Network
+
+Join the official Farnsworth Planetary Memory network:
+
+```bash
+# Add to your .env file
+FARNSWORTH_BOOTSTRAP_PEER=ws://194.68.245.145:8889
+FARNSWORTH_BOOTSTRAP_PASSWORD=Farnsworth2026!
+ENABLE_PLANETARY_MEMORY=true
+PLANETARY_USE_P2P=true
+```
+
+Then start your node:
+```bash
+python main.py --node
+```
+
+You'll see:
+```
+P2P: Connected to bootstrap! X peers in network
+```
+
+### What Gets Shared
+
+| Shared | NOT Shared |
+|--------|------------|
+| Anonymized skill vectors | Your actual conversations |
+| Problem-solution patterns | Personal data / PII |
+| Generic solutions | IP addresses, API keys |
+
+The privacy filter automatically scrubs sensitive data before sharing.
+
 ### Network Architecture
 
 ```
@@ -239,7 +273,7 @@ When using `--dashboard`, you see live stats:
 │                    Your Farnsworth Node                      │
 │                                                             │
 │  ┌──────────┐   UDP 8888   ┌──────────────────────────┐    │
-│  │ Discovery│ ◄──────────► │  Peer Nodes (LAN/WAN)    │    │
+│  │ Discovery│ ◄──────────► │  Peer Nodes (LAN)        │    │
 │  └──────────┘              └──────────────────────────┘    │
 │       │                                                     │
 │       ▼                                                     │
@@ -247,8 +281,12 @@ When using `--dashboard`, you see live stats:
 │  │ Gossip   │ ◄──────────► │  Knowledge Exchange      │    │
 │  │ Protocol │              │  - DKG Sync              │    │
 │  └──────────┘              │  - Skill Broadcast       │    │
-│                            │  - Task Auctions         │    │
-│                            └──────────────────────────┘    │
+│       │                    │  - Task Auctions         │    │
+│       ▼                    └──────────────────────────┘    │
+│  ┌──────────┐   WS 8889    ┌──────────────────────────┐    │
+│  │ Bootstrap│ ◄──────────► │  WAN Relay Server        │    │
+│  │ Client   │              │  (Password Protected)    │    │
+│  └──────────┘              └──────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
 

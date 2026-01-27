@@ -43,6 +43,13 @@ class SignalType(Enum):
     USER_INTERRUPTION = "io.user.interruption"
     EXTERNAL_ALERT = "io.external.alert"
 
+    # P2P / Network Signals
+    EXTERNAL_EVENT = "p2p.external_event"
+    TASK_RECEIVED = "p2p.task_received"
+    PEER_CONNECTED = "p2p.peer_connected"
+    PEER_DISCONNECTED = "p2p.peer_disconnected"
+    SKILL_RECEIVED = "p2p.skill_received"
+
 @dataclass
 class Signal:
     """A quantified event propagating through the Nexus."""
