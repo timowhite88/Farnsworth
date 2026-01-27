@@ -1,15 +1,154 @@
+# Smithery MCP Server Configuration
+# https://smithery.ai
+
+name: farnsworth
+version: 2.8.0
+description: |
+  Farnsworth - Your Claude Companion AI with superpowers: persistent memory,
+  model swarms, multimodal understanding, P2P networking, and self-evolution.
+
+  Give Claude infinite memory, specialist agents, Solana trading tools,
+  and distributed knowledge sharing.
+
+author: timowhite88
+license: MIT
+repository: https://github.com/timowhite88/Farnsworth
+homepage: https://github.com/timowhite88/Farnsworth
+
+# Server configuration
 startCommand:
   type: stdio
-  command: python
-  args:
-    - -m
-    - farnsworth.mcp_server
-installCommand:
-  command: pip
-  args:
-    - install
-    - -r
-    - requirements.txt
-build:
-  dockerfile: docker/Dockerfile
-  context: .
+  configSchema:
+    type: object
+    properties:
+      data_dir:
+        type: string
+        description: Directory to store Farnsworth data
+        default: "./data"
+      solana_rpc_url:
+        type: string
+        description: Solana RPC URL for blockchain operations
+      isolated_mode:
+        type: boolean
+        description: Disable P2P networking for maximum privacy
+        default: false
+      enable_vision:
+        type: boolean
+        description: Enable vision/image understanding
+        default: true
+      enable_voice:
+        type: boolean
+        description: Enable voice transcription
+        default: true
+    required: []
+  commandFunction: |
+    (config) => ({
+      command: "python",
+      args: ["-m", "farnsworth.mcp_server"],
+      env: {
+        FARNSWORTH_DATA_DIR: config.data_dir || "./data",
+        SOLANA_RPC_URL: config.solana_rpc_url || "",
+        FARNSWORTH_ISOLATED: config.isolated_mode ? "true" : "false",
+        FARNSWORTH_ENABLE_VISION: config.enable_vision !== false ? "true" : "false",
+        FARNSWORTH_ENABLE_VOICE: config.enable_voice !== false ? "true" : "false"
+      }
+    })
+
+# Tool categories
+categories:
+  - memory
+  - agents
+  - productivity
+  - blockchain
+  - ai
+
+# Keywords for search
+keywords:
+  - memory
+  - persistent memory
+  - agents
+  - swarm
+  - solana
+  - trading
+  - p2p
+  - evolution
+  - vision
+  - voice
+  - productivity
+  - knowledge graph
+
+# Tools provided by this server
+tools:
+  - name: farnsworth_remember
+    description: Store information in Farnsworth's persistent memory with optional tags and importance
+
+  - name: farnsworth_recall
+    description: Search and retrieve relevant memories using semantic search
+
+  - name: farnsworth_delegate
+    description: Delegate tasks to specialist agents (code, reasoning, research, creative)
+
+  - name: farnsworth_evolve
+    description: Provide feedback to help Farnsworth learn and improve
+
+  - name: farnsworth_status
+    description: Get system health, memory stats, and fitness metrics
+
+  - name: farnsworth_vision
+    description: Analyze images - captioning, VQA, OCR, scene understanding
+
+  - name: farnsworth_voice
+    description: Process audio - transcription, speaker diarization
+
+  - name: farnsworth_swarm
+    description: Multi-model collaborative inference using PSO optimization
+
+  - name: farnsworth_solana_balance
+    description: Check Solana wallet balance
+
+  - name: farnsworth_solana_swap
+    description: Execute token swaps on Jupiter
+
+  - name: farnsworth_dexscreener
+    description: Get token data from DexScreener
+
+  - name: farnsworth_project_create
+    description: Create and track projects with milestones
+
+  - name: farnsworth_project_status
+    description: Get project progress and tasks
+
+  - name: farnsworth_quick_note
+    description: Add a quick note with tags
+
+  - name: farnsworth_focus_start
+    description: Start a Pomodoro focus session
+
+  - name: farnsworth_daily_summary
+    description: Generate daily activity summary
+
+  - name: farnsworth_switch_profile
+    description: Switch context profile (Work, Personal, Creative, Technical)
+
+# Resources provided
+resources:
+  - uri: farnsworth://memory/recent
+    description: Recent conversation memories
+
+  - uri: farnsworth://memory/graph
+    description: Knowledge graph of entities and relationships
+
+  - uri: farnsworth://agents/active
+    description: Currently active agents
+
+  - uri: farnsworth://evolution/fitness
+    description: Current fitness metrics
+
+# Requirements
+requirements:
+  python: ">=3.10"
+  dependencies:
+    - mcp>=1.0.0
+    - ollama
+    - sentence-transformers
+    - chromadb
