@@ -1,15 +1,18 @@
 """
 Farnsworth Web Server
 Token-gated chat interface with Solana wallet verification
+Real-time WebSocket for live action graphs and thinking states
 """
 
 import os
 import json
 import logging
+import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Set
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -81,6 +84,83 @@ class ChatRequest(BaseModel):
 
 class TokenVerifyRequest(BaseModel):
     wallet_address: str
+
+
+# ============================================
+# WEBSOCKET MANAGER FOR REAL-TIME UPDATES
+# ============================================
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time updates."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self.session_events: Dict[str, List[dict]] = {}  # session_id -> events
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        logger.info(f"WebSocket connected. Total: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
+
+    async def broadcast(self, message: dict):
+        """Broadcast message to all connected clients."""
+        dead_connections = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                dead_connections.append(connection)
+
+        for conn in dead_connections:
+            self.disconnect(conn)
+
+    async def emit_event(self, event_type: str, data: dict, session_id: str = "default"):
+        """Emit a real-time event to all clients."""
+        event = {
+            "type": event_type,
+            "data": data,
+            "session_id": session_id,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # Store in session history
+        if session_id not in self.session_events:
+            self.session_events[session_id] = []
+        self.session_events[session_id].append(event)
+
+        # Keep only last 100 events per session
+        if len(self.session_events[session_id]) > 100:
+            self.session_events[session_id] = self.session_events[session_id][-100:]
+
+        await self.broadcast(event)
+
+    def get_session_history(self, session_id: str) -> List[dict]:
+        """Get event history for a session."""
+        return self.session_events.get(session_id, [])
+
+
+# Global connection manager
+ws_manager = ConnectionManager()
+
+
+# Event types for real-time updates
+class EventType:
+    THINKING_START = "thinking_start"
+    THINKING_STEP = "thinking_step"
+    THINKING_END = "thinking_end"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    RESPONSE_CHUNK = "response_chunk"
+    RESPONSE_COMPLETE = "response_complete"
+    NODE_UPDATE = "node_update"
+    SESSION_START = "session_start"
+    SESSION_END = "session_end"
+    ERROR = "error"
 
 
 # Solana client
@@ -462,6 +542,134 @@ async def market_sentiment():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# ============================================
+# WEBSOCKET ENDPOINTS FOR REAL-TIME UPDATES
+# ============================================
+
+@app.websocket("/ws/live")
+async def websocket_live(websocket: WebSocket):
+    """WebSocket endpoint for real-time events (thinking, tools, responses)."""
+    await ws_manager.connect(websocket)
+    try:
+        # Send welcome message
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Good news, everyone! Connected to Farnsworth Live Feed!",
+            "timestamp": datetime.now().isoformat()
+        })
+
+        # Keep connection alive and receive messages
+        while True:
+            try:
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
+
+                # Handle client messages
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                elif data.get("type") == "get_history":
+                    session_id = data.get("session_id", "default")
+                    history = ws_manager.get_session_history(session_id)
+                    await websocket.send_json({
+                        "type": "history",
+                        "session_id": session_id,
+                        "events": history
+                    })
+
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                await websocket.send_json({"type": "heartbeat"})
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        ws_manager.disconnect(websocket)
+
+
+@app.get("/live", response_class=HTMLResponse)
+async def live_dashboard(request: Request):
+    """Live dashboard showing real-time action graphs and thinking states."""
+    return templates.TemplateResponse("live.html", {"request": request})
+
+
+@app.get("/api/sessions")
+async def get_sessions():
+    """Get list of active sessions with event counts."""
+    sessions = []
+    for session_id, events in ws_manager.session_events.items():
+        sessions.append({
+            "session_id": session_id,
+            "event_count": len(events),
+            "last_event": events[-1]["timestamp"] if events else None
+        })
+    return JSONResponse({
+        "sessions": sessions,
+        "active_connections": len(ws_manager.active_connections)
+    })
+
+
+@app.get("/api/sessions/{session_id}/graph")
+async def get_session_graph(session_id: str):
+    """Get action chain graph data for a session."""
+    events = ws_manager.get_session_history(session_id)
+
+    # Build graph nodes and edges
+    nodes = []
+    edges = []
+    node_id = 0
+
+    for event in events:
+        event_type = event.get("type", "unknown")
+
+        # Create node for each event
+        node = {
+            "id": node_id,
+            "type": event_type,
+            "label": event_type.replace("_", " ").title(),
+            "timestamp": event.get("timestamp"),
+            "data": event.get("data", {})
+        }
+        nodes.append(node)
+
+        # Create edge to previous node
+        if node_id > 0:
+            edges.append({
+                "from": node_id - 1,
+                "to": node_id
+            })
+
+        node_id += 1
+
+    return JSONResponse({
+        "session_id": session_id,
+        "nodes": nodes,
+        "edges": edges
+    })
+
+
+# Helper to emit events from chat
+async def emit_thinking_event(step: str, content: str, session_id: str = "default"):
+    """Emit a thinking step event."""
+    await ws_manager.emit_event(EventType.THINKING_STEP, {
+        "step": step,
+        "content": content
+    }, session_id)
+
+
+async def emit_tool_event(tool_name: str, args: dict, result: str = None, session_id: str = "default"):
+    """Emit a tool call/result event."""
+    if result is None:
+        await ws_manager.emit_event(EventType.TOOL_CALL, {
+            "tool": tool_name,
+            "args": args
+        }, session_id)
+    else:
+        await ws_manager.emit_event(EventType.TOOL_RESULT, {
+            "tool": tool_name,
+            "result": result
+        }, session_id)
 
 
 def main():
