@@ -307,6 +307,60 @@ models:
       - "vision"
     release_date: "2025-05"
 
+# ============================================
+  # TIER 4: Cloud API Models (Requires API Key)
+  # Best for: Complex coding, agentic workflows
+  # ============================================
+
+  minimax-m2:
+    name: "MiniMax-M2"
+    description: "SOTA coding model - 230B MoE, 10B active params, optimized for SWE tasks"
+    backend: "openai_compatible"
+    api_base: "https://api.deepinfra.com/v1/openai"
+    api_model: "MiniMaxAI/MiniMax-M2"
+    params: 230e9
+    active_params: 10e9
+    context_length: 128000
+    interleaved_thinking: true
+    strengths:
+      - "code"
+      - "agentic"
+      - "multi-file-editing"
+      - "debugging"
+      - "swe-bench"
+      - "tool-calling"
+    license: "MiniMax"
+    recommended_for:
+      - "code"
+      - "agentic"
+      - "complex-coding"
+    env_key: "DEEPINFRA_API_KEY"
+    release_date: "2025-04"
+    notes: "Interleaved thinking model - preserve <think>...</think> tags in history"
+
+  minimax-m2-1:
+    name: "MiniMax-M2.1"
+    description: "Enhanced M2 with multi-language programming and office automation"
+    backend: "openai_compatible"
+    api_base: "https://api.deepinfra.com/v1/openai"
+    api_model: "MiniMaxAI/MiniMax-M2.1"
+    params: 230e9
+    active_params: 10e9
+    context_length: 128000
+    interleaved_thinking: true
+    strengths:
+      - "code"
+      - "agentic"
+      - "multi-language-code"
+      - "office-automation"
+      - "real-world-tasks"
+    license: "MiniMax"
+    recommended_for:
+      - "code"
+      - "real-world-dev"
+    env_key: "DEEPINFRA_API_KEY"
+    release_date: "2025-06"
+
 # Embedding models
 embeddings:
   all-minilm-l6-v2:
@@ -411,13 +465,17 @@ hardware_profiles:
 task_routing:
   code:
     description: "Programming and debugging"
-    primary: "deepseek-r1-1.5b"
-    secondary: "phi-4-mini"
-    fallback: "smollm2-1.7b"
+    primary: "minimax-m2"
+    secondary: "deepseek-r1-1.5b"
+    fallback: "phi-4-mini"
+    cloud_primary: "minimax-m2"
+    local_primary: "deepseek-r1-1.5b"
     swarm_models:
+      - "minimax-m2"
       - "deepseek-r1-1.5b"
       - "phi-4-mini"
       - "qwen3-4b"
+    notes: "MiniMax M2 excels at SWE-Bench, multi-file editing, and complex debugging"
 
   reasoning:
     description: "Logic and analysis"

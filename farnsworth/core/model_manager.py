@@ -30,6 +30,7 @@ from farnsworth.core.llm_backend import (
     LlamaCppBackend,
     BitNetBackend,
     CascadeBackend,
+    OpenAICompatibleBackend,
     GenerationConfig,
     BackendType,
 )
@@ -320,6 +321,32 @@ class ModelManager:
                 elif backend_type == 'bitnet':
                     backend = BitNetBackend(
                         model_path=model_config.get('path', ''),
+                        config=config,
+                    )
+                elif backend_type == 'openai_compatible':
+                    # Get API key from environment
+                    env_key = model_config.get('env_key', 'OPENAI_API_KEY')
+                    api_key = os.environ.get(env_key)
+
+                    # Also check for common alternatives
+                    if not api_key:
+                        api_key = os.environ.get('DEEPINFRA_API_KEY')
+                    if not api_key:
+                        api_key = os.environ.get('MINIMAX_API_KEY')
+                    if not api_key:
+                        api_key = os.environ.get('OPENROUTER_API_KEY')
+
+                    if not api_key:
+                        return ModelLoadResult(
+                            success=False,
+                            model_name=model_key,
+                            error=f"API key not found. Set {env_key} environment variable.",
+                        )
+
+                    backend = OpenAICompatibleBackend(
+                        model_name=model_config.get('api_model', model_key),
+                        api_key=api_key,
+                        base_url=model_config.get('api_base', 'https://api.deepinfra.com/v1/openai'),
                         config=config,
                     )
                 else:

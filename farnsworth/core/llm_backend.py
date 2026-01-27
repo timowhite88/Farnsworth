@@ -23,6 +23,7 @@ class BackendType(Enum):
     OLLAMA = "ollama"
     LLAMA_CPP = "llama_cpp"
     BITNET = "bitnet"
+    OPENAI_COMPATIBLE = "openai_compatible"  # For MiniMax, DeepInfra, OpenRouter, etc.
 
 
 @dataclass
@@ -761,6 +762,208 @@ class BitNetBackend(LLMBackend):
 
         logger.warning("BitNet using hash-based pseudo-embeddings (not semantic)")
         return embedding
+
+
+class OpenAICompatibleBackend(LLMBackend):
+    """
+    OpenAI-compatible API backend for cloud models.
+
+    Supports:
+    - MiniMax M2/M2.1 (coding & agentic workflows)
+    - DeepInfra endpoints
+    - OpenRouter
+    - Any OpenAI-compatible API
+
+    MiniMax M2 is optimized for coding with:
+    - Interleaved thinking (<think>...</think>)
+    - 128K context window
+    - Tool/function calling
+    - Multi-file editing and SWE tasks
+    """
+
+    def __init__(
+        self,
+        model_name: str,
+        api_key: Optional[str] = None,
+        base_url: str = "https://api.deepinfra.com/v1/openai",
+        config: Optional[GenerationConfig] = None,
+    ):
+        super().__init__(model_name, config)
+        self.api_key = api_key
+        self.base_url = base_url
+        self._client = None
+
+    @property
+    def backend_type(self) -> BackendType:
+        return BackendType.OPENAI_COMPATIBLE
+
+    async def _get_client(self):
+        """Get or create OpenAI client."""
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+                self._client = AsyncOpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                )
+            except ImportError:
+                raise RuntimeError("openai package not installed. Run: pip install openai")
+        return self._client
+
+    async def load(self) -> bool:
+        """Verify API connectivity."""
+        try:
+            await self._get_client()
+            self._is_loaded = True
+            logger.info(f"OpenAI-compatible backend initialized for {self.model_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI backend: {e}")
+            return False
+
+    async def unload(self) -> bool:
+        """Close client."""
+        self._client = None
+        self._is_loaded = False
+        return True
+
+    async def generate(
+        self,
+        prompt: str,
+        config: Optional[GenerationConfig] = None,
+    ) -> GenerationResult:
+        """Generate using OpenAI-compatible API."""
+        cfg = config or self.config
+        client = await self._get_client()
+
+        start_time = time.time()
+        self.confidence_estimator.reset()
+
+        content_type = self.adaptive_temp.detect_content_type(prompt)
+        temp = self.adaptive_temp.adapt(1.0, content_type)
+
+        # MiniMax M2 recommended settings
+        if "minimax" in self.model_name.lower():
+            temp = 1.0  # MiniMax recommends temp=1.0
+            top_p = 0.95
+            top_k = 40
+        else:
+            top_p = cfg.top_p
+            top_k = cfg.top_k
+
+        try:
+            response = await client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temp,
+                top_p=top_p,
+                max_tokens=cfg.max_tokens,
+            )
+
+            total_time = time.time() - start_time
+            text = response.choices[0].message.content or ""
+
+            # Update confidence from output
+            for token in text.split():
+                self.confidence_estimator.update(token)
+
+            return GenerationResult(
+                text=text,
+                tokens_generated=response.usage.completion_tokens if response.usage else len(text.split()),
+                tokens_per_second=(response.usage.completion_tokens if response.usage else len(text.split())) / max(0.001, total_time),
+                model_used=self.model_name,
+                backend_used=self.backend_type,
+                confidence_score=self.confidence_estimator.base_confidence,
+                total_time=total_time,
+            )
+        except Exception as e:
+            logger.error(f"OpenAI API error: {e}")
+            return GenerationResult(
+                text=f"Error: {e}",
+                tokens_generated=0,
+                tokens_per_second=0,
+                model_used=self.model_name,
+                backend_used=self.backend_type,
+                confidence_score=0,
+                total_time=time.time() - start_time,
+            )
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        config: Optional[GenerationConfig] = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream generation from OpenAI-compatible API."""
+        cfg = config or self.config
+        client = await self._get_client()
+
+        self.confidence_estimator.reset()
+        content_type = self.adaptive_temp.detect_content_type(prompt)
+        temp = self.adaptive_temp.adapt(1.0, content_type)
+
+        # MiniMax M2 settings
+        if "minimax" in self.model_name.lower():
+            temp = 1.0
+            top_p = 0.95
+        else:
+            top_p = cfg.top_p
+
+        token_index = 0
+        cumulative_confidence = 1.0
+
+        try:
+            stream = await client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temp,
+                top_p=top_p,
+                max_tokens=cfg.max_tokens,
+                stream=True,
+            )
+
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    text = chunk.choices[0].delta.content
+                    confidence = self.confidence_estimator.update(text)
+                    cumulative_confidence = 0.95 * cumulative_confidence + 0.05 * confidence
+
+                    yield StreamChunk(
+                        text=text,
+                        token_index=token_index,
+                        confidence=confidence,
+                        cumulative_confidence=cumulative_confidence,
+                    )
+                    token_index += 1
+        except Exception as e:
+            logger.error(f"OpenAI streaming error: {e}")
+            yield StreamChunk(
+                text=f"Error: {e}",
+                token_index=0,
+                confidence=0,
+                cumulative_confidence=0,
+            )
+
+    async def get_embedding(self, text: str) -> list[float]:
+        """Get embedding (if model supports it)."""
+        client = await self._get_client()
+
+        try:
+            response = await client.embeddings.create(
+                model="text-embedding-ada-002",  # Fallback embedding model
+                input=text,
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            logger.warning(f"Embedding failed: {e}, using hash fallback")
+            # Hash-based fallback
+            import hashlib
+            text_hash = hashlib.sha256(text.encode()).digest()
+            embedding = []
+            for i in range(384):
+                byte_idx = i % 32
+                val = (text_hash[byte_idx] / 255.0) * 2 - 1
+                embedding.append(val)
+            return embedding
 
 
 class CascadeBackend(LLMBackend):
