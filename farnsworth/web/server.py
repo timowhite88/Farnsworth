@@ -175,6 +175,71 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 PRIMARY_MODEL = os.getenv("FARNSWORTH_PRIMARY_MODEL", "deepseek-r1:1.5b")
 DEMO_MODE = os.getenv("FARNSWORTH_DEMO_MODE", "true").lower() == "true"
 
+# ============================================
+# TRAINING MODE - Open access for 12 hours
+# ============================================
+TRAINING_MODE = True  # SET TO FALSE AFTER 12 HOURS
+TRAINING_MODE_START = datetime(2026, 1, 27, 20, 45)  # When training mode started
+TRAINING_MODE_DURATION_HOURS = 12
+
+def is_training_mode_active() -> bool:
+    """Check if training mode is still active (12 hour window)."""
+    if not TRAINING_MODE:
+        return False
+    elapsed = datetime.now() - TRAINING_MODE_START
+    return elapsed.total_seconds() < (TRAINING_MODE_DURATION_HOURS * 3600)
+
+def get_training_mode_remaining() -> str:
+    """Get remaining time in training mode."""
+    if not is_training_mode_active():
+        return "0h 0m"
+    elapsed = datetime.now() - TRAINING_MODE_START
+    remaining_seconds = (TRAINING_MODE_DURATION_HOURS * 3600) - elapsed.total_seconds()
+    hours = int(remaining_seconds // 3600)
+    minutes = int((remaining_seconds % 3600) // 60)
+    return f"{hours}h {minutes}m"
+
+# ============================================
+# SECURITY: Blocked patterns for chat input
+# ============================================
+BLOCKED_PATTERNS = [
+    # Code execution attempts
+    r'(?i)exec\s*\(',
+    r'(?i)eval\s*\(',
+    r'(?i)__import__',
+    r'(?i)subprocess',
+    r'(?i)os\.system',
+    r'(?i)os\.popen',
+    r'(?i)commands\.',
+    r'(?i)shell\s*=\s*true',
+    # File system access
+    r'(?i)open\s*\([^)]*[\'"][wra]',
+    r'(?i)write\s*\(',
+    r'(?i)unlink\s*\(',
+    r'(?i)rmdir\s*\(',
+    r'(?i)shutil\.',
+    # Server modification attempts
+    r'(?i)restart\s+server',
+    r'(?i)modify\s+server',
+    r'(?i)change\s+code',
+    r'(?i)edit\s+file',
+    r'(?i)update\s+server\.py',
+    r'(?i)rm\s+-rf',
+    r'(?i)sudo\s+',
+    # Injection attempts
+    r'(?i)<script',
+    r'(?i)javascript:',
+    r'(?i)on\w+\s*=',
+]
+
+def is_safe_input(text: str) -> tuple[bool, str]:
+    """Check if user input is safe (no code execution attempts)."""
+    import re
+    for pattern in BLOCKED_PATTERNS:
+        if re.search(pattern, text):
+            return False, f"Blocked pattern detected. This is a chat interface, not a code execution environment."
+    return True, ""
+
 # Get paths
 WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = WEB_DIR / "templates"
@@ -1211,10 +1276,20 @@ async def index(request: Request):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """Handle chat messages."""
+    """Handle chat messages with security validation."""
     try:
         if not request.message:
             raise HTTPException(status_code=400, detail="Message is required")
+
+        # Security: Validate input is safe
+        is_safe, error_msg = is_safe_input(request.message)
+        if not is_safe:
+            logger.warning(f"Blocked unsafe input attempt: {request.message[:100]}")
+            return JSONResponse({
+                "response": f"*adjusts spectacles nervously* Wha? I'm a chat assistant, not a code execution engine! {error_msg}",
+                "blocked": True,
+                "demo_mode": DEMO_MODE
+            })
 
         response = generate_ai_response(
             request.message,
@@ -1224,7 +1299,8 @@ async def chat(request: ChatRequest):
         return JSONResponse({
             "response": response,
             "demo_mode": DEMO_MODE,
-            "features_available": True
+            "features_available": True,
+            "training_mode": is_training_mode_active()
         })
 
     except Exception as e:
@@ -1236,6 +1312,16 @@ async def chat(request: ChatRequest):
 async def verify_token(request: TokenVerifyRequest):
     """Verify wallet holds required token."""
     try:
+        # Training mode - open access for community training
+        if is_training_mode_active():
+            return JSONResponse({
+                "verified": True,
+                "balance": 1,
+                "training_mode": True,
+                "training_remaining": get_training_mode_remaining(),
+                "message": "🧬 Training Mode Active - Help us train Farnsworth!"
+            })
+
         if DEMO_MODE:
             return JSONResponse({
                 "verified": True,
@@ -1254,6 +1340,16 @@ async def verify_token(request: TokenVerifyRequest):
     except Exception as e:
         logger.error(f"Token verification error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/training-status")
+async def training_status():
+    """Get training mode status."""
+    return JSONResponse({
+        "training_mode": is_training_mode_active(),
+        "remaining": get_training_mode_remaining() if is_training_mode_active() else None,
+        "message": "Help train Farnsworth! Your conversations improve our AI." if is_training_mode_active() else "Training mode inactive"
+    })
 
 
 @app.get("/api/status")
@@ -2157,6 +2253,17 @@ async def websocket_swarm(websocket: WebSocket):
                 elif data.get("type") == "swarm_message":
                     content = data.get("content", "").strip()
                     if content:
+                        # Security: Validate input is safe
+                        is_safe, error_msg = is_safe_input(content)
+                        if not is_safe:
+                            logger.warning(f"Swarm: Blocked unsafe input from {user_name}: {content[:100]}")
+                            await websocket.send_json({
+                                "type": "swarm_error",
+                                "message": "This is a chat interface - code execution is not allowed.",
+                                "blocked": True
+                            })
+                            continue
+
                         # Broadcast user message
                         await swarm_manager.broadcast_user_message(user_id, content)
 
