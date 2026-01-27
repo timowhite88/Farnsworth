@@ -34,7 +34,10 @@
       "Bash(git pull:*)",
       "Bash(python -m pytest:*)",
       "Bash(pip:*)",
-      "Bash(pip3:*)"
+      "Bash(pip3:*)",
+      "Bash(git checkout:*)",
+      "Bash(git rebase:*)",
+      "Bash(GIT_EDITOR=true git rebase:*)"
     ]
   }
 }

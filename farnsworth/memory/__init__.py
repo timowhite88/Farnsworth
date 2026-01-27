@@ -69,6 +69,14 @@ from farnsworth.memory.project_tracking import (
     MilestoneType,
     LinkType,
 )
+from farnsworth.memory.dream_consolidation import (
+    DreamConsolidator,
+    DreamPhase,
+    ConsolidationStrategy,
+    MemoryTrace,
+    DreamSequence,
+    ConsolidationCycle,
+)
 
 __all__ = [
     # Core memory components
@@ -121,4 +129,11 @@ __all__ = [
     "TaskStatus",
     "MilestoneType",
     "LinkType",
+    # Advanced Dream Consolidation
+    "DreamConsolidator",
+    "DreamPhase",
+    "ConsolidationStrategy",
+    "MemoryTrace",
+    "DreamSequence",
+    "ConsolidationCycle",
 ]
