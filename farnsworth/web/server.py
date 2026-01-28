@@ -99,6 +99,14 @@ try:
 except ImportError:
     AUDIO_SHARD_AVAILABLE = False
 
+# Optional P2P Swarm Fabric for distributed learning
+try:
+    from farnsworth.core.swarm.p2p import swarm_fabric
+    P2P_FABRIC_AVAILABLE = True
+except ImportError:
+    swarm_fabric = None
+    P2P_FABRIC_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -1148,13 +1156,10 @@ class SwarmLearningEngine:
 
     async def _propagate_to_p2p(self):
         """Share learnings with P2P network (Planetary Memory)."""
-        if not self._p2p_manager:
-            return
-
         try:
             # Create a learning summary to share
             summary = {
-                "type": "swarm_learning",
+                "type": "GOSSIP_LEARNING",
                 "cycle": self.learning_cycles,
                 "concepts": sorted(self.concept_cache.items(), key=lambda x: -x[1])[:10],
                 "tool_stats": dict(sorted(self.tool_usage_stats.items(), key=lambda x: -x[1])[:5]),
@@ -1162,12 +1167,18 @@ class SwarmLearningEngine:
                 "timestamp": datetime.now().isoformat()
             }
 
-            if hasattr(self._p2p_manager, 'broadcast_learning'):
-                await self._p2p_manager.broadcast_learning(summary)
-            elif hasattr(self._p2p_manager, 'share_knowledge'):
-                await self._p2p_manager.share_knowledge(summary)
-
-            logger.info(f"Swarm Learning: Propagated to P2P network")
+            # Use the P2P swarm fabric for distributed learning
+            if P2P_FABRIC_AVAILABLE and swarm_fabric:
+                await swarm_fabric.broadcast_message(summary)
+                logger.info(f"Swarm Learning: Propagated to P2P swarm fabric ({swarm_fabric.node_id})")
+            elif self._p2p_manager:
+                if hasattr(self._p2p_manager, 'broadcast_learning'):
+                    await self._p2p_manager.broadcast_learning(summary)
+                elif hasattr(self._p2p_manager, 'share_knowledge'):
+                    await self._p2p_manager.share_knowledge(summary)
+                logger.info(f"Swarm Learning: Propagated to P2P manager")
+            else:
+                logger.debug("Swarm Learning: No P2P connection available")
         except Exception as e:
             logger.error(f"Swarm Learning: P2P propagation failed: {e}")
 
@@ -3314,6 +3325,21 @@ async def websocket_swarm(websocket: WebSocket):
                             last_bot_message = followup_content
                             last_bot_name = followup["bot_name"]
                             continuation_rounds += 1
+
+                        # Share conversation with P2P planetary network
+                        if continuation_rounds > 0 and P2P_FABRIC_AVAILABLE and swarm_fabric:
+                            try:
+                                # Extract recent bot messages for sharing
+                                recent_bot_msgs = [
+                                    {"bot": m.get("bot_name"), "content": m.get("content", "")[:200]}
+                                    for m in swarm_manager.chat_history[-10:]
+                                    if m.get("type") == "swarm_bot"
+                                ]
+                                if recent_bot_msgs:
+                                    await swarm_fabric.broadcast_conversation(recent_bot_msgs)
+                                    logger.info(f"P2P: Shared {len(recent_bot_msgs)} bot messages to planetary network")
+                            except Exception as e:
+                                logger.debug(f"P2P conversation share failed: {e}")
 
                         # Periodically store learnings
                         if len(swarm_manager.learning_queue) >= 10:
