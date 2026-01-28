@@ -3096,45 +3096,19 @@ async def speak_text_api(request: SpeakRequest):
                 detail="Reference audio not found. Add farnsworth_reference.wav to static/audio/"
             )
 
-        # Generate speech with voice cloning using optimized XTTS parameters
+        # Generate speech with XTTS v2 voice cloning
         logger.info(f"TTS: Generating speech for: {text[:50]}...")
 
         # Generate to temp path first
         temp_path = cache_dir / f"{text_hash}_temp.wav"
 
-        # XTTS v2 parameters for more natural Farnsworth voice
-        try:
-            # Use model.tts() with kwargs passed to underlying XTTS model
-            wav = model.tts(
-                text=text,
-                speaker_wav=str(reference_audio),
-                language="en",
-                speed=0.92,  # Slightly slower for elderly professor feel
-                # XTTS kwargs for better voice cloning:
-                gpt_cond_len=24,           # Conditioning length from reference
-                temperature=0.7,           # Balance consistency and naturalness
-                length_penalty=1.0,
-                repetition_penalty=10.0,   # High to reduce robotic repetition
-                top_k=50,
-                top_p=0.85,
-            )
-            # Save wav to file
-            import scipy.io.wavfile as wavfile
-            import numpy as np
-            if isinstance(wav, list):
-                wav = np.array(wav, dtype=np.float32)
-            wav = np.clip(wav, -1.0, 1.0)
-            wav_int16 = (wav * 32767).astype(np.int16)
-            wavfile.write(str(temp_path), 24000, wav_int16)
-            logger.info("TTS: Generated with optimized XTTS parameters")
-        except Exception as synth_error:
-            logger.warning(f"TTS: Advanced params failed ({synth_error}), using default")
-            model.tts_to_file(
-                text=text,
-                speaker_wav=str(reference_audio),
-                language="en",
-                file_path=str(temp_path)
-            )
+        # Use standard XTTS synthesis - voice quality depends on reference audio
+        model.tts_to_file(
+            text=text,
+            speaker_wav=str(reference_audio),
+            language="en",
+            file_path=str(temp_path)
+        )
 
         # Read generated audio
         with open(temp_path, "rb") as f:
