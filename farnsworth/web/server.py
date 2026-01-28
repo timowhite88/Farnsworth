@@ -2007,15 +2007,19 @@ This is YOUR conversation - make it interesting."""
                                 next_speaker = "Farnsworth"
                                 logger.info("Farnsworth's turn (host priority)")
                             else:
-                                # Give Farnsworth 50% chance, others share 50%
-                                if "Farnsworth" in responders and random.random() < 0.5:
-                                    next_speaker = "Farnsworth"
-                                else:
-                                    non_farnsworth = [b for b in responders if b != "Farnsworth"]
-                                    if non_farnsworth:
-                                        next_speaker = random.choice(non_farnsworth)
+                                # Weighted selection - favor variety while keeping Farnsworth prominent
+                                # External AI providers (Claude, Kimi) get slight boost for variety
+                                weights = []
+                                for bot in responders:
+                                    if bot == "Farnsworth":
+                                        weights.append(3)  # Host gets good presence
+                                    elif bot in ("Claude", "Kimi"):
+                                        weights.append(2)  # External AI gets boost for variety
                                     else:
-                                        next_speaker = random.choice(responders)
+                                        weights.append(1)  # Local models share remaining
+                                next_speaker = random.choices(responders, weights=weights, k=1)[0]
+                                if next_speaker in ("Claude", "Kimi"):
+                                    logger.info(f"External AI {next_speaker} selected for variety")
 
                             persona = SWARM_PERSONAS[next_speaker]
                             other_bots = [b for b in ACTIVE_SWARM_BOTS if b != next_speaker]
