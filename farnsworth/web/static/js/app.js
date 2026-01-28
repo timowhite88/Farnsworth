@@ -544,13 +544,24 @@ function stopVoiceInput() {
 // Current audio element for TTS playback
 let currentAudio = null;
 let audioQueue = [];
+let serverAudioQueue = [];
 let isPlayingAudio = false;
 
-// Play pre-generated audio from server URL
+// Play pre-generated audio from server URL (with queue)
 async function playServerAudio(audioUrl) {
-    if (!state.voiceEnabled || isPlayingAudio) return;
+    if (!state.voiceEnabled) return;
+
+    // Add to queue and process
+    serverAudioQueue.push(audioUrl);
+    console.log('[Audio] Queued server audio, queue size:', serverAudioQueue.length);
+    processServerAudioQueue();
+}
+
+async function processServerAudioQueue() {
+    if (isPlayingAudio || serverAudioQueue.length === 0) return;
 
     isPlayingAudio = true;
+    const audioUrl = serverAudioQueue.shift();
 
     // Stop any current audio
     if (currentAudio) {
@@ -570,22 +581,36 @@ async function playServerAudio(audioUrl) {
                 currentAudio = null;
                 isPlayingAudio = false;
                 console.log('[Audio] Farnsworth finished speaking');
+
+                // Signal server that audio finished
+                if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
+                    state.swarmWs.send(JSON.stringify({
+                        type: 'audio_complete',
+                        bot_name: 'Farnsworth'
+                    }));
+                }
+
+                // Process next in queue
+                processServerAudioQueue();
             };
 
             currentAudio.onerror = (e) => {
                 console.error('[Audio] Error playing server audio:', e);
                 isPlayingAudio = false;
+                processServerAudioQueue();
             };
 
-            console.log('[Audio] Playing Farnsworth voice');
+            console.log('[Audio] Playing Farnsworth voice, remaining in queue:', serverAudioQueue.length);
             await currentAudio.play();
         } else {
             console.warn('[Audio] Server audio not ready yet');
             isPlayingAudio = false;
+            processServerAudioQueue();
         }
     } catch (error) {
         console.error('[Audio] Failed to fetch server audio:', error);
         isPlayingAudio = false;
+        processServerAudioQueue();
     }
 }
 

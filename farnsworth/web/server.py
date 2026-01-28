@@ -1782,27 +1782,32 @@ async def generate_multi_model_response(
 # Global turn-taking state
 _current_speaker = None
 _speaking_until = 0
+_awaiting_audio_complete = False  # True when waiting for Farnsworth's TTS to finish
 
 
-def estimate_speaking_time(content: str) -> float:
+def estimate_speaking_time(content: str, has_tts: bool = False) -> float:
     """Estimate how long it takes to speak content (TTS time)."""
     if not content:
         return 0
     # Roughly 150 words per minute = 2.5 words per second
-    # Add buffer for processing
     word_count = len(content.split())
-    return max(3, word_count / 2.5 + 2)  # Minimum 3 seconds
+    base_time = max(3, word_count / 2.5 + 2)  # Minimum 3 seconds
+
+    # TTS generation + playback takes longer - add buffer
+    if has_tts:
+        return base_time + 10  # Extra time for TTS generation + streaming
+    return base_time
 
 
 async def wait_for_turn(speaker: str) -> bool:
     """Wait until it's safe to speak. Returns True if we can proceed."""
-    global _current_speaker, _speaking_until
+    global _current_speaker, _speaking_until, _awaiting_audio_complete
     import time
 
     # Wait if someone else is speaking
     wait_count = 0
     while _current_speaker and time.time() < _speaking_until:
-        if wait_count > 30:  # Max 30 seconds wait
+        if wait_count > 45:  # Max 45 seconds wait (longer for TTS)
             logger.warning(f"{speaker} gave up waiting for {_current_speaker}")
             return False
         await asyncio.sleep(1)
@@ -1810,26 +1815,44 @@ async def wait_for_turn(speaker: str) -> bool:
 
     # Claim the turn
     _current_speaker = speaker
+    _awaiting_audio_complete = False
     return True
 
 
-def release_turn(speaker: str, content: str):
+def release_turn(speaker: str, content: str, has_tts: bool = False):
     """Release turn after speaking, setting expected finish time."""
-    global _current_speaker, _speaking_until
+    global _current_speaker, _speaking_until, _awaiting_audio_complete
     import time
 
-    speaking_time = estimate_speaking_time(content)
+    speaking_time = estimate_speaking_time(content, has_tts)
     _speaking_until = time.time() + speaking_time
-    logger.debug(f"{speaker} speaking for ~{speaking_time:.1f}s")
 
-    # Schedule turn release
+    if has_tts:
+        _awaiting_audio_complete = True
+        logger.debug(f"{speaker} speaking with TTS (~{speaking_time:.1f}s max, waiting for audio_complete)")
+    else:
+        logger.debug(f"{speaker} speaking for ~{speaking_time:.1f}s")
+
+    # Schedule turn release (fallback if audio_complete never arrives)
     async def delayed_release():
         await asyncio.sleep(speaking_time)
         global _current_speaker
         if _current_speaker == speaker:
             _current_speaker = None
+            logger.debug(f"{speaker} turn released by timeout")
 
     asyncio.create_task(delayed_release())
+
+
+def audio_complete_signal(bot_name: str):
+    """Called when client signals audio finished playing."""
+    global _current_speaker, _speaking_until, _awaiting_audio_complete
+    import time
+
+    if _current_speaker == bot_name and _awaiting_audio_complete:
+        logger.info(f"Audio complete for {bot_name} - releasing turn early")
+        _speaking_until = time.time()  # Allow next speaker now
+        _awaiting_audio_complete = False
 
 
 async def autonomous_conversation_loop():
@@ -1932,8 +1955,8 @@ This is YOUR conversation - make it interesting."""
                         logger.info(f"Autonomous: {speaker} speaking (others waiting)")
                         await swarm_manager.broadcast_bot_message(speaker, content)
 
-                        # Release turn with estimated speaking time
-                        release_turn(speaker, content)
+                        # Release turn with estimated speaking time (Farnsworth has TTS)
+                        release_turn(speaker, content, has_tts=(speaker == "Farnsworth"))
 
                         recent_speakers.append(speaker)
                         if len(recent_speakers) > 4:
@@ -2064,8 +2087,8 @@ Be yourself. Make this conversation valuable."""
                                     logger.info(f"Autonomous: {next_speaker} responding to {last_speaker}")
                                     await swarm_manager.broadcast_bot_message(next_speaker, content)
 
-                                    # Release turn with speaking time
-                                    release_turn(next_speaker, content)
+                                    # Release turn with speaking time (Farnsworth has TTS)
+                                    release_turn(next_speaker, content, has_tts=(next_speaker == "Farnsworth"))
 
                                     recent_speakers.append(next_speaker)
                                     if len(recent_speakers) > 4:
@@ -4201,10 +4224,9 @@ async def websocket_swarm(websocket: WebSocket):
                     })
 
                 elif data.get("type") == "audio_complete":
-                    # Client signals audio finished playing - can proceed with next bot
+                    # Client signals audio finished playing - release turn for next bot
                     bot_name = data.get("bot_name", "")
-                    logger.debug(f"Audio complete for {bot_name}")
-                    # This signal is informational - helps with pacing but doesn't block
+                    audio_complete_signal(bot_name)
 
             except asyncio.TimeoutError:
                 # Send heartbeat
