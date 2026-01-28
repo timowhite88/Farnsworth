@@ -1912,12 +1912,22 @@ async def autonomous_conversation_loop():
 
             # Start new topic or continue (30% chance of new topic)
             if not swarm_manager.chat_history or random.random() < 0.3:
-                # Start fresh topic - Farnsworth has high priority (60%), others share rest
-                if farnsworth_turn or random.random() < 0.6:
+                # Start fresh topic - weighted selection for variety
+                if farnsworth_turn:
                     speaker = "Farnsworth"
                 else:
-                    non_farnsworth = [b for b in available_bots if b != "Farnsworth"]
-                    speaker = random.choice(non_farnsworth) if non_farnsworth else "Farnsworth"
+                    # Weighted selection: Farnsworth 3, Claude/Kimi 2, others 1
+                    weights = []
+                    for bot in available_bots:
+                        if bot == "Farnsworth":
+                            weights.append(3)
+                        elif bot in ("Claude", "Kimi"):
+                            weights.append(2)  # External AI boost
+                        else:
+                            weights.append(1)
+                    speaker = random.choices(available_bots, weights=weights, k=1)[0]
+                    if speaker in ("Claude", "Kimi"):
+                        logger.info(f"External AI {speaker} starting fresh topic")
                 topic = random.choice(AUTONOMOUS_TOPICS)
                 persona = SWARM_PERSONAS[speaker]
                 other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
