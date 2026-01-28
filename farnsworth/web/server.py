@@ -1834,30 +1834,54 @@ async def generate_bot_followup(last_bot: str, last_message: str, history: List[
 
     # Check if the last message mentions another bot or asks a question
     msg_lower = last_message.lower()
-    bot_names_lower = {name.lower(): name for name in SWARM_PERSONAS.keys() if name != "Orchestrator"}
 
-    # Find mentioned bot or select randomly if there's a question
+    # Bot name aliases for better detection
+    bot_aliases = {
+        "Farnsworth": ["farnsworth", "professor", "prof", "the professor", "farnsy"],
+        "DeepSeek": ["deepseek", "deep seek", "deep", "seeker"],
+        "Phi": ["phi", "phii"],
+        "Swarm-Mind": ["swarm-mind", "swarm mind", "swarmmind", "swarm", "hive", "collective", "bender"],
+    }
+
+    # Find directly mentioned bot
     addressed_bot = None
+    is_direct_mention = False
 
-    # Check for direct mention
-    for bot_lower, bot_name in bot_names_lower.items():
-        if bot_lower in msg_lower and bot_name != last_bot:
-            addressed_bot = bot_name
+    for bot_name, aliases in bot_aliases.items():
+        if bot_name == last_bot:
+            continue
+        for alias in aliases:
+            if alias in msg_lower:
+                addressed_bot = bot_name
+                is_direct_mention = True
+                logger.debug(f"Bot followup: {last_bot} mentioned {bot_name} via '{alias}'")
+                break
+        if addressed_bot:
             break
 
-    # If no direct mention, check if it's a question that invites conversation
-    has_question = "?" in last_message or any(q in msg_lower for q in ["what do you", "what about", "don't you think", "agree", "thoughts"])
+    # Check for questions or conversation invitations
+    has_question = "?" in last_message
+    invites_response = any(q in msg_lower for q in [
+        "what do you", "what about", "don't you think", "agree", "thoughts",
+        "right?", "anyone", "who else", "what say", "hey ", "tell me",
+        "can you", "would you", "should we"
+    ])
 
-    if not addressed_bot and has_question:
-        # Pick a random bot to respond (not the one who just spoke)
+    # If no direct mention but invites response, pick a relevant bot
+    if not addressed_bot and (has_question or invites_response):
         available_bots = [b for b in SWARM_PERSONAS.keys() if b != last_bot and b != "Orchestrator"]
         if available_bots:
-            # Weighted towards Farnsworth and DeepSeek
-            weights = [3 if b == "Farnsworth" else (2 if b == "DeepSeek" else 1) for b in available_bots]
+            # Heavily weighted towards Farnsworth - he's the main character!
+            weights = [5 if b == "Farnsworth" else (3 if b == "DeepSeek" else 1) for b in available_bots]
             addressed_bot = random.choices(available_bots, weights=weights, k=1)[0]
 
-    # Only continue ~60% of the time to avoid infinite loops
-    if not addressed_bot or random.random() > 0.6:
+    # Response probability based on context
+    if not addressed_bot:
+        return None
+
+    # Always respond if directly mentioned, 70% for questions, 50% for general
+    response_chance = 1.0 if is_direct_mention else (0.7 if has_question else 0.5)
+    if random.random() > response_chance:
         return None
 
     persona = SWARM_PERSONAS[addressed_bot]
