@@ -724,12 +724,22 @@ function stopVoiceInput() {
     }
 }
 
-function speakText(text) {
-    if (!state.voiceEnabled) return;
-    if (!('speechSynthesis' in window)) return;
+// Current audio element for TTS playback
+let currentAudio = null;
 
-    // Cancel any ongoing speech
-    speechSynthesis.cancel();
+async function speakText(text) {
+    if (!state.voiceEnabled) return;
+
+    // Stop any current audio
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+    }
+
+    // Cancel any browser speech
+    if ('speechSynthesis' in window) {
+        speechSynthesis.cancel();
+    }
 
     // Clean text for speech
     const cleanText = text
@@ -739,11 +749,38 @@ function speakText(text) {
         .replace(/\n/g, ' ')
         .slice(0, 500);
 
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 0.9;
-    utterance.pitch = 0.8;
+    if (!cleanText.trim()) return;
 
-    speechSynthesis.speak(utterance);
+    try {
+        // Try XTTS v2 voice cloning first
+        const response = await fetch('/api/speak', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cleanText })
+        });
+
+        if (response.ok) {
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            currentAudio = new Audio(audioUrl);
+            currentAudio.onended = () => {
+                URL.revokeObjectURL(audioUrl);
+                currentAudio = null;
+            };
+            await currentAudio.play();
+            return;
+        }
+    } catch (error) {
+        console.warn('XTTS TTS error, falling back to browser:', error);
+    }
+
+    // Fallback to browser TTS
+    if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = 0.9;
+        utterance.pitch = 0.8;
+        speechSynthesis.speak(utterance);
+    }
 }
 
 // ============================================

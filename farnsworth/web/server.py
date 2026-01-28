@@ -23,6 +23,7 @@ import json
 import logging
 import asyncio
 import sys
+import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -31,7 +32,7 @@ from dataclasses import asdict
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -55,6 +56,49 @@ try:
 except ImportError:
     OLLAMA_AVAILABLE = False
 
+# Optional TTS imports for voice cloning
+try:
+    import torch
+    import torchaudio
+    import soundfile as sf
+    import numpy as np
+
+    # Patch torch.load for PyTorch 2.6+ compatibility with TTS library
+    _original_torch_load = torch.load
+    def _patched_torch_load(*args, **kwargs):
+        if 'weights_only' not in kwargs:
+            kwargs['weights_only'] = False
+        return _original_torch_load(*args, **kwargs)
+    torch.load = _patched_torch_load
+
+    # Patch torchaudio.load to use soundfile for compatibility
+    _original_torchaudio_load = torchaudio.load
+    def _patched_torchaudio_load(filepath, *args, **kwargs):
+        try:
+            data, sr = sf.read(filepath, dtype='float32')
+            if len(data.shape) == 1:
+                data = data.reshape(1, -1)
+            else:
+                data = data.T
+            return torch.from_numpy(data), sr
+        except Exception:
+            return _original_torchaudio_load(filepath, *args, **kwargs)
+    torchaudio.load = _patched_torchaudio_load
+
+    from TTS.api import TTS
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
+
+# Optional Planetary Audio Shard
+try:
+    from farnsworth.core.memory.planetary.audio_shard import (
+        PlanetaryAudioShard, AudioScope, get_audio_shard
+    )
+    AUDIO_SHARD_AVAILABLE = True
+except ImportError:
+    AUDIO_SHARD_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -64,6 +108,8 @@ _context_profiles = None
 _health_analyzer = None
 _tool_router = None
 _sequential_thinking = None
+_tts_model = None
+_audio_shard = None
 
 def get_memory_system():
     """Lazy-load memory system."""
@@ -162,6 +208,40 @@ def get_sequential_thinking():
         except Exception as e:
             logger.warning(f"Could not load sequential thinking: {e}")
     return _sequential_thinking
+
+def get_tts_model():
+    """Lazy-load XTTS v2 model for voice cloning."""
+    global _tts_model
+    if _tts_model is None:
+        if not TTS_AVAILABLE:
+            logger.warning("TTS library not available")
+            return None
+        try:
+            _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+            if torch.cuda.is_available():
+                _tts_model = _tts_model.to("cuda")
+                logger.info("TTS model loaded on GPU")
+            else:
+                logger.info("TTS model loaded on CPU")
+        except Exception as e:
+            logger.warning(f"Could not load TTS model: {e}")
+    return _tts_model
+
+def get_planetary_audio_shard():
+    """Lazy-load Planetary Audio Shard for distributed TTS caching."""
+    global _audio_shard
+    if _audio_shard is None:
+        if not AUDIO_SHARD_AVAILABLE:
+            return None
+        try:
+            # Compute static dir relative to this file (STATIC_DIR may not be defined yet)
+            web_dir = Path(__file__).parent
+            cache_dir = web_dir / "static" / "audio" / "cache"
+            _audio_shard = get_audio_shard(cache_dir)
+            logger.info(f"Planetary Audio Shard loaded: {_audio_shard.get_stats()}")
+        except Exception as e:
+            logger.warning(f"Could not load Planetary Audio Shard: {e}")
+    return _audio_shard
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -743,6 +823,9 @@ class RugCheckRequest(BaseModel):
 
 class TokenScanRequest(BaseModel):
     query: str
+
+class SpeakRequest(BaseModel):
+    text: str
 
 
 # ============================================
@@ -2881,6 +2964,140 @@ async def market_sentiment():
     except Exception as e:
         logger.error(f"Market sentiment error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# TEXT-TO-SPEECH WITH VOICE CLONING
+# ============================================
+
+@app.post("/api/speak")
+async def speak_text_api(request: SpeakRequest):
+    """
+    Generate speech using XTTS v2 voice cloning with Farnsworth's voice.
+
+    Uses Planetary Audio Shard for distributed caching:
+    1. Check local shard cache
+    2. Check P2P network for cached audio from peers
+    3. Generate locally if not found
+    4. Broadcast metadata to P2P network for sharing
+    """
+    try:
+        text = request.text[:500]  # Limit text length
+
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        # Paths for audio files
+        audio_dir = STATIC_DIR / "audio"
+        reference_audio = audio_dir / "farnsworth_reference.wav"
+
+        # Calculate text hash for cache lookup
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+
+        # Try Planetary Audio Shard first (distributed cache)
+        audio_shard = get_planetary_audio_shard()
+
+        if audio_shard:
+            # 1. Check local shard cache
+            local_path = audio_shard.get_audio(text_hash)
+            if local_path and local_path.exists():
+                logger.info(f"TTS: Local shard hit for {text_hash[:8]}...")
+                return FileResponse(str(local_path), media_type="audio/wav")
+
+            # 2. Check if a peer has this audio cached
+            if audio_shard.has_remote_audio(text_hash):
+                logger.info(f"TTS: Requesting {text_hash[:8]}... from P2P peer")
+                peer_audio = await audio_shard.request_audio_from_peer(text_hash, timeout=5.0)
+                if peer_audio:
+                    # Audio was fetched and stored locally by request_audio_from_peer
+                    local_path = audio_shard.get_audio(text_hash)
+                    if local_path and local_path.exists():
+                        logger.info(f"TTS: P2P cache hit for {text_hash[:8]}...")
+                        return FileResponse(str(local_path), media_type="audio/wav")
+
+        # 3. Fallback to simple file cache (for when shard unavailable)
+        cache_dir = audio_dir / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        simple_cache_path = cache_dir / f"{text_hash}.wav"
+
+        if simple_cache_path.exists():
+            logger.info(f"TTS: Simple cache hit for {text_hash[:8]}...")
+            return FileResponse(str(simple_cache_path), media_type="audio/wav")
+
+        # 4. Generate new audio with TTS model
+        model = get_tts_model()
+        if model is None:
+            raise HTTPException(
+                status_code=503,
+                detail="TTS model not available. Install TTS package."
+            )
+
+        # Check for reference audio
+        if not reference_audio.exists():
+            raise HTTPException(
+                status_code=503,
+                detail="Reference audio not found. Add farnsworth_reference.wav to static/audio/"
+            )
+
+        # Generate speech with voice cloning
+        logger.info(f"TTS: Generating speech for: {text[:50]}...")
+
+        # Generate to temp path first
+        temp_path = cache_dir / f"{text_hash}_temp.wav"
+        model.tts_to_file(
+            text=text,
+            speaker_wav=str(reference_audio),
+            language="en",
+            file_path=str(temp_path)
+        )
+
+        # Read generated audio
+        with open(temp_path, "rb") as f:
+            audio_data = f.read()
+
+        # 5. Store in Planetary Audio Shard (broadcasts to P2P)
+        if audio_shard and AUDIO_SHARD_AVAILABLE:
+            final_path = await audio_shard.store_audio(
+                text_hash=text_hash,
+                audio_data=audio_data,
+                voice_id="farnsworth",
+                scope=AudioScope.PLANETARY  # Share with P2P network
+            )
+            # Clean up temp file
+            temp_path.unlink(missing_ok=True)
+            logger.info(f"TTS: Generated and stored in shard: {text_hash[:8]}...")
+            return FileResponse(str(final_path), media_type="audio/wav")
+        else:
+            # Simple cache fallback
+            temp_path.rename(simple_cache_path)
+            logger.info(f"TTS: Generated and cached: {text_hash[:8]}...")
+            return FileResponse(str(simple_cache_path), media_type="audio/wav")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/speak/stats")
+async def get_tts_stats():
+    """Get TTS cache statistics including P2P network info."""
+    audio_shard = get_planetary_audio_shard()
+
+    if audio_shard:
+        stats = audio_shard.get_stats()
+        stats["tts_available"] = TTS_AVAILABLE
+        stats["p2p_enabled"] = AUDIO_SHARD_AVAILABLE
+        return JSONResponse(stats)
+
+    return JSONResponse({
+        "local_entries": 0,
+        "global_entries": 0,
+        "total_size_mb": 0,
+        "tts_available": TTS_AVAILABLE,
+        "p2p_enabled": False
+    })
 
 
 # ============================================

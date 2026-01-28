@@ -298,6 +298,57 @@ class SwarmFabric:
             ))
             logger.info(f"P2P: Task auction received: {task_id}")
 
+        elif m_type == "GOSSIP_AUDIO":
+            # Planetary Audio Shard - metadata sharing
+            metadata = msg.get("metadata")
+            peer_id = msg.get("node_id", "unknown")
+            if metadata:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "planetary_audio_metadata",
+                        "metadata": metadata,
+                        "peer_id": peer_id
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.debug(f"P2P: Received audio metadata: {metadata.get('text_hash', 'unknown')[:8]}...")
+            await self.gossip(msg)
+
+        elif m_type == "AUDIO_REQUEST":
+            # Peer requesting audio file
+            text_hash = msg.get("text_hash")
+            requester_id = msg.get("requester_id")
+            if text_hash and requester_id:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "audio_request",
+                        "text_hash": text_hash,
+                        "requester_id": requester_id
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.debug(f"P2P: Audio request for {text_hash[:8]}... from {requester_id}")
+
+        elif m_type == "AUDIO_RESPONSE":
+            # Peer sending audio file data
+            text_hash = msg.get("text_hash")
+            audio_data = msg.get("audio_data")
+            sender_id = msg.get("sender_id")
+            if text_hash and audio_data:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "audio_response",
+                        "text_hash": text_hash,
+                        "audio_data": audio_data,
+                        "sender_id": sender_id
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.debug(f"P2P: Audio response for {text_hash[:8]}... from {sender_id}")
+
     async def _send_to_writer(self, writer: asyncio.StreamWriter, msg: Dict):
         """Send message directly to a writer."""
         try:
@@ -341,6 +392,25 @@ class SwarmFabric:
         }
         await self.gossip(msg)
         logger.info(f"P2P: Submitted task auction: {task_id}")
+
+    async def broadcast_message(self, msg: Dict):
+        """Broadcast any message to all peers (LAN + WAN)."""
+        # Add node_id if not present
+        if "node_id" not in msg:
+            msg["node_id"] = self.node_id
+
+        # Local peers (LAN)
+        await self.gossip(msg)
+
+        # Bootstrap (WAN)
+        await self.broadcast_to_bootstrap(msg)
+
+        total_peers = len(self.peers) + (1 if self.bootstrap_authenticated else 0)
+        logger.debug(f"P2P: Broadcasted message type '{msg.get('type')}' to {total_peers} peers")
+
+    async def send_to_peer(self, peer_id: str, msg: Dict):
+        """Send a message to a specific peer by ID."""
+        await self._send_to_peer(peer_id, msg)
 
     async def gossip(self, msg: Dict):
         """Propagate message through the fabric."""
