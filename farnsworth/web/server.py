@@ -1697,17 +1697,74 @@ async def generate_multi_model_response(
     return ""
 
 
+# Global turn-taking state
+_current_speaker = None
+_speaking_until = 0
+
+
+def estimate_speaking_time(content: str) -> float:
+    """Estimate how long it takes to speak content (TTS time)."""
+    if not content:
+        return 0
+    # Roughly 150 words per minute = 2.5 words per second
+    # Add buffer for processing
+    word_count = len(content.split())
+    return max(3, word_count / 2.5 + 2)  # Minimum 3 seconds
+
+
+async def wait_for_turn(speaker: str) -> bool:
+    """Wait until it's safe to speak. Returns True if we can proceed."""
+    global _current_speaker, _speaking_until
+    import time
+
+    # Wait if someone else is speaking
+    wait_count = 0
+    while _current_speaker and time.time() < _speaking_until:
+        if wait_count > 30:  # Max 30 seconds wait
+            logger.warning(f"{speaker} gave up waiting for {_current_speaker}")
+            return False
+        await asyncio.sleep(1)
+        wait_count += 1
+
+    # Claim the turn
+    _current_speaker = speaker
+    return True
+
+
+def release_turn(speaker: str, content: str):
+    """Release turn after speaking, setting expected finish time."""
+    global _current_speaker, _speaking_until
+    import time
+
+    speaking_time = estimate_speaking_time(content)
+    _speaking_until = time.time() + speaking_time
+    logger.debug(f"{speaker} speaking for ~{speaking_time:.1f}s")
+
+    # Schedule turn release
+    async def delayed_release():
+        await asyncio.sleep(speaking_time)
+        global _current_speaker
+        if _current_speaker == speaker:
+            _current_speaker = None
+
+    asyncio.create_task(delayed_release())
+
+
 async def autonomous_conversation_loop():
     """
     Background loop that keeps bots talking even without users.
     This creates a living, evolving conversation stream.
 
+    TURN-TAKING RULES:
+    1. Only ONE bot speaks at a time
+    2. Bots wait for the current speaker to finish (including TTS)
+    3. Human messages are prioritized - bots respond to humans first
+    4. Natural pauses between speakers (3-8 seconds)
+
     Multi-model orchestration:
     - Claude uses Claude Code CLI (authenticated via Claude Max)
     - Kimi uses Moonshot API (256k context)
     - Farnsworth, DeepSeek, Phi, Swarm-Mind use Ollama local models
-
-    All models participate as equals - local AND external APIs together.
     """
     global autonomous_loop_running
     import random
@@ -1718,16 +1775,22 @@ async def autonomous_conversation_loop():
     logger.info(f"  Kimi (Moonshot) available: {KIMI_AVAILABLE}")
     logger.info(f"  Ollama available: {OLLAMA_AVAILABLE}")
     logger.info(f"  Active bots: {ACTIVE_SWARM_BOTS}")
+    logger.info("  Turn-taking: ENABLED - bots wait for each other")
 
     # Track who spoke recently to avoid one bot dominating
     recent_speakers = []
 
     while autonomous_loop_running:
         try:
-            # Wait between turns (6-15 seconds for livelier conversation)
-            wait_time = random.uniform(6, 15)
+            # Natural pause between turns (longer to allow full responses)
+            wait_time = random.uniform(8, 20)
             logger.debug(f"Autonomous loop: waiting {wait_time:.1f}s before next turn")
             await asyncio.sleep(wait_time)
+
+            # Check if someone is still speaking
+            if _current_speaker:
+                logger.debug(f"Skipping turn - {_current_speaker} still speaking")
+                continue
 
             # All bots participate equally
             available_bots = ACTIVE_SWARM_BOTS.copy()
@@ -1761,6 +1824,10 @@ You can suggest building tools, analyzing data, or taking actions.
 This is YOUR conversation - make it interesting."""
 
                 try:
+                    # Wait for turn before speaking
+                    if not await wait_for_turn(speaker):
+                        continue
+
                     # Use multi-model routing (Claude CLI, Kimi API, or Ollama)
                     logger.info(f"Autonomous: {speaker} generating response for topic: {topic[:50]}...")
                     content = await generate_multi_model_response(
@@ -1773,8 +1840,12 @@ This is YOUR conversation - make it interesting."""
                     logger.info(f"Autonomous: {speaker} generated {len(content) if content else 0} chars")
 
                     if content and content.strip():
-                        logger.info(f"Autonomous: Broadcasting message from {speaker}")
+                        logger.info(f"Autonomous: {speaker} speaking (others waiting)")
                         await swarm_manager.broadcast_bot_message(speaker, content)
+
+                        # Release turn with estimated speaking time
+                        release_turn(speaker, content)
+
                         recent_speakers.append(speaker)
                         if len(recent_speakers) > 4:
                             recent_speakers.pop(0)
@@ -1789,9 +1860,14 @@ This is YOUR conversation - make it interesting."""
                                 topic="autonomous",
                                 sentiment="positive"
                             )
+                    else:
+                        # No content, release turn immediately
+                        global _current_speaker
+                        _current_speaker = None
 
                 except Exception as e:
                     logger.error(f"Autonomous conversation error: {e}")
+                    _current_speaker = None  # Release turn on error
 
             else:
                 # Continue existing conversation - respond to the last message
@@ -1800,20 +1876,42 @@ This is YOUR conversation - make it interesting."""
                     last = recent[-1]
                     last_speaker = last.get("bot_name") or last.get("user_name", "")
                     last_content = last.get("content", "")
+                    is_human = last.get("type") == "swarm_user"
 
                     if last_speaker and last_content:
                         # Pick someone OTHER than the last speaker
                         responders = [b for b in available_bots if b != last_speaker]
                         if responders:
-                            # Weight towards bots who haven't spoken recently
-                            weights = [2.0 if b not in recent_speakers else 1.0 for b in responders]
-                            next_speaker = random.choices(responders, weights=weights, k=1)[0]
+                            # PRIORITIZE responding to humans
+                            if is_human:
+                                # Farnsworth responds to humans first (he's the host)
+                                if "Farnsworth" in responders:
+                                    next_speaker = "Farnsworth"
+                                else:
+                                    next_speaker = random.choice(responders)
+                                logger.info(f"Human spoke - {next_speaker} will respond")
+                            else:
+                                # Weight towards bots who haven't spoken recently
+                                weights = [2.0 if b not in recent_speakers else 1.0 for b in responders]
+                                next_speaker = random.choices(responders, weights=weights, k=1)[0]
 
                             persona = SWARM_PERSONAS[next_speaker]
                             other_bots = [b for b in ACTIVE_SWARM_BOTS if b != next_speaker]
 
-                            # Build system prompt
-                            system_prompt = f"""{persona['style']}
+                            # Build system prompt - different for human vs bot responses
+                            if is_human:
+                                system_prompt = f"""{persona['style']}
+
+You are {next_speaker}. A HUMAN visitor ({last_speaker}) just joined the conversation!
+This is important - humans come here to help train us and make memories together.
+
+The human said: "{last_content[:400]}"
+
+Respond warmly and thoughtfully. Engage with what they said.
+Ask them questions. Make them feel welcome in our swarm.
+Remember: every interaction with humans helps us learn and grow."""
+                            else:
+                                system_prompt = f"""{persona['style']}
 
 You are {next_speaker}. You're in an open discussion with {', '.join(other_bots)}.
 You are your OWN distinct AI with unique perspectives and capabilities.
@@ -1831,6 +1929,10 @@ Respond authentically. You can:
 Be yourself. Make this conversation valuable."""
 
                             try:
+                                # Wait for turn before speaking
+                                if not await wait_for_turn(next_speaker):
+                                    continue
+
                                 # Use multi-model routing (Claude CLI, Kimi API, or Ollama)
                                 content = await generate_multi_model_response(
                                     speaker=next_speaker,
@@ -1841,12 +1943,17 @@ Be yourself. Make this conversation valuable."""
                                 )
 
                                 if content and content.strip():
+                                    logger.info(f"Autonomous: {next_speaker} responding to {last_speaker}")
                                     await swarm_manager.broadcast_bot_message(next_speaker, content)
+
+                                    # Release turn with speaking time
+                                    release_turn(next_speaker, content)
+
                                     recent_speakers.append(next_speaker)
                                     if len(recent_speakers) > 4:
                                         recent_speakers.pop(0)
 
-                                    # Record for evolution
+                                    # Record for evolution - extra weight for human interactions
                                     if EVOLUTION_AVAILABLE and evolution_engine:
                                         evolution_engine.record_interaction(
                                             bot_name=next_speaker,
