@@ -88,6 +88,10 @@ class EvolutionEngine:
         self.evolution_cycles = 0
         self.last_evolution = None
 
+        # Auto-evolution settings
+        self.auto_evolve_threshold = 100  # Evolve every N learnings
+        self._learnings_since_evolution = 0
+
         # Load existing data
         self._load_state()
 
@@ -115,6 +119,7 @@ class EvolutionEngine:
                 self.total_learnings = meta.get("total_learnings", 0)
                 self.evolution_cycles = meta.get("evolution_cycles", 0)
                 self.last_evolution = meta.get("last_evolution")
+                self._learnings_since_evolution = meta.get("learnings_since_evolution", 0)
 
         except Exception as e:
             logger.warning(f"Could not load evolution state: {e}")
@@ -140,7 +145,8 @@ class EvolutionEngine:
             meta = {
                 "total_learnings": self.total_learnings,
                 "evolution_cycles": self.evolution_cycles,
-                "last_evolution": self.last_evolution
+                "last_evolution": self.last_evolution,
+                "learnings_since_evolution": self._learnings_since_evolution
             }
             (self.storage_path / "meta.json").write_text(json.dumps(meta, indent=2))
 
@@ -191,9 +197,16 @@ class EvolutionEngine:
                 if len(personality.learned_phrases) > 50:
                     personality.learned_phrases = personality.learned_phrases[-50:]
 
-        # Trigger evolution if buffer is large enough
+        # Trigger learning processing if buffer is large enough
         if len(self.learning_buffer) >= 20:
             self._process_learnings()
+
+        # Auto-evolve after threshold learnings
+        self._learnings_since_evolution += 1
+        if self._learnings_since_evolution >= self.auto_evolve_threshold:
+            logger.info(f"Auto-evolution triggered after {self._learnings_since_evolution} learnings")
+            self.evolve()
+            self._learnings_since_evolution = 0
 
     def record_debate(
         self,
@@ -400,6 +413,8 @@ class EvolutionEngine:
             "evolution_cycles": self.evolution_cycles,
             "last_evolution": self.last_evolution,
             "patterns_count": len(self.patterns),
+            "learnings_until_next_evolution": self.auto_evolve_threshold - self._learnings_since_evolution,
+            "auto_evolve_threshold": self.auto_evolve_threshold,
             "personalities": {
                 name: {
                     "generation": p.evolution_generation,

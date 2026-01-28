@@ -445,6 +445,87 @@ class ToolRouter:
             handler=self._handle_bags_track,
         ))
 
+        self.register_tool(ToolDefinition(
+            name="bags_fm_trending",
+            description="Get trending tokens on Bags.fm",
+            category=ToolCategory.ANALYSIS,
+            parameters={},
+            capabilities=["bags.fm", "memecoins", "trending"],
+            handler=self._handle_bags_trending,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_trade_quote",
+            description="Get a trade quote for buying/selling tokens on Bags.fm",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "token_mint": {"type": "string", "required": True, "description": "Token mint address"},
+                "amount": {"type": "number", "required": True, "description": "Amount to trade"},
+                "side": {"type": "string", "required": True, "description": "'buy' or 'sell'"},
+                "slippage_bps": {"type": "integer", "required": False, "description": "Slippage in basis points (default 100 = 1%)"},
+            },
+            capabilities=["bags.fm", "trading", "quote"],
+            handler=self._handle_bags_quote,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_swap",
+            description="Create a swap transaction on Bags.fm",
+            category=ToolCategory.ACTION,
+            parameters={
+                "token_mint": {"type": "string", "required": True, "description": "Token mint address"},
+                "amount": {"type": "number", "required": True, "description": "Amount to swap"},
+                "side": {"type": "string", "required": True, "description": "'buy' or 'sell'"},
+                "slippage_bps": {"type": "integer", "required": False, "description": "Slippage in basis points (default 100)"},
+            },
+            capabilities=["bags.fm", "trading", "swap", "solana"],
+            handler=self._handle_bags_swap,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_token_creators",
+            description="Get creators associated with a Bags.fm token launch",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "token_mint": {"type": "string", "required": True, "description": "Token mint address"},
+            },
+            capabilities=["bags.fm", "token_launch", "creators"],
+            handler=self._handle_bags_creators,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_token_fees",
+            description="Get lifetime fee information for a Bags.fm token",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "token_mint": {"type": "string", "required": True, "description": "Token mint address"},
+            },
+            capabilities=["bags.fm", "fees", "analytics"],
+            handler=self._handle_bags_fees,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_claimable",
+            description="Get claimable fee positions for a wallet on Bags.fm",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "wallet_address": {"type": "string", "required": True, "description": "Solana wallet address"},
+            },
+            capabilities=["bags.fm", "fees", "claimable", "wallet"],
+            handler=self._handle_bags_claimable,
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="bags_fm_partner_stats",
+            description="Get partner statistics on Bags.fm",
+            category=ToolCategory.ANALYSIS,
+            parameters={
+                "wallet_address": {"type": "string", "required": True, "description": "Partner wallet address"},
+            },
+            capabilities=["bags.fm", "partner", "stats"],
+            handler=self._handle_bags_partner_stats,
+        ))
+
         # --- Solana Trading Skills ---
         self.register_tool(ToolDefinition(
             name="solana_get_balance",
@@ -1397,6 +1478,76 @@ Return ONLY the JSON array:"""
         if api_key:
             memecoin_tracker.set_bags_api_key(api_key)
         return await memecoin_tracker.get_bags_token(token_address)
+
+    async def _handle_bags_trending(self) -> dict:
+        """Handle Bags.fm trending tokens."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        tokens = await memecoin_tracker.get_bags_trending()
+        return {"trending": tokens, "count": len(tokens)}
+
+    async def _handle_bags_quote(self, token_mint: str, amount: float, side: str, slippage_bps: int = 100) -> dict:
+        """Handle Bags.fm trade quote."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        return await memecoin_tracker.get_trade_quote(token_mint, amount, side, slippage_bps)
+
+    async def _handle_bags_swap(self, token_mint: str, amount: float, side: str, slippage_bps: int = 100) -> dict:
+        """Handle Bags.fm swap transaction."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker, BagsSwapParams
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        swap_params = BagsSwapParams(
+            token_mint=token_mint,
+            amount=amount,
+            side=side,
+            slippage_bps=slippage_bps
+        )
+        return await memecoin_tracker.create_swap_transaction(swap_params)
+
+    async def _handle_bags_creators(self, token_mint: str) -> dict:
+        """Handle Bags.fm token creators lookup."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        return await memecoin_tracker.get_token_launch_creators(token_mint)
+
+    async def _handle_bags_fees(self, token_mint: str) -> dict:
+        """Handle Bags.fm token fees lookup."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        return await memecoin_tracker.get_token_lifetime_fees(token_mint)
+
+    async def _handle_bags_claimable(self, wallet_address: str) -> dict:
+        """Handle Bags.fm claimable positions lookup."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        return await memecoin_tracker.get_claimable_positions(wallet_address)
+
+    async def _handle_bags_partner_stats(self, wallet_address: str) -> dict:
+        """Handle Bags.fm partner stats lookup."""
+        import os
+        from farnsworth.integration.financial.memecoin_tracker import memecoin_tracker
+        api_key = os.environ.get("BAGS_API_KEY")
+        if api_key:
+            memecoin_tracker.set_bags_api_key(api_key)
+        return await memecoin_tracker.get_partner_stats(wallet_address)
 
     async def _handle_solana_balance(self, pubkey: str = None) -> dict:
         """Handle Solana balance check."""
