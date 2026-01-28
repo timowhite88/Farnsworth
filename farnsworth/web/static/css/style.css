@@ -2673,3 +2673,252 @@ body:has(.training-banner.active) .chat-section {
         grid-template-columns: 1fr;
     }
 }
+
+/* ============================================
+   FEATURE INTRODUCTION SECTION
+   ============================================ */
+
+.feature-intro {
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.intro-text {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.intro-features {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+.intro-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    cursor: help;
+    transition: all 0.2s;
+}
+
+.intro-item:hover {
+    background: var(--glass-bg-hover);
+    border-color: var(--primary);
+    color: var(--text-primary);
+}
+
+/* ============================================
+   WALLET & TRAINING SECTIONS
+   ============================================ */
+
+.wallet-connect-section,
+.training-entry-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.wallet-connect-section.hidden,
+.training-entry-section.hidden {
+    display: none;
+}
+
+.training-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.2));
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    border-radius: 100px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--success);
+}
+
+.training-icon-large {
+    font-size: 1.3rem;
+    animation: dnaRotate 3s linear infinite;
+}
+
+.training-description {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    text-align: center;
+    max-width: 300px;
+    line-height: 1.6;
+}
+
+.training-btn {
+    background: linear-gradient(135deg, var(--success), #059669) !important;
+}
+
+.training-btn:hover {
+    box-shadow: 0 20px 40px -10px rgba(16, 185, 129, 0.5) !important;
+}
+
+/* ============================================
+   TRAINING INDICATOR IN HEADER
+   ============================================ */
+
+.training-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--success);
+}
+
+.training-indicator.hidden {
+    display: none;
+}
+
+.training-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: trainingPulse 1.5s infinite;
+}
+
+/* ============================================
+   SECTION DESCRIPTIONS & HELP TIPS
+   ============================================ */
+
+.section-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: -8px 0 12px 0;
+    padding-left: 2px;
+}
+
+.help-tip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 6px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 50%;
+    cursor: help;
+    transition: all 0.2s;
+}
+
+.help-tip:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: rgba(139, 92, 246, 0.1);
+}
+
+/* ============================================
+   IMPROVED SIDEBAR SPACING
+   ============================================ */
+
+.sidebar-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.sidebar-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.widget-section {
+    padding: 16px;
+}
+
+/* Better input spacing */
+.memory-input-group,
+.memory-search-group,
+.note-input-group {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.memory-input-group textarea,
+.memory-search-group input,
+#note-input {
+    flex: 1;
+    padding: 10px 14px;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.memory-input-group textarea:focus,
+.memory-search-group input:focus,
+#note-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+.memory-input-group textarea::placeholder,
+.memory-search-group input::placeholder,
+#note-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Action buttons */
+.action-btn {
+    padding: 10px 16px;
+    font-family: var(--font-display);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.action-btn:hover {
+    background: var(--glass-bg-hover);
+    border-color: var(--primary);
+    transform: translateY(-1px);
+}
+
+.action-btn.primary {
+    background: linear-gradient(135deg, var(--primary), #7c3aed);
+    border: none;
+    color: white;
+}
+
+.action-btn.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px -6px var(--primary-glow);
+}

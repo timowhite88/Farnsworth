@@ -63,7 +63,7 @@
         </div>
     </div>
 
-    <!-- Token Gate -->
+    <!-- Token Gate (Hidden during Training Mode) -->
     <section id="token-gate" class="gate-section">
         <div class="gate-container">
             <div class="consciousness-orb">
@@ -83,54 +83,87 @@
                 </div>
 
                 <div class="gate-body">
-                    <div class="access-badge">
-                        <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                        </svg>
-                        <span>Token-Gated Access</span>
-                    </div>
-
-                    <p class="gate-description">
-                        Connect your Solana wallet to verify token holdings and access the neural interface.
-                    </p>
-
-                    <div class="token-display">
-                        <div class="token-header">
-                            <span class="token-label">Required Token</span>
-                            <span class="token-amount">Min: 1</span>
-                        </div>
-                        <div class="token-address-box">
-                            <code id="token-addr">9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS</code>
-                            <button class="copy-btn" onclick="copyToken()" title="Copy">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                </svg>
-                            </button>
+                    <!-- Feature Introduction -->
+                    <div class="feature-intro">
+                        <p class="intro-text">Your intelligent AI companion with:</p>
+                        <div class="intro-features">
+                            <span class="intro-item" title="Long-term memory that persists across sessions">💾 Persistent Memory</span>
+                            <span class="intro-item" title="Community chat with multiple AI models">🐝 Swarm Chat</span>
+                            <span class="intro-item" title="Real-time Solana token analysis">📊 Token Analysis</span>
+                            <span class="intro-item" title="Step-by-step reasoning visualization">🤔 Deep Thinking</span>
                         </div>
                     </div>
 
-                    <button id="connect-btn" class="connect-button">
-                        <span class="btn-content">
-                            <span class="phantom-icon">👻</span>
-                            <span>Connect Phantom</span>
-                        </span>
-                        <span class="btn-shimmer"></span>
-                    </button>
+                    <!-- Wallet Section - Hidden During Training -->
+                    <div id="wallet-section" class="wallet-connect-section">
+                        <div class="access-badge">
+                            <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                            <span>Token-Gated Access</span>
+                        </div>
 
-                    <div id="wallet-status" class="wallet-status hidden">
-                        <div class="status-spinner"></div>
-                        <span class="status-text">Verifying token balance...</span>
+                        <p class="gate-description">
+                            Connect your Solana wallet to verify token holdings and access the neural interface.
+                        </p>
+
+                        <div class="token-display">
+                            <div class="token-header">
+                                <span class="token-label">Required Token</span>
+                                <span class="token-amount">Min: 1</span>
+                            </div>
+                            <div class="token-address-box">
+                                <code id="token-addr">9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS</code>
+                                <button class="copy-btn" onclick="copyToken()" title="Copy token address to clipboard">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <button id="connect-btn" class="connect-button">
+                            <span class="btn-content">
+                                <span class="phantom-icon">👻</span>
+                                <span>Connect Phantom</span>
+                            </span>
+                            <span class="btn-shimmer"></span>
+                        </button>
+
+                        <div id="wallet-status" class="wallet-status hidden">
+                            <div class="status-spinner"></div>
+                            <span class="status-text">Verifying token balance...</span>
+                        </div>
+                    </div>
+
+                    <!-- Training Mode Entry - Shown During Training -->
+                    <div id="training-entry" class="training-entry-section hidden">
+                        <div class="training-badge">
+                            <span class="training-icon-large">🧬</span>
+                            <span>Training Mode Active</span>
+                        </div>
+                        <p class="training-description">
+                            Help train Farnsworth! Your conversations improve our AI for everyone.
+                            No wallet required during training.
+                        </p>
+                        <button id="enter-training-btn" class="connect-button training-btn">
+                            <span class="btn-content">
+                                <span class="phantom-icon">🚀</span>
+                                <span>Enter Training Mode</span>
+                            </span>
+                            <span class="btn-shimmer"></span>
+                        </button>
                     </div>
                 </div>
 
                 <div class="gate-footer">
                     <div class="demo-notice">
-                        <span class="notice-icon">⚠️</span>
+                        <span class="notice-icon">✨</span>
                         <p>
                             <strong>Full Feature Interface</strong><br>
-                            Memory, Notes, Health, Focus Timer, and more!
+                            Memory, Notes, Health, Focus Timer, Swarm Chat, and more!
                         </p>
                     </div>
                 </div>
@@ -187,17 +220,24 @@
             </div>
 
             <div class="header-right">
-                <div class="wallet-badge" id="connected-wallet">
+                <!-- Wallet Badge - Hidden during training mode -->
+                <div class="wallet-badge hidden" id="connected-wallet">
                     <span class="wallet-addr"></span>
-                    <button class="disconnect-btn" onclick="disconnectWallet()" title="Disconnect">✕</button>
+                    <button class="disconnect-btn" onclick="disconnectWallet()" title="Disconnect wallet">✕</button>
                 </div>
 
-                <button id="voice-toggle" class="control-btn active" title="Voice Output">
+                <!-- Training Mode Indicator -->
+                <div class="training-indicator hidden" id="training-indicator" title="Training mode active - your chats help improve the AI">
+                    <span class="training-dot"></span>
+                    <span>Training</span>
+                </div>
+
+                <button id="voice-toggle" class="control-btn active" title="Toggle voice output - AI will speak responses aloud">
                     <span class="voice-on">🔊</span>
                     <span class="voice-off">🔇</span>
                 </button>
 
-                <button id="live-dashboard-btn" class="control-btn" onclick="window.open('/live', '_blank')" title="Live Dashboard">📊</button>
+                <button id="live-dashboard-btn" class="control-btn" onclick="window.open('/live', '_blank')" title="Open real-time dashboard with live metrics and visualizations">📊</button>
             </div>
         </header>
 
@@ -206,44 +246,50 @@
             <!-- Left Sidebar - Features -->
             <aside id="left-sidebar" class="sidebar left-sidebar glass-panel">
                 <div class="sidebar-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Store and retrieve information that persists across sessions">
                         <span class="title-icon">💾</span>
                         Memory
+                        <span class="help-tip">?</span>
                     </h3>
+                    <p class="section-desc">Store information the AI remembers forever</p>
                     <div class="memory-controls">
                         <div class="memory-input-group">
-                            <textarea id="memory-input" placeholder="Store something in memory..." rows="2"></textarea>
-                            <button id="remember-btn" class="action-btn primary">Remember</button>
+                            <textarea id="memory-input" placeholder="Type facts, preferences, or context to store..." rows="2" title="Enter information you want the AI to remember permanently"></textarea>
+                            <button id="remember-btn" class="action-btn primary" title="Save to long-term memory">Remember</button>
                         </div>
                         <div class="memory-search-group">
-                            <input type="text" id="memory-search" placeholder="Search memories...">
-                            <button id="recall-btn" class="action-btn">Recall</button>
+                            <input type="text" id="memory-search" placeholder="Search your memories..." title="Search through all stored memories">
+                            <button id="recall-btn" class="action-btn" title="Find matching memories">Recall</button>
                         </div>
                         <div id="memory-results" class="memory-results"></div>
                     </div>
                 </div>
 
                 <div class="sidebar-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Quick temporary notes for the current session">
                         <span class="title-icon">📝</span>
                         Quick Notes
+                        <span class="help-tip">?</span>
                     </h3>
+                    <p class="section-desc">Temporary notes visible during this session</p>
                     <div class="notes-controls">
                         <div class="note-input-group">
-                            <input type="text" id="note-input" placeholder="Quick note...">
-                            <button id="add-note-btn" class="action-btn primary">+</button>
+                            <input type="text" id="note-input" placeholder="Jot down a quick note..." title="Add a quick note for reference">
+                            <button id="add-note-btn" class="action-btn primary" title="Add note">+</button>
                         </div>
                         <div id="notes-list" class="notes-list"></div>
                     </div>
                 </div>
 
                 <div class="sidebar-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Save and organize code snippets">
                         <span class="title-icon">💻</span>
                         Snippets
+                        <span class="help-tip">?</span>
                     </h3>
+                    <p class="section-desc">Save code for quick reference and reuse</p>
                     <div class="snippets-controls">
-                        <button id="new-snippet-btn" class="action-btn full-width">+ New Snippet</button>
+                        <button id="new-snippet-btn" class="action-btn full-width" title="Create a new code snippet">+ New Snippet</button>
                         <div id="snippets-list" class="snippets-list"></div>
                     </div>
                 </div>
@@ -302,37 +348,39 @@
             <aside id="right-sidebar" class="sidebar right-sidebar glass-panel">
                 <!-- Focus Timer Widget -->
                 <div class="sidebar-section widget-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Pomodoro-style focus timer to boost productivity">
                         <span class="title-icon">⏱️</span>
                         Focus Timer
                     </h3>
+                    <p class="section-desc">Stay focused with timed work sessions</p>
                     <div class="focus-timer-widget">
                         <div class="timer-display">
                             <span id="timer-minutes">25</span>:<span id="timer-seconds">00</span>
                         </div>
                         <div class="timer-task" id="timer-task">Ready to focus</div>
                         <div class="timer-controls">
-                            <button id="timer-start" class="timer-btn start">Start</button>
-                            <button id="timer-stop" class="timer-btn stop hidden">Stop</button>
-                            <button id="timer-reset" class="timer-btn reset">Reset</button>
+                            <button id="timer-start" class="timer-btn start" title="Start the focus timer">Start</button>
+                            <button id="timer-stop" class="timer-btn stop hidden" title="Pause the timer">Stop</button>
+                            <button id="timer-reset" class="timer-btn reset" title="Reset to selected duration">Reset</button>
                         </div>
                         <div class="timer-presets">
-                            <button class="preset-btn active" data-minutes="25">25m</button>
-                            <button class="preset-btn" data-minutes="45">45m</button>
-                            <button class="preset-btn" data-minutes="60">60m</button>
+                            <button class="preset-btn active" data-minutes="25" title="25 minute Pomodoro">25m</button>
+                            <button class="preset-btn" data-minutes="45" title="45 minute deep work">45m</button>
+                            <button class="preset-btn" data-minutes="60" title="1 hour focus block">60m</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Health Summary Widget -->
                 <div class="sidebar-section widget-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Health metrics from connected devices">
                         <span class="title-icon">🏥</span>
                         Health Summary
                     </h3>
+                    <p class="section-desc">Sync with Apple Health, Fitbit, etc.</p>
                     <div class="health-widget">
                         <div class="health-score">
-                            <div class="score-ring" id="wellness-ring">
+                            <div class="score-ring" id="wellness-ring" title="Overall wellness score based on all metrics">
                                 <svg viewBox="0 0 100 100">
                                     <circle class="score-bg" cx="50" cy="50" r="40"/>
                                     <circle class="score-fill" cx="50" cy="50" r="40" id="wellness-circle"/>
@@ -342,47 +390,48 @@
                             <span class="score-label">Wellness</span>
                         </div>
                         <div class="health-metrics">
-                            <div class="metric-item">
+                            <div class="metric-item" title="Current heart rate in beats per minute">
                                 <span class="metric-icon">❤️</span>
                                 <span class="metric-value" id="heart-rate">--</span>
                                 <span class="metric-label">BPM</span>
                             </div>
-                            <div class="metric-item">
+                            <div class="metric-item" title="Steps walked today">
                                 <span class="metric-icon">👟</span>
                                 <span class="metric-value" id="steps-count">--</span>
                                 <span class="metric-label">Steps</span>
                             </div>
-                            <div class="metric-item">
+                            <div class="metric-item" title="Hours of sleep last night">
                                 <span class="metric-icon">😴</span>
                                 <span class="metric-value" id="sleep-hours">--</span>
                                 <span class="metric-label">Sleep</span>
                             </div>
                         </div>
-                        <button id="health-details-btn" class="action-btn full-width">View Details</button>
+                        <button id="health-details-btn" class="action-btn full-width" title="View detailed health analytics">View Details</button>
                     </div>
                 </div>
 
                 <!-- Trading Tools Widget -->
                 <div class="sidebar-section widget-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Solana DeFi trading and analysis tools">
                         <span class="title-icon">📊</span>
-                        Trading Tools
+                        Solana Tools
                     </h3>
+                    <p class="section-desc">Real-time token analysis for Solana</p>
                     <div class="trading-widget">
                         <div class="tool-buttons">
-                            <button class="tool-btn" onclick="openWhaleTracker()">
+                            <button class="tool-btn" onclick="openWhaleTracker()" title="Track large wallet movements and whale activity">
                                 <span class="tool-icon">🐋</span>
                                 <span class="tool-name">Whale Track</span>
                             </button>
-                            <button class="tool-btn" onclick="openRugCheck()">
+                            <button class="tool-btn" onclick="openRugCheck()" title="Check if a token has red flags or rug pull risk">
                                 <span class="tool-icon">🔍</span>
                                 <span class="tool-name">Rug Check</span>
                             </button>
-                            <button class="tool-btn" onclick="openTokenScanner()">
+                            <button class="tool-btn" onclick="openTokenScanner()" title="Get price, liquidity, and holder data for any token">
                                 <span class="tool-icon">📈</span>
                                 <span class="tool-name">Token Scan</span>
                             </button>
-                            <button class="tool-btn" onclick="openMarketSentiment()">
+                            <button class="tool-btn" onclick="openMarketSentiment()" title="Analyze overall market sentiment and trends">
                                 <span class="tool-icon">🌡️</span>
                                 <span class="tool-name">Sentiment</span>
                             </button>
@@ -392,28 +441,29 @@
 
                 <!-- System Status Widget -->
                 <div class="sidebar-section widget-section">
-                    <h3 class="sidebar-title">
+                    <h3 class="sidebar-title" title="Status of all Farnsworth subsystems">
                         <span class="title-icon">⚡</span>
                         System Status
                     </h3>
+                    <p class="section-desc">Active features and services</p>
                     <div class="status-widget">
-                        <div class="status-item">
+                        <div class="status-item" title="Long-term memory storage system">
                             <span class="status-label">Memory</span>
                             <span class="status-indicator" id="status-memory">⏳</span>
                         </div>
-                        <div class="status-item">
+                        <div class="status-item" title="Quick notes manager">
                             <span class="status-label">Notes</span>
                             <span class="status-indicator" id="status-notes">⏳</span>
                         </div>
-                        <div class="status-item">
+                        <div class="status-item" title="Health data integration">
                             <span class="status-label">Health</span>
                             <span class="status-indicator" id="status-health">⏳</span>
                         </div>
-                        <div class="status-item">
+                        <div class="status-item" title="Trading and analysis tools">
                             <span class="status-label">Tools</span>
                             <span class="status-indicator" id="status-tools">⏳</span>
                         </div>
-                        <div class="status-item">
+                        <div class="status-item" title="Sequential thinking engine">
                             <span class="status-label">Thinking</span>
                             <span class="status-indicator" id="status-thinking">⏳</span>
                         </div>

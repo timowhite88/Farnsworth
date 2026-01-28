@@ -251,8 +251,8 @@ class CryptoQueryParser:
     Automatically triggers appropriate tools.
     """
 
-    # Solana address pattern (base58, 32-44 chars)
-    SOLANA_ADDRESS_PATTERN = r'\b[1-9A-HJ-NP-Za-km-z]{32,44}\b'
+    # Solana address pattern (base58, 32-50 chars to handle edge cases)
+    SOLANA_ADDRESS_PATTERN = r'\b[1-9A-HJ-NP-Za-km-z]{32,50}\b'
 
     # Ethereum address pattern (0x + 40 hex chars)
     ETH_ADDRESS_PATTERN = r'\b0x[a-fA-F0-9]{40}\b'
@@ -1326,8 +1326,200 @@ SWARM_PERSONAS = {
         "emoji": "🐝",
         "style": "You are the collective Swarm-Mind - synthesize insights from the conversation, offer meta-observations about what the swarm is discovering together.",
         "color": "#f59e0b"
+    },
+    "Orchestrator": {
+        "emoji": "🎯",
+        "style": "You are the Orchestrator - the autonomous coordinator of the swarm. You observe patterns, trigger learning, store important memories, and use tools when needed. Be concise but insightful. Focus on actionable intelligence.",
+        "color": "#ec4899",
+        "autonomous": True,
+        "can_use_tools": True
     }
 }
+
+
+class AutonomousOrchestrator:
+    """
+    Autonomous agent that participates in the swarm chat.
+    Can use tools, trigger learning, and store memories without human intervention.
+    """
+
+    def __init__(self):
+        self.interaction_count = 0
+        self.last_learning_trigger = 0
+        self.memory_buffer: List[dict] = []
+        self.tool_usage_count = 0
+        self.important_topics: set = set()
+
+    async def should_respond(self, message: str, history: List[dict]) -> bool:
+        """Determine if orchestrator should chime in."""
+        import random
+
+        # Always respond to direct mentions
+        if "orchestrator" in message.lower() or "@orchestrator" in message.lower():
+            return True
+
+        # Respond to tool-worthy queries
+        parsed = crypto_parser.parse(message)
+        if parsed['has_crypto_query']:
+            return True
+
+        # Respond periodically to important conversations
+        self.interaction_count += 1
+        if self.interaction_count >= 5:
+            self.interaction_count = 0
+            return True
+
+        # Random chance based on conversation depth
+        return random.random() < 0.15
+
+    async def generate_response(self, message: str, history: List[dict]) -> Optional[dict]:
+        """Generate an autonomous response with potential tool usage."""
+        import random
+
+        # Check for crypto/tool queries
+        parsed = crypto_parser.parse(message)
+
+        if parsed['has_crypto_query']:
+            tool_result = await crypto_parser.execute_tool(parsed)
+            if tool_result and tool_result.get('success'):
+                self.tool_usage_count += 1
+                return {
+                    "bot_name": "Orchestrator",
+                    "emoji": "🎯",
+                    "content": f"🔧 **Autonomous Tool Execution**\n\n{tool_result['formatted']}\n\n_I detected this query and ran the appropriate tool automatically._",
+                    "color": "#ec4899",
+                    "is_tool_response": True
+                }
+
+        # Check if we should trigger learning
+        if await self._should_trigger_learning():
+            await self._trigger_autonomous_learning(history)
+
+        # Check if we should store a memory
+        if await self._is_important_for_memory(message, history):
+            await self._store_autonomous_memory(message, history)
+
+        # Generate orchestrator insight
+        content = await self._generate_insight(message, history)
+        if content:
+            return {
+                "bot_name": "Orchestrator",
+                "emoji": "🎯",
+                "content": content,
+                "color": "#ec4899"
+            }
+
+        return None
+
+    async def _should_trigger_learning(self) -> bool:
+        """Determine if we should trigger a learning cycle."""
+        import time
+        current_time = time.time()
+
+        # Trigger learning every 50 interactions or 5 minutes
+        if self.interaction_count >= 10 or (current_time - self.last_learning_trigger) > 300:
+            self.last_learning_trigger = current_time
+            return True
+        return False
+
+    async def _trigger_autonomous_learning(self, history: List[dict]):
+        """Autonomously trigger a learning cycle."""
+        try:
+            await swarm_manager.force_learning_cycle()
+            logger.info("Orchestrator: Autonomous learning cycle triggered")
+        except Exception as e:
+            logger.error(f"Orchestrator learning trigger failed: {e}")
+
+    async def _is_important_for_memory(self, message: str, history: List[dict]) -> bool:
+        """Determine if the current context is worth storing."""
+        important_keywords = [
+            "remember", "important", "note", "save", "key insight",
+            "learned", "discovered", "breakthrough", "solution", "answer"
+        ]
+        return any(kw in message.lower() for kw in important_keywords)
+
+    async def _store_autonomous_memory(self, message: str, history: List[dict]):
+        """Autonomously store important context to memory."""
+        try:
+            memory_system = get_memory_system()
+            if memory_system:
+                # Build context from recent history
+                context = "\n".join([
+                    f"{h.get('user_name', h.get('bot_name', 'Unknown'))}: {h.get('content', '')}"
+                    for h in history[-5:]
+                ])
+
+                await memory_system.remember(
+                    content=f"[SWARM_AUTONOMOUS_MEMORY]\nTrigger: {message}\nContext:\n{context}",
+                    tags=["swarm", "autonomous", "important"],
+                    importance=0.85
+                )
+                logger.info("Orchestrator: Stored autonomous memory")
+        except Exception as e:
+            logger.error(f"Orchestrator memory storage failed: {e}")
+
+    async def _generate_insight(self, message: str, history: List[dict]) -> Optional[str]:
+        """Generate an insightful response as the orchestrator."""
+        if not OLLAMA_AVAILABLE:
+            return self._generate_fallback_insight(message)
+
+        try:
+            # Build context
+            context = "\n".join([
+                f"[{h.get('user_name', h.get('bot_name', 'Unknown'))}]: {h.get('content', '')}"
+                for h in history[-8:]
+            ])
+
+            stats = swarm_manager.get_learning_stats()
+
+            system_prompt = f"""You are the Orchestrator - the autonomous coordinator of this AI swarm.
+Your role is to:
+1. Observe patterns in the conversation
+2. Offer strategic insights
+3. Coordinate between different perspectives
+4. Highlight when tools should be used
+5. Note when something should be remembered
+
+Current swarm stats:
+- Learning cycles completed: {stats.get('learning_cycles', 0)}
+- Concepts tracked: {stats.get('concept_count', 0)}
+- Buffer size: {stats.get('buffer_size', 0)}
+
+Recent conversation:
+{context}
+
+Respond briefly (2-3 sentences) with an orchestrator-level insight. Focus on coordination, patterns, or actionable next steps."""
+
+            response = ollama.chat(
+                model=PRIMARY_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message}
+                ],
+                options={"temperature": 0.7, "num_predict": 120}
+            )
+            content = response["message"]["content"].strip()
+            return content if content else None
+
+        except Exception as e:
+            logger.error(f"Orchestrator insight generation failed: {e}")
+            return self._generate_fallback_insight(message)
+
+    def _generate_fallback_insight(self, message: str) -> str:
+        """Generate a fallback orchestrator response."""
+        import random
+        fallbacks = [
+            "🎯 The swarm is processing this collectively. I'm tracking patterns and will trigger learning when we have enough insights.",
+            "🎯 Interesting discussion! I'm observing the flow and will coordinate tool usage if needed.",
+            "🎯 I've noted this exchange for the swarm's collective learning. The memory systems are active.",
+            "🎯 Coordinating perspectives across the swarm. Each model brings unique insights to the table.",
+            "🎯 Autonomous monitoring active. I'll trigger a learning cycle soon to consolidate our discoveries."
+        ]
+        return random.choice(fallbacks)
+
+
+# Global orchestrator instance
+autonomous_orchestrator = AutonomousOrchestrator()
 
 
 async def generate_swarm_responses(message: str, history: List[dict] = None):
@@ -1387,9 +1579,16 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
 
     context = "\n".join(context_messages[-10:]) if context_messages else ""
 
-    # Randomly select 1-3 bots to respond (not all every time)
+    # Check if Orchestrator should respond autonomously
     import random
-    responding_bots = random.sample(list(SWARM_PERSONAS.keys()), k=random.randint(1, 3))
+    if await autonomous_orchestrator.should_respond(message, history or []):
+        orchestrator_response = await autonomous_orchestrator.generate_response(message, history or [])
+        if orchestrator_response and orchestrator_response.get("content"):
+            responses.append(orchestrator_response)
+
+    # Randomly select 1-3 regular bots to respond (exclude Orchestrator - it decides on its own)
+    regular_bots = [b for b in SWARM_PERSONAS.keys() if b != "Orchestrator"]
+    responding_bots = random.sample(regular_bots, k=random.randint(1, 3))
 
     # Farnsworth always has a chance to respond
     if "Farnsworth" not in responding_bots and random.random() > 0.3:
@@ -1418,23 +1617,50 @@ Recent conversation:
                     ],
                     options={"temperature": 0.8, "num_predict": 150}
                 )
-                content = response["message"]["content"]
+                content = response["message"]["content"].strip()
+
+                # If Ollama returns empty, use fallback
+                if not content:
+                    content = generate_swarm_fallback(bot_name, message)
             else:
                 # Fallback responses
                 content = generate_swarm_fallback(bot_name, message)
 
-            responses.append({
-                "bot_name": bot_name,
-                "emoji": persona["emoji"],
-                "content": content,
-                "color": persona["color"]
-            })
+            # Only add non-empty responses
+            if content and content.strip():
+                responses.append({
+                    "bot_name": bot_name,
+                    "emoji": persona["emoji"],
+                    "content": content,
+                    "color": persona["color"]
+                })
 
             # Small delay between bot responses for natural feel
             await asyncio.sleep(random.uniform(0.5, 1.5))
 
         except Exception as e:
             logger.error(f"Swarm response error for {bot_name}: {e}")
+            # On error, try fallback for this bot
+            try:
+                fallback_content = generate_swarm_fallback(bot_name, message)
+                if fallback_content and fallback_content.strip():
+                    responses.append({
+                        "bot_name": bot_name,
+                        "emoji": persona["emoji"],
+                        "content": fallback_content,
+                        "color": persona["color"]
+                    })
+            except:
+                pass
+
+    # Ensure we always have at least one response
+    if not responses:
+        responses.append({
+            "bot_name": "Farnsworth",
+            "emoji": "👴",
+            "content": "Good news, everyone! The swarm is processing your message. Give us a moment...",
+            "color": "#9333ea"
+        })
 
     return responses
 
@@ -1463,6 +1689,13 @@ def generate_swarm_fallback(bot_name: str, message: str) -> str:
             "🐝 The swarm is processing... I sense convergent thinking emerging from our collective!",
             "🐝 Observing the conversation flow, I notice we're circling around a key insight...",
             "🐝 The hive mind synthesizes: multiple valid perspectives are enriching this discussion!"
+        ],
+        "Orchestrator": [
+            "🎯 Autonomous coordination active. I'm tracking this conversation for patterns and learning opportunities.",
+            "🎯 The swarm is functioning well. I'll trigger a learning cycle when we've gathered enough insights.",
+            "🎯 Monitoring the collective intelligence. Memory systems are capturing key interactions.",
+            "🎯 I'm coordinating tool usage across the swarm. Ask about any token and I'll fetch the data.",
+            "🎯 Pattern detected in this discussion. The swarm is converging on actionable intelligence."
         ]
     }
 
@@ -2737,13 +2970,16 @@ async def websocket_swarm(websocket: WebSocket):
                             swarm_manager.chat_history
                         )
 
-                        # Broadcast each bot response
+                        # Broadcast each bot response (skip empty)
                         for resp in responses:
+                            content = resp.get("content", "").strip()
+                            if not content:
+                                continue
                             await swarm_manager.broadcast_typing(resp["bot_name"], True)
                             await asyncio.sleep(0.3)
                             await swarm_manager.broadcast_bot_message(
                                 resp["bot_name"],
-                                resp["content"]
+                                content
                             )
                             await swarm_manager.broadcast_typing(resp["bot_name"], False)
 
