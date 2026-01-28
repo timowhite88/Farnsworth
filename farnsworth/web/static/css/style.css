@@ -2829,6 +2829,41 @@ body:has(.training-banner.active) .chat-section {
     font-style: italic;
 }
 
+/* Chat Mode Toggle */
+.chat-mode-toggle {
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 4px;
+    border-radius: 12px;
+}
+
+.mode-btn {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mode-btn:hover {
+    background: rgba(139, 92, 246, 0.1);
+    color: var(--text-primary);
+}
+
+.mode-btn.active {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--primary);
+    box-shadow: 0 0 10px var(--primary-glow);
+}
+
 /* Responsive Swarm */
 @media (max-width: 768px) {
     .chat-mode-toggle {

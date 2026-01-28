@@ -1651,26 +1651,44 @@ window.deleteNote = deleteNote;
 // ============================================
 
 function switchChatMode(toSwarm) {
-    // Always swarm mode now - this function kept for compatibility
-    state.swarmMode = true;
+    console.log('[Chat] Switching to', toSwarm ? 'Swarm' : 'Personal', 'mode');
+    state.swarmMode = toSwarm;
 
-    // Show learning widget
-    document.getElementById('swarm-learning-widget')?.classList.remove('hidden');
+    // Update UI buttons
+    document.getElementById('personal-chat-btn')?.classList.toggle('active', !toSwarm);
+    document.getElementById('swarm-chat-btn')?.classList.toggle('active', toSwarm);
 
-    // Connect to Swarm Chat if not already
-    if (!state.swarmConnected) {
+    // Toggle swarm status header
+    const swarmHeader = document.getElementById('swarm-status-header');
+    if (swarmHeader) swarmHeader.style.display = toSwarm ? 'flex' : 'none';
+
+    // Toggle learning widget visibility
+    document.getElementById('swarm-learning-widget')?.classList.toggle('hidden', !toSwarm);
+
+    // Clear messages
+    const messagesContainer = document.getElementById('messages');
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+    }
+
+    if (toSwarm) {
+        // Connect to Swarm Chat
         connectSwarmChat();
         addSwarmWelcomeMessage();
+    } else {
+        // Disconnect from Swarm
+        disconnectSwarmChat();
+        addWelcomeMessage();
     }
+
+    showToast(toSwarm ? '🐝 Switched to Swarm Chat - Community Mode!' : '💬 Switched to Personal Chat', 'success');
 }
 
 function initSwarmMode() {
-    // Auto-start in swarm mode
-    console.log('[Swarm] Initializing swarm mode...');
-    state.swarmMode = true;
-    document.getElementById('swarm-learning-widget')?.classList.remove('hidden');
-    connectSwarmChat();
-    addSwarmWelcomeMessage();
+    // Initialize in personal mode by default, user can switch to swarm
+    console.log('[Chat] Initializing in personal mode (click 🐝 Swarm to join swarm chat)');
+    state.swarmMode = false;
+    addWelcomeMessage();
 }
 
 function connectSwarmChat() {

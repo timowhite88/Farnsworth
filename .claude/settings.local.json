@@ -37,7 +37,30 @@
       "Bash(pip3:*)",
       "Bash(git checkout:*)",
       "Bash(git rebase:*)",
-      "Bash(GIT_EDITOR=true git rebase:*)"
+      "Bash(GIT_EDITOR=true git rebase:*)",
+      "Bash(ssh -o ConnectTimeout=30 root@194.68.245.145 -p 22177 -i ~/.ssh/runpod_key 'cd /workspace/Farnsworth && git fetch origin && git reset --hard origin/main && pkill -9 python; sleep 2; nohup python farnsworth/web/server.py > /tmp/farnsworth.log 2>&1 & sleep 4; curl -s http://localhost:8080/api/status | head -c 80')",
+      "WebFetch(domain:docs.coqui.ai)",
+      "Bash(dir \"C:\\\\Fawnsworth\\\\farnsworth\\\\web\\\\static\" /s /b)",
+      "Bash(ssh:*)",
+      "Bash(git -C \"C:/Farnsworth\" status)",
+      "Bash(dir /s \"C:\\\\Fawnsworth\\\\farnsworth\\\\web\\\\static\\\\audio\"\")",
+      "Bash(dir:*)",
+      "Bash(ls:*)",
+      "Bash(/c/Python313/python.exe:*)",
+      "Bash(cmd.exe /c \"python --version\")",
+      "Bash(cmd.exe /c \"C:\\\\Python313\\\\python.exe --version\")",
+      "Bash(powershell.exe -Command \"python --version\")",
+      "Bash(scp:*)",
+      "WebFetch(domain:docs.bags.fm)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.bitquery.io)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(ss:*)",
+      "WebFetch(domain:ai.farnsworth.cloud)",
+      "WebFetch(domain:platform.moonshot.cn)",
+      "Bash(python3:*)"
     ]
   }
 }

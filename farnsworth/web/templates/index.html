@@ -76,8 +76,18 @@
             </div>
 
             <div class="header-center">
-                <!-- Swarm Chat Header -->
-                <div class="swarm-header">
+                <!-- Chat Mode Toggle -->
+                <div class="chat-mode-toggle">
+                    <button id="personal-chat-btn" class="mode-btn active" onclick="switchChatMode(false)" title="Personal chat with Farnsworth">
+                        💬 Personal
+                    </button>
+                    <button id="swarm-chat-btn" class="mode-btn" onclick="switchChatMode(true)" title="Global swarm chat with all bots">
+                        🐝 Swarm
+                    </button>
+                </div>
+
+                <!-- Swarm Status (shows when in swarm mode) -->
+                <div class="swarm-header" id="swarm-status-header" style="display: none;">
                     <span class="swarm-logo">🐝</span>
                     <span class="swarm-title">Global Swarm</span>
                     <span class="online-badge" id="swarm-online-count">0</span>
