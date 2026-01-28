@@ -239,42 +239,56 @@
                     </div>
                 </div>
 
-                <!-- Health Summary Widget -->
+                <!-- Evolution Stats Widget -->
                 <div class="sidebar-section widget-section">
-                    <h3 class="sidebar-title" title="Health metrics from connected devices">
-                        <span class="title-icon">🏥</span>
-                        Health Summary
+                    <h3 class="sidebar-title" title="Real-time swarm evolution and learning stats">
+                        <span class="title-icon">🧬</span>
+                        Swarm Evolution
+                        <span class="evolution-live-indicator" title="Updates every 60s">LIVE</span>
                     </h3>
-                    <p class="section-desc">Sync with Apple Health, Fitbit, etc.</p>
-                    <div class="health-widget">
-                        <div class="health-score">
-                            <div class="score-ring" id="wellness-ring" title="Overall wellness score based on all metrics">
+                    <p class="section-desc">Watch the swarm learn and evolve in real-time</p>
+                    <div class="evolution-widget">
+                        <div class="evolution-cycle">
+                            <div class="cycle-ring" title="Evolution cycle progress">
                                 <svg viewBox="0 0 100 100">
-                                    <circle class="score-bg" cx="50" cy="50" r="40"/>
-                                    <circle class="score-fill" cx="50" cy="50" r="40" id="wellness-circle"/>
+                                    <defs>
+                                        <linearGradient id="evolution-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#8b5cf6"/>
+                                            <stop offset="50%" style="stop-color:#06b6d4"/>
+                                            <stop offset="100%" style="stop-color:#10b981"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <circle class="cycle-bg" cx="50" cy="50" r="40"/>
+                                    <circle class="cycle-fill" cx="50" cy="50" r="40" id="evolution-circle"/>
                                 </svg>
-                                <span class="score-value" id="wellness-score">--</span>
+                                <span class="cycle-value" id="evolution-cycle">--</span>
                             </div>
-                            <span class="score-label">Wellness</span>
+                            <span class="cycle-label">Generation</span>
                         </div>
-                        <div class="health-metrics">
-                            <div class="metric-item" title="Current heart rate in beats per minute">
-                                <span class="metric-icon">❤️</span>
-                                <span class="metric-value" id="heart-rate">--</span>
-                                <span class="metric-label">BPM</span>
+                        <div class="evolution-metrics">
+                            <div class="evo-metric" title="Total learnings accumulated">
+                                <span class="evo-icon">📚</span>
+                                <span class="evo-value" id="total-learnings">--</span>
+                                <span class="evo-label">Learnings</span>
                             </div>
-                            <div class="metric-item" title="Steps walked today">
-                                <span class="metric-icon">👟</span>
-                                <span class="metric-value" id="steps-count">--</span>
-                                <span class="metric-label">Steps</span>
+                            <div class="evo-metric" title="Learnings until next auto-evolution">
+                                <span class="evo-icon">⏳</span>
+                                <span class="evo-value" id="until-evolution">--</span>
+                                <span class="evo-label">Until Evolve</span>
                             </div>
-                            <div class="metric-item" title="Hours of sleep last night">
-                                <span class="metric-icon">😴</span>
-                                <span class="metric-value" id="sleep-hours">--</span>
-                                <span class="metric-label">Sleep</span>
+                            <div class="evo-metric" title="Conversation patterns discovered">
+                                <span class="evo-icon">🔮</span>
+                                <span class="evo-value" id="patterns-count">--</span>
+                                <span class="evo-label">Patterns</span>
                             </div>
                         </div>
-                        <button id="health-details-btn" class="action-btn full-width" title="View detailed health analytics">View Details</button>
+                        <div class="personality-stats" id="personality-stats">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div class="evolution-footer">
+                            <span class="last-evolution" id="last-evolution">Last: --</span>
+                            <button id="force-evolve-btn" class="action-btn small" title="Manually trigger evolution cycle">Evolve Now</button>
+                        </div>
                     </div>
                 </div>
 
@@ -323,9 +337,9 @@
                             <span class="status-label">Notes</span>
                             <span class="status-indicator" id="status-notes">⏳</span>
                         </div>
-                        <div class="status-item" title="Health data integration">
-                            <span class="status-label">Health</span>
-                            <span class="status-indicator" id="status-health">⏳</span>
+                        <div class="status-item" title="Swarm evolution and learning">
+                            <span class="status-label">Evolution</span>
+                            <span class="status-indicator" id="status-evolution">⏳</span>
                         </div>
                         <div class="status-item" title="Trading and analysis tools">
                             <span class="status-label">Tools</span>

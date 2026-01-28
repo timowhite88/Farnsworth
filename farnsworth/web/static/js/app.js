@@ -60,7 +60,10 @@ async function initApp() {
     // Load initial data
     loadNotes();
     loadSnippets();
-    loadHealthSummary();
+    loadEvolutionStats();
+
+    // Start evolution stats auto-refresh (every 60 seconds)
+    setInterval(loadEvolutionStats, 60000);
 
     // Show welcome message
     addWelcomeMessage();
@@ -84,7 +87,7 @@ async function checkServerStatus() {
         // Update status indicators
         updateStatusIndicator('memory', data.features?.memory);
         updateStatusIndicator('notes', data.features?.notes);
-        updateStatusIndicator('health', data.features?.health);
+        updateStatusIndicator('evolution', data.features?.evolution);
         updateStatusIndicator('tools', data.features?.tools);
         updateStatusIndicator('thinking', data.features?.thinking);
 
@@ -291,8 +294,11 @@ function setupEventListeners() {
         });
     });
 
-    // Health details
+    // Health details (legacy)
     document.getElementById('health-details-btn')?.addEventListener('click', openHealthModal);
+
+    // Evolution force evolve button
+    document.getElementById('force-evolve-btn')?.addEventListener('click', forceEvolve);
 
     // Swarm Chat Mode Toggle
     document.getElementById('personal-chat-btn')?.addEventListener('click', () => switchChatMode(false));
@@ -977,7 +983,118 @@ function completeFocusTimer() {
 }
 
 // ============================================
-// HEALTH SYSTEM
+// EVOLUTION STATS SYSTEM
+// ============================================
+
+async function loadEvolutionStats() {
+    try {
+        const response = await fetch('/api/evolution/status');
+        const data = await response.json();
+
+        if (data.available) {
+            // Update evolution cycle ring
+            const threshold = data.auto_evolve_threshold || 100;
+            const untilNext = data.learnings_until_next_evolution || 0;
+            const progress = ((threshold - untilNext) / threshold) * 100;
+
+            const circle = document.getElementById('evolution-circle');
+            const circumference = 2 * Math.PI * 40;
+            const offset = circumference - (progress / 100) * circumference;
+            if (circle) {
+                circle.style.strokeDashoffset = offset;
+            }
+
+            // Update cycle value
+            const cycleEl = document.getElementById('evolution-cycle');
+            if (cycleEl) cycleEl.textContent = data.evolution_cycles || 0;
+
+            // Update metrics
+            const learningsEl = document.getElementById('total-learnings');
+            const untilEl = document.getElementById('until-evolution');
+            const patternsEl = document.getElementById('patterns-count');
+
+            if (learningsEl) learningsEl.textContent = formatNumber(data.total_learnings || 0);
+            if (untilEl) untilEl.textContent = untilNext;
+            if (patternsEl) patternsEl.textContent = data.patterns_count || 0;
+
+            // Update personality stats
+            const personalityContainer = document.getElementById('personality-stats');
+            if (personalityContainer && data.personalities) {
+                const personalities = Object.entries(data.personalities);
+                personalityContainer.innerHTML = personalities.map(([name, p]) => `
+                    <div class="personality-item">
+                        <span class="personality-name">${getBotEmoji(name)} ${name}</span>
+                        <span class="personality-meta">
+                            <span class="personality-gen">Gen ${p.generation}</span>
+                            <span class="personality-interactions">${formatNumber(p.interactions)} chats</span>
+                        </span>
+                    </div>
+                `).join('');
+            }
+
+            // Update last evolution time
+            const lastEl = document.getElementById('last-evolution');
+            if (lastEl && data.last_evolution) {
+                const lastTime = new Date(data.last_evolution);
+                lastEl.textContent = `Last: ${formatTimeAgo(lastTime)}`;
+            } else if (lastEl) {
+                lastEl.textContent = 'Last: Never';
+            }
+        }
+    } catch (error) {
+        console.error('Evolution stats error:', error);
+    }
+}
+
+function getBotEmoji(name) {
+    const emojis = {
+        'Farnsworth': '🧪',
+        'DeepSeek': '🔮',
+        'Phi': '⚡',
+        'Swarm-Mind': '🧠'
+    };
+    return emojis[name] || '🤖';
+}
+
+function formatTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+async function forceEvolve() {
+    try {
+        const btn = document.getElementById('force-evolve-btn');
+        if (btn) {
+            btn.textContent = 'Evolving...';
+            btn.disabled = true;
+        }
+
+        const response = await fetch('/api/evolution/evolve', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+            showNotification('Evolution cycle completed!', 'success');
+            loadEvolutionStats(); // Refresh stats
+        } else {
+            showNotification(data.error || 'Evolution failed', 'error');
+        }
+    } catch (error) {
+        console.error('Force evolve error:', error);
+        showNotification('Evolution request failed', 'error');
+    } finally {
+        const btn = document.getElementById('force-evolve-btn');
+        if (btn) {
+            btn.textContent = 'Evolve Now';
+            btn.disabled = false;
+        }
+    }
+}
+
+// ============================================
+// HEALTH SYSTEM (Legacy)
 // ============================================
 
 async function loadHealthSummary() {
