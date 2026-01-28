@@ -62,6 +62,10 @@ class KimiProvider(ExternalProvider):
             self.status = ConnectionStatus.ERROR
             return False
 
+    async def sync(self):
+        """Kimi doesn't need polling - it's a request/response API."""
+        pass
+
     async def execute_action(self, action: str, params: Dict[str, Any]) -> Any:
         """Execute a Kimi action."""
         if action == "chat":
