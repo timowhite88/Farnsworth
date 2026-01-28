@@ -1666,6 +1666,7 @@ function switchChatMode(toSwarm) {
 
 function initSwarmMode() {
     // Auto-start in swarm mode
+    console.log('[Swarm] Initializing swarm mode...');
     state.swarmMode = true;
     document.getElementById('swarm-learning-widget')?.classList.remove('hidden');
     connectSwarmChat();
@@ -1673,18 +1674,26 @@ function initSwarmMode() {
 }
 
 function connectSwarmChat() {
-    if (state.swarmWs && state.swarmConnected) return;
+    console.log('[Swarm] Attempting to connect to swarm chat...');
+    if (state.swarmWs && state.swarmConnected) {
+        console.log('[Swarm] Already connected, skipping');
+        return;
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/swarm`;
+    console.log('[Swarm] Connecting to:', wsUrl);
 
     try {
         state.swarmWs = new WebSocket(wsUrl);
+        console.log('[Swarm] WebSocket created');
 
         state.swarmWs.onopen = () => {
+            console.log('[Swarm] WebSocket connected!');
             // Send identification
             const userName = `User_${Math.random().toString(36).slice(2, 8)}`;
             state.swarmUserName = userName;
+            console.log('[Swarm] Sending identification as:', userName);
             state.swarmWs.send(JSON.stringify({
                 type: 'identify',
                 user_name: userName
@@ -1692,20 +1701,24 @@ function connectSwarmChat() {
         };
 
         state.swarmWs.onmessage = (event) => {
-            handleSwarmMessage(JSON.parse(event.data));
+            const data = JSON.parse(event.data);
+            console.log('[Swarm] Received message:', data.type, data);
+            handleSwarmMessage(data);
         };
 
         state.swarmWs.onclose = () => {
+            console.log('[Swarm] WebSocket closed');
             state.swarmConnected = false;
             updateSwarmStatus();
             // Reconnect if still in swarm mode
             if (state.swarmMode) {
+                console.log('[Swarm] Will reconnect in 3 seconds...');
                 setTimeout(connectSwarmChat, 3000);
             }
         };
 
         state.swarmWs.onerror = (error) => {
-            console.error('Swarm WebSocket error:', error);
+            console.error('[Swarm] WebSocket error:', error);
             state.swarmConnected = false;
         };
 
