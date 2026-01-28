@@ -1347,7 +1347,10 @@ class SwarmChatManager:
         return msg
 
     async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
-        """Broadcast a bot/model message to all users and feed to learning engine."""
+        """Broadcast a bot/model message to all users and feed to learning engine.
+
+        Also triggers TTS generation so the bot's voice is streamed to users.
+        """
         import hashlib
 
         # Create unique message ID to prevent duplicates
@@ -1365,13 +1368,28 @@ class SwarmChatManager:
                 logger.warning(f"Duplicate message blocked from {bot_name}")
                 return None
 
+        # Generate TTS audio URL - ONLY for Farnsworth (he's the voice of the system)
+        audio_url = None
+        if not is_thinking and TTS_AVAILABLE and bot_name == "Farnsworth":
+            try:
+                # Create audio hash for caching
+                text_hash = hashlib.md5(content.encode()).hexdigest()
+                audio_url = f"/api/speak?text_hash={text_hash}"
+
+                # Trigger TTS generation in background
+                asyncio.create_task(self._generate_tts_async(content, text_hash))
+                logger.info(f"TTS: Generating voice for Farnsworth message")
+            except Exception as e:
+                logger.warning(f"TTS URL generation failed: {e}")
+
         msg = {
             "type": "swarm_bot",
             "bot_name": bot_name,
             "content": content,
             "is_thinking": is_thinking,
             "timestamp": datetime.now().isoformat(),
-            "msg_id": msg_id
+            "msg_id": msg_id,
+            "audio_url": audio_url  # Include audio URL for client playback
         }
         if not is_thinking:
             self.chat_history.append(msg)
@@ -1404,6 +1422,52 @@ class SwarmChatManager:
 
         await self._broadcast(msg)
         return msg
+
+    async def _generate_tts_async(self, text: str, text_hash: str):
+        """Generate TTS audio in background for caching."""
+        try:
+            import hashlib
+            from pathlib import Path
+
+            # Check if already cached
+            cache_dir = Path("/tmp/farnsworth_tts_cache")
+            cache_dir.mkdir(exist_ok=True)
+            cache_path = cache_dir / f"{text_hash}.wav"
+
+            if cache_path.exists():
+                return  # Already cached
+
+            # Try planetary audio shard first
+            audio_shard = get_planetary_audio_shard()
+            if audio_shard:
+                cached = await asyncio.to_thread(audio_shard.get_audio, text_hash)
+                if cached:
+                    return
+
+            # Generate TTS
+            tts_model = get_tts_model()
+            if tts_model:
+                reference_audio = "/workspace/Farnsworth/farnsworth_voice.wav"
+                if Path(reference_audio).exists():
+                    await asyncio.to_thread(
+                        tts_model.tts_to_file,
+                        text=text[:500],  # Limit length
+                        file_path=str(cache_path),
+                        speaker_wav=reference_audio,
+                        language="en"
+                    )
+                    logger.debug(f"TTS generated: {text_hash[:8]}...")
+
+                    # Cache in planetary shard
+                    if audio_shard and cache_path.exists():
+                        await asyncio.to_thread(
+                            audio_shard.cache_audio,
+                            text_hash,
+                            str(cache_path),
+                            {"bot": "swarm", "text_preview": text[:50]}
+                        )
+        except Exception as e:
+            logger.warning(f"Background TTS generation failed: {e}")
 
     async def broadcast_tool_usage(self, user_id: str, tool_name: str, result: dict):
         """Track tool usage for learning - tools are perfect learning opportunities."""
@@ -4323,7 +4387,37 @@ async def swarm_user_patterns():
 
 @app.on_event("startup")
 async def startup_event():
-    """Start the autonomous conversation loop on server startup."""
+    """Initialize providers and start the autonomous conversation loop."""
+    global CLAUDE_CODE_AVAILABLE
+
+    # Initialize Claude Code CLI
+    if CLAUDE_CODE_AVAILABLE and get_claude_code:
+        try:
+            claude_provider = get_claude_code()
+            is_available = await claude_provider.check_available()
+            if is_available:
+                logger.info("Claude Code CLI initialized and ready!")
+            else:
+                logger.warning("Claude Code CLI not available - Claude will use Ollama fallback")
+                CLAUDE_CODE_AVAILABLE = False
+        except Exception as e:
+            logger.error(f"Claude Code initialization failed: {e}")
+            CLAUDE_CODE_AVAILABLE = False
+
+    # Initialize Kimi (Moonshot AI)
+    if KIMI_AVAILABLE and get_kimi_provider:
+        try:
+            kimi_provider = get_kimi_provider()
+            if kimi_provider:
+                connected = await kimi_provider.connect()
+                if connected:
+                    logger.info("Kimi (Moonshot AI) connected!")
+                else:
+                    logger.warning("Kimi connection failed - will use Ollama fallback")
+        except Exception as e:
+            logger.warning(f"Kimi initialization failed: {e}")
+
+    # Start autonomous conversation loop
     asyncio.create_task(autonomous_conversation_loop())
     logger.info("Autonomous conversation loop launched - bots are now talking!")
 

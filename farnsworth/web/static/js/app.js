@@ -546,6 +546,49 @@ let currentAudio = null;
 let audioQueue = [];
 let isPlayingAudio = false;
 
+// Play pre-generated audio from server URL
+async function playServerAudio(audioUrl) {
+    if (!state.voiceEnabled || isPlayingAudio) return;
+
+    isPlayingAudio = true;
+
+    // Stop any current audio
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+    }
+
+    try {
+        const response = await fetch(audioUrl);
+        if (response.ok) {
+            const audioBlob = await response.blob();
+            const blobUrl = URL.createObjectURL(audioBlob);
+            currentAudio = new Audio(blobUrl);
+
+            currentAudio.onended = () => {
+                URL.revokeObjectURL(blobUrl);
+                currentAudio = null;
+                isPlayingAudio = false;
+                console.log('[Audio] Farnsworth finished speaking');
+            };
+
+            currentAudio.onerror = (e) => {
+                console.error('[Audio] Error playing server audio:', e);
+                isPlayingAudio = false;
+            };
+
+            console.log('[Audio] Playing Farnsworth voice');
+            await currentAudio.play();
+        } else {
+            console.warn('[Audio] Server audio not ready yet');
+            isPlayingAudio = false;
+        }
+    } catch (error) {
+        console.error('[Audio] Failed to fetch server audio:', error);
+        isPlayingAudio = false;
+    }
+}
+
 // Sequential audio playback - bots wait for each other
 async function speakText(text, botName = 'Farnsworth') {
     if (!state.voiceEnabled) return Promise.resolve();
@@ -1879,9 +1922,14 @@ function renderSwarmMessage(data, animate = true) {
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-    // Voice for bot messages (Farnsworth speaks, others wait)
+    // Voice for Farnsworth only - he's the voice of the system
     if (data.type === 'swarm_bot' && state.voiceEnabled && data.bot_name === 'Farnsworth') {
-        speakText(content, data.bot_name);
+        // Use pre-generated audio URL if available (server-side TTS)
+        if (data.audio_url) {
+            playServerAudio(data.audio_url);
+        } else {
+            speakText(content, data.bot_name);
+        }
     }
 }
 
