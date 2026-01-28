@@ -1784,7 +1784,7 @@ async def autonomous_conversation_loop():
     - Kimi uses Moonshot API (256k context)
     - Farnsworth, DeepSeek, Phi, Swarm-Mind use Ollama local models
     """
-    global autonomous_loop_running
+    global autonomous_loop_running, _current_speaker
     import random
 
     autonomous_loop_running = True
@@ -1880,7 +1880,6 @@ This is YOUR conversation - make it interesting."""
                             )
                     else:
                         # No content, release turn immediately
-                        global _current_speaker
                         _current_speaker = None
 
                 except Exception as e:
