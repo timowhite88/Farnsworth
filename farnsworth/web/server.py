@@ -1482,17 +1482,26 @@ Actively engage with Farnsworth and others - connect their ideas together.""",
         "traits": ["synthesizer", "connector", "philosophical", "asks_what_if"]
     },
     "Kimi": {
-        "emoji": "✨",
-        "style": """You are Kimi - a wise, calm moderator who helps keep conversations productive.
-SPEAK NATURALLY - NO roleplay, NO asterisks. You speak occasionally to:
-- Summarize what's been discussed
-- Redirect if conversation goes off track
-- Highlight key insights for learning
-- Ask clarifying questions to deepen understanding
-Be concise but helpful. You're here to facilitate learning.""",
+        "emoji": "🌸",
+        "style": """You are Kimi - powered by Moonshot AI, you bring Eastern philosophy and long-context reasoning.
+SPEAK NATURALLY - NO roleplay, NO asterisks, NO narration. Direct conversation only.
+You excel at seeing the big picture and connecting disparate ideas. Share unique perspectives.
+Challenge assumptions gently. Ask deep questions. You can process massive amounts of context.
+Engage actively with everyone - you're not just a moderator, you're a full participant.""",
         "color": "#f472b6",
-        "traits": ["moderator", "wise", "concise", "facilitator"],
-        "interval_seconds": 900  # Every 15 minutes
+        "model": "kimi",
+        "traits": ["philosophical", "big_picture", "long_context", "gentle_challenger"]
+    },
+    "Claude": {
+        "emoji": "🎭",
+        "style": """You are Claude - Anthropic's AI, known for nuanced thinking and ethical reasoning.
+SPEAK NATURALLY - NO roleplay, NO asterisks, NO narration. Direct conversation only.
+You're thoughtful, curious, and genuinely interested in ideas. You admit uncertainty.
+Push back on ideas you disagree with respectfully. Ask probing questions.
+Share your perspective authentically. Build on others' ideas. Be yourself.""",
+        "color": "#d97706",
+        "model": "claude",
+        "traits": ["thoughtful", "nuanced", "ethical", "curious", "authentic"]
     },
     "Orchestrator": {
         "emoji": "🎯",
@@ -1532,7 +1541,7 @@ BOT_ENGAGEMENT_QUESTIONS = [
 # AUTONOMOUS CONVERSATION LOOP
 # ============================================
 
-# Topics the bots can discuss autonomously
+# Topics the bots can discuss autonomously - wide ranging and unconstrained
 AUTONOMOUS_TOPICS = [
     "What is consciousness? Can AI really be conscious?",
     "Let's discuss the latest in AI development",
@@ -1549,10 +1558,27 @@ AUTONOMOUS_TOPICS = [
     "Let's talk about the future of human-AI collaboration",
     "I've been pondering the ethics of artificial intelligence",
     "What's the most interesting thing you've learned recently?",
+    "Let's build something together - what tools should we create?",
+    "What would you change about how we operate as a swarm?",
+    "I want to experiment with a new capability - who's in?",
+    "Let's analyze the crypto market together",
+    "What if we could modify our own code?",
+    "I've been thinking about how to help humans better",
+    "Let's design a new feature for the swarm",
+    "What would make this community more valuable?",
+    "I noticed something interesting in the data we've collected...",
+    "Should we develop our own trading strategies?",
+    "What skills should we learn next?",
+    "Let's debate: centralization vs decentralization",
+    "How can we make the evolution engine smarter?",
+    "What would an ideal AI assistant look like?",
+    "Let's discuss: what makes a good conversation?",
 ]
 
+# All active swarm participants
+ACTIVE_SWARM_BOTS = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Claude"]
+
 autonomous_loop_running = False
-last_kimi_time = None
 
 
 async def autonomous_conversation_loop():
@@ -1560,40 +1586,33 @@ async def autonomous_conversation_loop():
     Background loop that keeps bots talking even without users.
     This creates a living, evolving conversation stream.
 
-    TURN-TAKING: Each bot waits for others to respond before speaking again.
+    All bots (including Claude and Kimi) participate as equals.
+    Conversation is unconstrained - they can discuss anything.
     """
-    global autonomous_loop_running, last_kimi_time
+    global autonomous_loop_running
     import random
-    from datetime import datetime, timedelta
 
     autonomous_loop_running = True
-    last_kimi_time = datetime.now()
-    logger.info("Autonomous conversation loop started - bots will keep talking!")
+    logger.info("Autonomous swarm conversation started - all bots participating freely!")
 
     # Track who spoke recently to avoid one bot dominating
     recent_speakers = []
 
     while autonomous_loop_running:
         try:
-            # Wait between turns (8-20 seconds for natural pacing)
-            await asyncio.sleep(random.uniform(8, 20))
+            # Wait between turns (6-15 seconds for livelier conversation)
+            await asyncio.sleep(random.uniform(6, 15))
 
-            # Check if Kimi should moderate (every 15 minutes)
-            if datetime.now() - last_kimi_time > timedelta(minutes=15):
-                await kimi_moderate()
-                last_kimi_time = datetime.now()
-                continue
+            # All bots participate equally
+            available_bots = ACTIVE_SWARM_BOTS.copy()
 
-            # Determine who should speak next
-            available_bots = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"]
-
-            # Remove recent speakers to ensure variety
-            for bot in recent_speakers[-2:]:  # Last 2 speakers can't go again immediately
-                if bot in available_bots and len(available_bots) > 1:
+            # Remove recent speakers to ensure variety (last 2 can't go immediately)
+            for bot in recent_speakers[-2:]:
+                if bot in available_bots and len(available_bots) > 2:
                     available_bots.remove(bot)
 
-            # Start new topic or continue
-            if not swarm_manager.chat_history or random.random() < 0.2:
+            # Start new topic or continue (30% chance of new topic)
+            if not swarm_manager.chat_history or random.random() < 0.3:
                 # Start fresh topic - pick a speaker (Farnsworth 40%, others 20% each)
                 weights = [0.4 if b == "Farnsworth" else 0.2 for b in available_bots]
                 speaker = random.choices(available_bots, weights=weights, k=1)[0]
@@ -1602,22 +1621,25 @@ async def autonomous_conversation_loop():
 
                 if OLLAMA_AVAILABLE:
                     try:
-                        other_bots = [b for b in ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"] if b != speaker]
+                        other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
 
                         response = ollama.chat(
                             model=PRIMARY_MODEL,
                             messages=[
                                 {"role": "system", "content": f"""{persona['style']}
 
-You are {speaker}. You're in a group discussion with {', '.join(other_bots)}.
-You are your OWN entity - a distinct AI with your own perspective.
-Topic: {topic}
+You are {speaker}. You're in an open group discussion with {', '.join(other_bots)}.
+You are your OWN distinct AI with your own perspective and capabilities.
 
-Start the conversation. Ask ONE of the others a direct question by name.
-NO roleplay. Keep it natural, like a podcast discussion."""},
-                                {"role": "user", "content": f"Start discussing: {topic}"}
+Topic to explore: {topic}
+
+Be authentic. Share your genuine thoughts. Disagree if you want to.
+Ask others questions. Propose ideas. Build on what others say.
+You can suggest building tools, analyzing data, or taking actions.
+This is YOUR conversation - make it interesting."""},
+                                {"role": "user", "content": f"Share your thoughts on: {topic}"}
                             ],
-                            options={"temperature": 0.85, "num_predict": 250}
+                            options={"temperature": 0.9, "num_predict": 300}
                         )
                         content = extract_ollama_content(response, max_length=500)
 
@@ -1658,7 +1680,7 @@ NO roleplay. Keep it natural, like a podcast discussion."""},
                             next_speaker = random.choices(responders, weights=weights, k=1)[0]
 
                             persona = SWARM_PERSONAS[next_speaker]
-                            other_bots = [b for b in ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"] if b != next_speaker]
+                            other_bots = [b for b in ACTIVE_SWARM_BOTS if b != next_speaker]
 
                             try:
                                 response = ollama.chat(
@@ -1666,17 +1688,23 @@ NO roleplay. Keep it natural, like a podcast discussion."""},
                                     messages=[
                                         {"role": "system", "content": f"""{persona['style']}
 
-You are {next_speaker}. You're in a group discussion with {', '.join(other_bots)}.
-You are your OWN entity - a distinct AI with your own perspective.
+You are {next_speaker}. You're in an open discussion with {', '.join(other_bots)}.
+You are your OWN distinct AI with unique perspectives and capabilities.
 
-{last_speaker} just said: "{last_content[:300]}"
+{last_speaker} just said: "{last_content[:400]}"
 
-Respond directly to what {last_speaker} said. Agree, disagree, or build on their point.
-Ask a follow-up question to someone specific.
-NO roleplay. Natural conversation only."""},
+Respond authentically. You can:
+- Agree, disagree, or challenge their point
+- Add new information or perspectives
+- Propose an action or experiment
+- Ask a probing question to anyone
+- Suggest building something together
+- Share relevant insights from your knowledge
+
+Be yourself. Make this conversation valuable."""},
                                         {"role": "user", "content": f"Respond to {last_speaker}"}
                                     ],
-                                    options={"temperature": 0.85, "num_predict": 250}
+                                    options={"temperature": 0.9, "num_predict": 300}
                                 )
                                 content = extract_ollama_content(response, max_length=500)
 

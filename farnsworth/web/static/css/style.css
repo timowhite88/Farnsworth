@@ -2473,46 +2473,45 @@ body:has(.training-banner.active) .chat-section {
    SWARM CHAT - COMMUNITY MODE STYLES
    ============================================ */
 
-/* Chat Mode Toggle */
-.chat-mode-toggle {
-    display: flex;
-    gap: 4px;
-    background: var(--glass-bg);
-    border-radius: 12px;
-    padding: 4px;
-    border: 1px solid var(--glass-border);
-}
-
-.mode-btn {
+/* Swarm Header */
+.swarm-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-secondary);
-    font-family: var(--font-display);
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s var(--ease-out-expo);
+    gap: 10px;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(6, 182, 212, 0.2));
+    border-radius: 12px;
+    padding: 8px 20px;
+    border: 1px solid rgba(139, 92, 246, 0.3);
     position: relative;
 }
 
-.mode-btn:hover {
-    color: var(--text-primary);
-    background: var(--glass-bg-hover);
+.swarm-logo {
+    font-size: 1.5rem;
+    animation: pulse-bee 2s infinite;
 }
 
-.mode-btn.active {
+@keyframes pulse-bee {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.swarm-title {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 600;
     background: linear-gradient(135deg, var(--primary), var(--accent));
-    color: white;
-    box-shadow: 0 4px 15px var(--primary-glow);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
-.mode-btn .mode-icon {
-    font-size: 1rem;
+.swarm-live-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: pulse-live 2s infinite;
+    box-shadow: 0 0 10px var(--success);
 }
 
 .online-badge {
