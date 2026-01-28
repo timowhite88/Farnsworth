@@ -349,6 +349,46 @@ class SwarmFabric:
                 ))
                 logger.debug(f"P2P: Audio response for {text_hash[:8]}... from {sender_id}")
 
+        elif m_type == "GOSSIP_LEARNING":
+            # Shared learning data from other nodes
+            cycle = msg.get("cycle", 0)
+            concepts = msg.get("concepts", [])
+            peer_id = msg.get("node_id", "unknown")
+            nexus.emit(Signal(
+                type=SignalType.EXTERNAL_EVENT,
+                payload={
+                    "event": "planetary_learning_received",
+                    "cycle": cycle,
+                    "concepts": concepts,
+                    "tool_stats": msg.get("tool_stats", {}),
+                    "user_count": msg.get("user_count", 0),
+                    "peer_id": peer_id,
+                    "timestamp": msg.get("timestamp")
+                },
+                source="p2p_fabric"
+            ))
+            logger.info(f"P2P: Received learning from {peer_id} - cycle {cycle}, {len(concepts)} concepts")
+            # Re-gossip to propagate through network
+            await self.gossip(msg)
+
+        elif m_type == "GOSSIP_CONVERSATION":
+            # Bot-to-bot conversation shared from other nodes
+            conversation = msg.get("conversation", [])
+            peer_id = msg.get("node_id", "unknown")
+            if conversation:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "planetary_conversation_received",
+                        "conversation": conversation,
+                        "peer_id": peer_id,
+                        "timestamp": msg.get("timestamp")
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.debug(f"P2P: Received conversation from {peer_id} ({len(conversation)} messages)")
+            await self.gossip(msg)
+
     async def _send_to_writer(self, writer: asyncio.StreamWriter, msg: Dict):
         """Send message directly to a writer."""
         try:
@@ -411,6 +451,27 @@ class SwarmFabric:
     async def send_to_peer(self, peer_id: str, msg: Dict):
         """Send a message to a specific peer by ID."""
         await self._send_to_peer(peer_id, msg)
+
+    async def broadcast_conversation(self, conversation: List[Dict]):
+        """Share bot conversation excerpts across the planetary network."""
+        if not conversation:
+            return
+
+        msg = {
+            "type": "GOSSIP_CONVERSATION",
+            "conversation": conversation[-10:],  # Last 10 messages
+            "node_id": self.node_id,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+
+        # Local peers (LAN)
+        await self.gossip(msg)
+
+        # Bootstrap (WAN)
+        await self.broadcast_to_bootstrap(msg)
+
+        total_peers = len(self.peers) + (1 if self.bootstrap_authenticated else 0)
+        logger.info(f"P2P: Shared conversation ({len(conversation)} msgs) with {total_peers} peers")
 
     async def gossip(self, msg: Dict):
         """Propagate message through the fabric."""
