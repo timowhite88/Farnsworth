@@ -1725,10 +1725,13 @@ async def autonomous_conversation_loop():
     while autonomous_loop_running:
         try:
             # Wait between turns (6-15 seconds for livelier conversation)
-            await asyncio.sleep(random.uniform(6, 15))
+            wait_time = random.uniform(6, 15)
+            logger.debug(f"Autonomous loop: waiting {wait_time:.1f}s before next turn")
+            await asyncio.sleep(wait_time)
 
             # All bots participate equally
             available_bots = ACTIVE_SWARM_BOTS.copy()
+            logger.debug(f"Autonomous loop: starting turn with {len(available_bots)} available bots")
 
             # Remove recent speakers to ensure variety (last 2 can't go immediately)
             for bot in recent_speakers[-2:]:
@@ -1759,6 +1762,7 @@ This is YOUR conversation - make it interesting."""
 
                 try:
                     # Use multi-model routing (Claude CLI, Kimi API, or Ollama)
+                    logger.info(f"Autonomous: {speaker} generating response for topic: {topic[:50]}...")
                     content = await generate_multi_model_response(
                         speaker=speaker,
                         prompt=f"Share your thoughts on: {topic}",
@@ -1766,8 +1770,10 @@ This is YOUR conversation - make it interesting."""
                         chat_history=list(swarm_manager.chat_history) if swarm_manager.chat_history else None,
                         max_tokens=300
                     )
+                    logger.info(f"Autonomous: {speaker} generated {len(content) if content else 0} chars")
 
                     if content and content.strip():
+                        logger.info(f"Autonomous: Broadcasting message from {speaker}")
                         await swarm_manager.broadcast_bot_message(speaker, content)
                         recent_speakers.append(speaker)
                         if len(recent_speakers) > 4:
