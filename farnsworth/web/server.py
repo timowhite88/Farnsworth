@@ -175,6 +175,30 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 PRIMARY_MODEL = os.getenv("FARNSWORTH_PRIMARY_MODEL", "deepseek-r1:1.5b")
 DEMO_MODE = os.getenv("FARNSWORTH_DEMO_MODE", "true").lower() == "true"
 
+
+def extract_ollama_content(response, max_length: int = 500) -> str:
+    """
+    Safely extract content from Ollama response.
+    Handles deepseek-r1 models which put response in 'thinking' field.
+    """
+    try:
+        msg = response.message if hasattr(response, 'message') else response.get("message", {})
+        content = getattr(msg, 'content', '') or msg.get('content', '') or ''
+        thinking = getattr(msg, 'thinking', '') or msg.get('thinking', '') or ''
+
+        # Use content if available, otherwise use thinking (deepseek-r1 behavior)
+        result = content.strip() if content.strip() else thinking.strip()
+
+        # Limit length
+        if max_length and len(result) > max_length:
+            result = result[:max_length] + "..."
+
+        return result
+    except Exception as e:
+        logger.error(f"Error extracting Ollama content: {e}")
+        return ""
+
+
 # ============================================
 # TRAINING MODE - Open access for 12 hours
 # ============================================
@@ -1498,7 +1522,7 @@ Respond briefly (2-3 sentences) with an orchestrator-level insight. Focus on coo
                 ],
                 options={"temperature": 0.7, "num_predict": 120}
             )
-            content = response["message"]["content"].strip()
+            content = extract_ollama_content(response, max_length=300)
             return content if content else None
 
         except Exception as e:
@@ -1557,12 +1581,14 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
                             messages=[{"role": "user", "content": comment_prompt}],
                             options={"temperature": 0.8, "num_predict": 80}
                         )
-                        responses.append({
-                            "bot_name": comment_bot,
-                            "emoji": persona["emoji"],
-                            "content": comment_response["message"]["content"],
-                            "color": persona["color"]
-                        })
+                        comment_content = extract_ollama_content(comment_response, max_length=200)
+                        if comment_content:
+                            responses.append({
+                                "bot_name": comment_bot,
+                                "emoji": persona["emoji"],
+                                "content": comment_content,
+                                "color": persona["color"]
+                            })
                     except:
                         pass
 
@@ -1617,9 +1643,9 @@ Recent conversation:
                     ],
                     options={"temperature": 0.8, "num_predict": 150}
                 )
-                content = response["message"]["content"].strip()
+                content = extract_ollama_content(response, max_length=500)
 
-                # If Ollama returns empty, use fallback
+                # If still empty, use fallback
                 if not content:
                     content = generate_swarm_fallback(bot_name, message)
             else:
@@ -1801,7 +1827,8 @@ def generate_ai_response(message: str, history: list = None) -> str:
                 options={"temperature": 0.7, "num_predict": 500}
             )
 
-            return response["message"]["content"]
+            content = extract_ollama_content(response, max_length=1000)
+            return content if content else generate_fallback_response(message)
 
         except Exception as e:
             logger.error(f"Ollama error: {e}")
