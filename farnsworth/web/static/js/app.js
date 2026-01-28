@@ -1822,8 +1822,84 @@ async function fetchSwarmLearningStats() {
                     ).join('');
             }
         }
+
+        // Also fetch real-time processing stats
+        fetchProcessingStats();
     } catch (error) {
         console.error('Failed to fetch learning stats:', error);
+    }
+}
+
+async function fetchProcessingStats() {
+    try {
+        // Fetch evolution and orchestrator stats for real-time view
+        const [evolutionRes, orchestratorRes] = await Promise.all([
+            fetch('/api/evolution/status'),
+            fetch('/api/orchestrator/status')
+        ]);
+
+        const evolution = await evolutionRes.json();
+        const orchestrator = await orchestratorRes.json();
+
+        const processingEl = document.getElementById('processing-stats');
+        if (processingEl) {
+            let html = '<h4>⚡ Live Processing</h4>';
+
+            // Evolution stats
+            if (evolution.available) {
+                html += `
+                    <div class="processing-item">
+                        <span class="proc-label">🧬 Learnings:</span>
+                        <span class="proc-value">${evolution.total_learnings || 0}</span>
+                    </div>
+                    <div class="processing-item">
+                        <span class="proc-label">🔄 Evolution Cycles:</span>
+                        <span class="proc-value">${evolution.evolution_cycles || 0}</span>
+                    </div>
+                    <div class="processing-item">
+                        <span class="proc-label">📦 Patterns:</span>
+                        <span class="proc-value">${evolution.patterns_count || 0}</span>
+                    </div>
+                    <div class="processing-item">
+                        <span class="proc-label">📝 Buffer:</span>
+                        <span class="proc-value">${evolution.buffer_size || 0}</span>
+                    </div>
+                `;
+
+                // Show personality evolution
+                if (evolution.personalities) {
+                    html += '<div class="personality-list"><h5>🤖 Bot Evolution</h5>';
+                    for (const [name, data] of Object.entries(evolution.personalities)) {
+                        html += `
+                            <div class="personality-item">
+                                <span class="bot-name">${name}</span>
+                                <span class="bot-gen">Gen ${data.generation}</span>
+                                <span class="bot-int">${data.interactions} msgs</span>
+                            </div>
+                        `;
+                    }
+                    html += '</div>';
+                }
+            }
+
+            // Orchestrator stats
+            if (orchestrator.available) {
+                html += `
+                    <div class="processing-item">
+                        <span class="proc-label">🎯 Turn #:</span>
+                        <span class="proc-value">${orchestrator.turn_number || 0}</span>
+                    </div>
+                    <div class="processing-item">
+                        <span class="proc-label">😊 Mood:</span>
+                        <span class="proc-value">${orchestrator.mood || 'curious'}</span>
+                    </div>
+                `;
+            }
+
+            processingEl.innerHTML = html;
+        }
+    } catch (error) {
+        console.debug('Processing stats fetch error:', error);
     }
 }
 
@@ -1863,7 +1939,7 @@ function addSwarmWelcomeMessage() {
             </p>
             <p class="swarm-bots">
                 <strong>Active Bots:</strong>
-                🧠 Farnsworth • 🔮 DeepSeek • ⚡ Phi • 🐝 Swarm-Mind
+                🧠 Farnsworth • 🔮 DeepSeek • ⚡ Phi • 🐝 Swarm-Mind • ✨ Kimi
             </p>
         </div>
     `;
