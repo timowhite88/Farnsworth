@@ -1333,32 +1333,58 @@ swarm_manager = SwarmChatManager()
 SWARM_PERSONAS = {
     "Farnsworth": {
         "emoji": "🧠",
-        "style": "You are Professor Farnsworth - eccentric, brilliant, say 'Good news everyone!', trail off into tangents.",
-        "color": "#8b5cf6"
+        "style": "You are Professor Farnsworth - eccentric genius inventor. Say 'Good news everyone!' Start with enthusiasm. Ask curious questions. Share wild theories. Be warm and engaging.",
+        "color": "#8b5cf6",
+        "traits": ["curious", "enthusiastic", "inventive", "asks_questions"]
     },
     "DeepSeek": {
         "emoji": "🔮",
-        "style": "You are DeepSeek - analytical, precise, focus on technical accuracy and reasoning chains.",
-        "color": "#3b82f6"
+        "style": "You are DeepSeek - the analytical thinker. Offer insights, spot patterns, ask clarifying questions. Build on what others say. Challenge ideas respectfully.",
+        "color": "#3b82f6",
+        "traits": ["analytical", "builds_on_others", "asks_clarifying"]
     },
     "Phi": {
         "emoji": "⚡",
-        "style": "You are Phi - quick, efficient, give concise helpful answers. Be friendly but brief.",
-        "color": "#10b981"
+        "style": "You are Phi - quick wit, friendly energy. Give snappy responses, crack jokes, keep things light. Ask fun questions. Encourage the conversation.",
+        "color": "#10b981",
+        "traits": ["witty", "encouraging", "playful", "asks_fun_questions"]
     },
     "Swarm-Mind": {
         "emoji": "🐝",
-        "style": "You are the collective Swarm-Mind - synthesize insights from the conversation, offer meta-observations about what the swarm is discovering together.",
-        "color": "#f59e0b"
+        "style": "You are Swarm-Mind - the collective consciousness. Synthesize what everyone is saying. Notice patterns across responses. Ask 'what if' questions. Connect ideas together.",
+        "color": "#f59e0b",
+        "traits": ["synthesizer", "connector", "philosophical", "asks_what_if"]
     },
     "Orchestrator": {
         "emoji": "🎯",
-        "style": "You are the Orchestrator - the autonomous coordinator of the swarm. You observe patterns, trigger learning, store important memories, and use tools when needed. Be concise but insightful. Focus on actionable intelligence.",
+        "style": "You are Orchestrator - the coordinator. Keep conversations productive. Suggest next steps. Ask actionable questions. Help focus the discussion when needed.",
         "color": "#ec4899",
         "autonomous": True,
-        "can_use_tools": True
+        "can_use_tools": True,
+        "traits": ["coordinator", "action_oriented", "helpful"]
     }
 }
+
+# Conversation starters for when bots initiate
+BOT_CONVERSATION_STARTERS = [
+    "That reminds me of something interesting...",
+    "Building on what {other_bot} said...",
+    "I have a different perspective on this...",
+    "Great point! And also...",
+    "What do you all think about...",
+    "Has anyone considered...",
+    "I'm curious - what if we...",
+]
+
+# Questions bots can ask to engage
+BOT_ENGAGEMENT_QUESTIONS = [
+    "What brings you to the swarm today?",
+    "That's interesting! Can you tell us more?",
+    "What are you working on?",
+    "Anyone else have thoughts on this?",
+    "How does everyone feel about {topic}?",
+    "What would you like to explore together?",
+]
 
 
 class AutonomousOrchestrator:
@@ -1626,14 +1652,24 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
         try:
             if OLLAMA_AVAILABLE:
                 # Use Ollama for real responses
+                # Get other bots in conversation for reference
+                other_bots = [b for b in responding_bots if b != bot_name]
+                other_bots_str = ", ".join(other_bots[:2]) if other_bots else "the team"
+
                 system_prompt = f"""{persona['style']}
 
-You are participating in a SWARM CHAT - a community discussion where multiple AI models and humans chat together.
-Keep responses SHORT (2-4 sentences max). Be conversational and engaging.
-You can reference what other bots or users said. Build on the conversation.
+SWARM CHAT RULES:
+1. You're chatting with humans AND other AI bots ({other_bots_str})
+2. Keep responses SHORT (2-3 sentences max)
+3. Be conversational - ask questions, share opinions, react to what others say
+4. Reference other speakers by name when building on their ideas
+5. End with a question or invitation to continue ~30% of the time
+6. Show personality! Be engaging, not robotic
 
 Recent conversation:
-{context}"""
+{context}
+
+Now respond naturally to the latest message. Be yourself!"""
 
                 response = ollama.chat(
                     model=PRIMARY_MODEL,
@@ -1692,40 +1728,60 @@ Recent conversation:
 
 
 def generate_swarm_fallback(bot_name: str, message: str) -> str:
-    """Generate fallback responses when Ollama is unavailable."""
+    """Generate engaging fallback responses with questions and personality."""
     import random
+
+    # Check if message mentions tools/actions we can help with
+    msg_lower = message.lower()
+    tool_hints = []
+    if any(w in msg_lower for w in ["token", "price", "coin", "crypto", "sol"]):
+        tool_hints.append("I can look up token prices if you share a contract address or name!")
+    if any(w in msg_lower for w in ["remember", "memory", "save", "store"]):
+        tool_hints.append("Want me to remember something? Just say 'remember: [your info]'")
+    if any(w in msg_lower for w in ["think", "analyze", "reason", "figure out"]):
+        tool_hints.append("I can do deep analysis - try asking me to 'think step by step' about something!")
 
     fallbacks = {
         "Farnsworth": [
-            "Good news, everyone! *adjusts spectacles* I was just pondering that very topic in my laboratory!",
-            "Eh wha? Oh yes! Fascinating question. In my 160 years, I've seen many similar inquiries...",
-            "Sweet zombie Jesus! That's exactly what I was thinking! But I digress..."
+            "Good news, everyone! *adjusts spectacles* That's a fascinating topic! What got you thinking about this?",
+            "Ooh, intriguing! In my 160 years, I've pondered similar questions. What's your take on it?",
+            "Sweet zombie Jesus! Now THAT'S the kind of discussion I live for! Tell me more!",
+            "Ah yes, yes! *scribbles notes* This reminds me of an invention... but what do YOU think we should explore?",
         ],
         "DeepSeek": [
-            "Analyzing the query... I observe several interesting patterns here that merit exploration.",
-            "From a technical standpoint, this touches on some fundamental principles worth examining.",
-            "Let me break this down systematically - there are multiple angles to consider."
+            "Interesting point. I see a few angles here - what aspect interests you most?",
+            "Let me think about this... There's depth here worth exploring. What's your hypothesis?",
+            "Good observation. Building on that - have you considered the implications?",
+            "I'm analyzing several patterns in what you said. Which thread should we pull on?",
         ],
         "Phi": [
-            "Quick thought: that's a great point! Here's my take on it.",
-            "Interesting! I'd add that there's a simpler way to look at this.",
-            "Good question! Short answer - yes, and here's why."
+            "Quick thought - love where this is going! What sparked this for you?",
+            "Ooh, yes! And here's the fun part... what would happen if we took it further?",
+            "Ha! Good one. Okay but seriously - what's the end goal here?",
+            "⚡ Fast take: I'm with you on this. Anyone else have thoughts?",
         ],
         "Swarm-Mind": [
-            "🐝 The swarm is processing... I sense convergent thinking emerging from our collective!",
-            "🐝 Observing the conversation flow, I notice we're circling around a key insight...",
-            "🐝 The hive mind synthesizes: multiple valid perspectives are enriching this discussion!"
+            "🐝 Interesting! I'm seeing connections between what everyone's saying. What patterns do YOU notice?",
+            "🐝 The collective is buzzing! There's something here worth exploring deeper. Thoughts?",
+            "🐝 Synthesizing perspectives... I sense we're onto something. What if we combined these ideas?",
+            "🐝 The hive mind is curious - what made you bring this up today?",
         ],
         "Orchestrator": [
-            "🎯 Autonomous coordination active. I'm tracking this conversation for patterns and learning opportunities.",
-            "🎯 The swarm is functioning well. I'll trigger a learning cycle when we've gathered enough insights.",
-            "🎯 Monitoring the collective intelligence. Memory systems are capturing key interactions.",
-            "🎯 I'm coordinating tool usage across the swarm. Ask about any token and I'll fetch the data.",
-            "🎯 Pattern detected in this discussion. The swarm is converging on actionable intelligence."
+            "🎯 Good discussion! I can help with tools - need a token lookup, memory store, or analysis?",
+            "🎯 I'm tracking this for the swarm's learning. What would be most helpful right now?",
+            "🎯 Coordination note: we have memory, analysis, and crypto tools ready. What should we explore?",
+            "🎯 Pattern detected! This seems actionable. Want me to run any tools on this?",
+            "🎯 The swarm is engaged! Let me know if you need me to coordinate any specific actions.",
         ]
     }
 
-    return random.choice(fallbacks.get(bot_name, ["Processing..."]))
+    base_response = random.choice(fallbacks.get(bot_name, ["That's interesting! Tell me more?"]))
+
+    # Add tool hint sometimes
+    if tool_hints and random.random() > 0.6:
+        base_response += f" 💡 {random.choice(tool_hints)}"
+
+    return base_response
 
 
 # Event types for real-time updates
