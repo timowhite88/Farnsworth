@@ -1671,6 +1671,178 @@ body {
     color: var(--text-muted);
 }
 
+/* Evolution Widget */
+.evolution-widget {
+    text-align: center;
+}
+
+.evolution-live-indicator {
+    font-size: 0.6rem;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+    animation: pulse-live 2s infinite;
+    font-weight: 600;
+}
+
+@keyframes pulse-live {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.evolution-cycle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.cycle-ring {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    margin-bottom: 8px;
+}
+
+.cycle-ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.cycle-ring .cycle-bg {
+    fill: none;
+    stroke: var(--glass-border);
+    stroke-width: 8;
+}
+
+.cycle-ring .cycle-fill {
+    fill: none;
+    stroke: url(#evolution-gradient);
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke-dasharray: 251.2;
+    stroke-dashoffset: 251.2;
+    transition: stroke-dashoffset 1s ease-out;
+}
+
+.cycle-value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+    text-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+
+.cycle-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.evolution-metrics {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--glass-bg);
+    border-radius: 8px;
+}
+
+.evo-metric {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.evo-icon {
+    font-size: 1.1rem;
+}
+
+.evo-value {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.evo-label {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.personality-stats {
+    margin-bottom: 12px;
+    text-align: left;
+}
+
+.personality-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    margin-bottom: 4px;
+    background: var(--glass-bg);
+    border-radius: 6px;
+    font-size: 0.75rem;
+}
+
+.personality-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.personality-meta {
+    display: flex;
+    gap: 8px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+}
+
+.personality-gen {
+    color: var(--primary);
+}
+
+.personality-interactions {
+    color: var(--success);
+}
+
+.evolution-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 8px;
+    border-top: 1px solid var(--glass-border);
+}
+
+.last-evolution {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+.action-btn.small {
+    padding: 4px 10px;
+    font-size: 0.7rem;
+}
+
+#force-evolve-btn {
+    background: linear-gradient(135deg, var(--primary), #7c3aed);
+    border: none;
+    color: white;
+}
+
+#force-evolve-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+}
+
 /* Trading Widget */
 .trading-widget {
     text-align: center;

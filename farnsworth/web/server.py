@@ -2638,7 +2638,7 @@ async def status():
             "snippets": get_snippet_manager() is not None,
             "focus_timer": get_focus_timer() is not None,
             "profiles": get_context_profiles() is not None,
-            "health": get_health_analyzer() is not None,
+            "evolution": EVOLUTION_AVAILABLE and evolution_engine is not None,
             "tools": get_tool_router() is not None,
             "thinking": get_sequential_thinking() is not None,
         },
