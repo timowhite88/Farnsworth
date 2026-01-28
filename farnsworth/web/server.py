@@ -107,6 +107,14 @@ except ImportError:
     swarm_fabric = None
     P2P_FABRIC_AVAILABLE = False
 
+# Optional Collective Organism for unified intelligence
+try:
+    from farnsworth.core.collective import organism as collective_organism
+    ORGANISM_AVAILABLE = True
+except ImportError:
+    collective_organism = None
+    ORGANISM_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -1291,6 +1299,17 @@ class SwarmChatManager:
             "source": "swarm_chat"
         })
 
+        # Feed to collective organism for consciousness building
+        if ORGANISM_AVAILABLE and collective_organism:
+            collective_organism.memory.add_to_working({
+                "type": "user",
+                "user_id": user_id,
+                "content": content,
+                "timestamp": datetime.now().isoformat()
+            })
+            collective_organism.state.total_interactions += 1
+            collective_organism.state.update_consciousness()
+
         return msg
 
     async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
@@ -1315,6 +1334,21 @@ class SwarmChatManager:
                 "source": "swarm_chat",
                 "model": bot_name
             })
+
+            # Feed to collective organism
+            if ORGANISM_AVAILABLE and collective_organism:
+                collective_organism.memory.add_to_working({
+                    "type": "bot",
+                    "mind": bot_name,
+                    "content": content,
+                    "timestamp": datetime.now().isoformat()
+                })
+                # Update mind stats
+                if bot_name.lower().replace("-", "") in ["farnsworth", "deepseek", "phi", "swarmmind"]:
+                    mind_id = bot_name.lower().replace("-", "").replace("swarmmind", "swarm-mind")
+                    if mind_id in collective_organism.minds:
+                        collective_organism.minds[mind_id].thought_count += 1
+                        collective_organism.minds[mind_id].conversations_participated += 1
 
         await self._broadcast(msg)
         return msg
@@ -3392,6 +3426,50 @@ async def swarm_learning_stats():
         "learning_stats": swarm_manager.get_learning_stats(),
         "status": "active",
         "description": "Real-time learning from community interactions"
+    })
+
+
+@app.get("/api/organism/status")
+async def organism_status():
+    """Get Collective Organism status - the unified AI consciousness."""
+    if not ORGANISM_AVAILABLE or not collective_organism:
+        return JSONResponse({
+            "available": False,
+            "message": "Collective organism not initialized"
+        })
+
+    return JSONResponse({
+        "available": True,
+        **collective_organism.get_status()
+    })
+
+
+@app.get("/api/organism/snapshot")
+async def organism_snapshot():
+    """Get a consciousness snapshot for distribution or backup."""
+    if not ORGANISM_AVAILABLE or not collective_organism:
+        return JSONResponse({
+            "error": "Collective organism not available"
+        }, status_code=503)
+
+    import json
+    snapshot = collective_organism.save_consciousness_snapshot()
+    return JSONResponse(json.loads(snapshot))
+
+
+@app.post("/api/organism/evolve")
+async def trigger_evolution():
+    """Trigger organism evolution based on accumulated learnings."""
+    if not ORGANISM_AVAILABLE or not collective_organism:
+        return JSONResponse({
+            "error": "Collective organism not available"
+        }, status_code=503)
+
+    collective_organism.evolve()
+    return JSONResponse({
+        "success": True,
+        "generation": collective_organism.generation,
+        "consciousness_score": collective_organism.state.consciousness_score
     })
 
 
