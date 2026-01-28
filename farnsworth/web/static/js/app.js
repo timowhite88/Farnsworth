@@ -1790,13 +1790,15 @@ function renderSwarmMessage(data, animate = true) {
         content = data.content;
         extraClass = 'swarm-user-msg';
     } else if (data.type === 'swarm_bot') {
-        // Bot colors and emojis
+        // Bot colors and emojis - includes all multi-model participants
         const botStyles = {
             'Farnsworth': { emoji: '🧠', color: '#8b5cf6' },
             'DeepSeek': { emoji: '🔮', color: '#3b82f6' },
             'Phi': { emoji: '⚡', color: '#10b981' },
             'Swarm-Mind': { emoji: '🐝', color: '#f59e0b' },
-            'Orchestrator': { emoji: '🎯', color: '#ec4899' }
+            'Orchestrator': { emoji: '🎯', color: '#ec4899' },
+            'Claude': { emoji: '🎭', color: '#d97706' },      // Anthropic Claude via CLI
+            'Kimi': { emoji: '🌸', color: '#f472b6' }         // Moonshot AI Kimi
         };
         const style = botStyles[data.bot_name] || { emoji: '🤖', color: '#6b7280' };
         avatar = style.emoji;
