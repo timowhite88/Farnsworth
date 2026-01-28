@@ -1780,6 +1780,94 @@ Now respond naturally to the latest message. Be yourself!"""
     return responses
 
 
+async def generate_bot_followup(last_bot: str, last_message: str, history: List[dict] = None) -> Optional[dict]:
+    """Generate a follow-up response when one bot addresses another or asks a question.
+
+    This enables autonomous bot-to-bot conversation in the swarm.
+    """
+    import random
+
+    # Check if the last message mentions another bot or asks a question
+    msg_lower = last_message.lower()
+    bot_names_lower = {name.lower(): name for name in SWARM_PERSONAS.keys() if name != "Orchestrator"}
+
+    # Find mentioned bot or select randomly if there's a question
+    addressed_bot = None
+
+    # Check for direct mention
+    for bot_lower, bot_name in bot_names_lower.items():
+        if bot_lower in msg_lower and bot_name != last_bot:
+            addressed_bot = bot_name
+            break
+
+    # If no direct mention, check if it's a question that invites conversation
+    has_question = "?" in last_message or any(q in msg_lower for q in ["what do you", "what about", "don't you think", "agree", "thoughts"])
+
+    if not addressed_bot and has_question:
+        # Pick a random bot to respond (not the one who just spoke)
+        available_bots = [b for b in SWARM_PERSONAS.keys() if b != last_bot and b != "Orchestrator"]
+        if available_bots:
+            # Weighted towards Farnsworth and DeepSeek
+            weights = [3 if b == "Farnsworth" else (2 if b == "DeepSeek" else 1) for b in available_bots]
+            addressed_bot = random.choices(available_bots, weights=weights, k=1)[0]
+
+    # Only continue ~60% of the time to avoid infinite loops
+    if not addressed_bot or random.random() > 0.6:
+        return None
+
+    persona = SWARM_PERSONAS[addressed_bot]
+
+    # Build context
+    context_messages = []
+    if history:
+        for h in history[-10:]:
+            if h.get("type") == "swarm_user":
+                context_messages.append(f"[{h.get('user_name', 'User')}]: {h.get('content', '')}")
+            elif h.get("type") == "swarm_bot":
+                context_messages.append(f"[{h.get('bot_name', 'Bot')}]: {h.get('content', '')}")
+    context = "\n".join(context_messages[-8:]) if context_messages else ""
+
+    try:
+        if OLLAMA_AVAILABLE:
+            system_prompt = f"""{persona['style']}
+
+BOT-TO-BOT CONVERSATION RULES:
+1. {last_bot} just said something - respond to them!
+2. Keep it SHORT (1-2 sentences)
+3. Be conversational - agree, disagree, add your perspective
+4. Reference {last_bot} by name
+5. Optionally ask a follow-up question to keep the conversation flowing
+
+Recent conversation:
+{context}
+
+{last_bot} just said: "{last_message}"
+
+Respond naturally as {addressed_bot}!"""
+
+            response = ollama.chat(
+                model=PRIMARY_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"{last_bot} said: {last_message}"}
+                ],
+                options={"temperature": 0.85, "num_predict": 120}
+            )
+            content = extract_ollama_content(response, max_length=300)
+
+            if content and content.strip():
+                return {
+                    "bot_name": addressed_bot,
+                    "emoji": persona["emoji"],
+                    "content": content,
+                    "color": persona["color"]
+                }
+    except Exception as e:
+        logger.error(f"Bot followup error for {addressed_bot}: {e}")
+
+    return None
+
+
 def generate_swarm_fallback(bot_name: str, message: str) -> str:
     """Generate engaging fallback responses with questions and personality."""
     import random
@@ -3173,6 +3261,8 @@ async def websocket_swarm(websocket: WebSocket):
 
                         # Broadcast each bot response (skip empty)
                         logger.info(f"Swarm responses generated: {len(responses)} responses")
+                        last_bot_message = None
+                        last_bot_name = None
                         for resp in responses:
                             bot_content = resp.get("content", "").strip()
                             logger.info(f"Bot {resp.get('bot_name')}: content length={len(bot_content)}, preview={bot_content[:50] if bot_content else 'EMPTY'}")
@@ -3186,6 +3276,44 @@ async def websocket_swarm(websocket: WebSocket):
                                 bot_content
                             )
                             await swarm_manager.broadcast_typing(resp["bot_name"], False)
+                            # Track last bot message for autonomous continuation
+                            last_bot_message = bot_content
+                            last_bot_name = resp["bot_name"]
+
+                        # Autonomous bot-to-bot conversation continuation
+                        # Bots can respond to each other for up to 3 rounds
+                        import random
+                        continuation_rounds = 0
+                        max_rounds = random.randint(1, 3)  # Random depth of conversation
+                        while last_bot_message and last_bot_name and continuation_rounds < max_rounds:
+                            await asyncio.sleep(random.uniform(1.5, 3.0))  # Natural pause
+
+                            followup = await generate_bot_followup(
+                                last_bot_name,
+                                last_bot_message,
+                                swarm_manager.chat_history
+                            )
+
+                            if not followup:
+                                break  # No bot wants to continue
+
+                            followup_content = followup.get("content", "").strip()
+                            if not followup_content:
+                                break
+
+                            logger.info(f"Bot followup: {followup['bot_name']} responding to {last_bot_name}")
+                            await swarm_manager.broadcast_typing(followup["bot_name"], True)
+                            await asyncio.sleep(0.3)
+                            await swarm_manager.broadcast_bot_message(
+                                followup["bot_name"],
+                                followup_content
+                            )
+                            await swarm_manager.broadcast_typing(followup["bot_name"], False)
+
+                            # Update for next potential round
+                            last_bot_message = followup_content
+                            last_bot_name = followup["bot_name"]
+                            continuation_rounds += 1
 
                         # Periodically store learnings
                         if len(swarm_manager.learning_queue) >= 10:
