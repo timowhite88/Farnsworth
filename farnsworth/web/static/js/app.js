@@ -91,11 +91,21 @@ async function checkTrainingMode() {
                 }
             }
 
-            // Auto-enter chat without wallet verification
-            setTimeout(() => {
-                enterChatInterface('training-user-' + Math.random().toString(36).slice(2, 8));
-                showToast('🧬 Training Mode: Help us improve Farnsworth!', 'success');
-            }, 1500);
+            // Hide wallet section, show training entry
+            const walletSection = document.getElementById('wallet-section');
+            const trainingEntry = document.getElementById('training-entry');
+
+            if (walletSection) walletSection.classList.add('hidden');
+            if (trainingEntry) trainingEntry.classList.remove('hidden');
+
+            // Setup training entry button
+            const enterBtn = document.getElementById('enter-training-btn');
+            if (enterBtn) {
+                enterBtn.addEventListener('click', () => {
+                    enterChatInterface('training-user-' + Math.random().toString(36).slice(2, 8), true);
+                    showToast('🧬 Training Mode: Help us improve Farnsworth!', 'success');
+                });
+            }
 
             return true;
         }
@@ -444,18 +454,31 @@ async function verifyToken(walletAddress) {
     }
 }
 
-function enterChatInterface(walletAddress) {
+function enterChatInterface(walletAddress, isTrainingMode = false) {
     state.wallet = walletAddress;
 
     // Hide gate, show chat
     document.getElementById('token-gate')?.classList.add('hidden');
     document.getElementById('chat-app')?.classList.remove('hidden');
 
-    // Update wallet display
+    // Handle training mode vs wallet mode
     const walletBadge = document.getElementById('connected-wallet');
-    const walletAddr = walletBadge?.querySelector('.wallet-addr');
-    if (walletAddr) {
-        walletAddr.textContent = walletAddress.slice(0, 4) + '...' + walletAddress.slice(-4);
+    const trainingIndicator = document.getElementById('training-indicator');
+
+    if (isTrainingMode) {
+        // Training mode: show training indicator, hide wallet badge
+        if (walletBadge) walletBadge.classList.add('hidden');
+        if (trainingIndicator) trainingIndicator.classList.remove('hidden');
+    } else {
+        // Wallet mode: show wallet badge, hide training indicator
+        if (walletBadge) {
+            walletBadge.classList.remove('hidden');
+            const walletAddr = walletBadge.querySelector('.wallet-addr');
+            if (walletAddr) {
+                walletAddr.textContent = walletAddress.slice(0, 4) + '...' + walletAddress.slice(-4);
+            }
+        }
+        if (trainingIndicator) trainingIndicator.classList.add('hidden');
     }
 
     // Add welcome message
