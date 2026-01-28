@@ -3624,6 +3624,84 @@ async def orchestrator_status():
     })
 
 
+@app.get("/api/evolution/status")
+async def evolution_status():
+    """Get Evolution Engine status - code-level learning from interactions."""
+    if not EVOLUTION_AVAILABLE or not evolution_engine:
+        return JSONResponse({
+            "available": False,
+            "message": "Evolution engine not initialized"
+        })
+
+    return JSONResponse({
+        "available": True,
+        **evolution_engine.get_stats()
+    })
+
+
+@app.get("/api/evolution/sync")
+async def evolution_sync():
+    """
+    Export evolution data for local installs to sync.
+
+    Local Farnsworth instances can call this to download:
+    - Learned conversation patterns
+    - Evolved personality traits
+    - Debate strategies that worked
+    """
+    if not EVOLUTION_AVAILABLE or not evolution_engine:
+        return JSONResponse({
+            "error": "Evolution engine not available"
+        }, status_code=503)
+
+    import json
+    from pathlib import Path
+
+    sync_data = {
+        "version": 1,
+        "timestamp": datetime.now().isoformat(),
+        "evolution_cycles": evolution_engine.evolution_cycles,
+        "patterns": [
+            {
+                "pattern_id": p.pattern_id,
+                "trigger_phrases": p.trigger_phrases,
+                "successful_responses": p.successful_responses,
+                "debate_strategies": p.debate_strategies,
+                "topic_associations": p.topic_associations,
+                "effectiveness_score": p.effectiveness_score
+            }
+            for p in list(evolution_engine.patterns.values())[-50:]  # Last 50 patterns
+        ],
+        "personalities": {
+            name: {
+                "traits": p.traits,
+                "learned_phrases": p.learned_phrases[-20:],  # Last 20 phrases
+                "debate_style": p.debate_style,
+                "topic_expertise": dict(list(p.topic_expertise.items())[:10]),
+                "evolution_generation": p.evolution_generation
+            }
+            for name, p in evolution_engine.personalities.items()
+        }
+    }
+
+    return JSONResponse(sync_data)
+
+
+@app.post("/api/evolution/evolve")
+async def trigger_evolution():
+    """Trigger an evolution cycle to improve patterns and personalities."""
+    if not EVOLUTION_AVAILABLE or not evolution_engine:
+        return JSONResponse({
+            "error": "Evolution engine not available"
+        }, status_code=503)
+
+    result = evolution_engine.evolve()
+    return JSONResponse({
+        "success": True,
+        **result
+    })
+
+
 @app.post("/api/swarm/learn")
 async def trigger_learning():
     """Force a learning cycle to process buffered interactions."""
