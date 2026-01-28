@@ -8,8 +8,6 @@
 // ============================================
 
 const state = {
-    wallet: null,
-    verified: false,
     voiceEnabled: true,
     sidebarOpen: {
         left: window.innerWidth > 992,
@@ -47,9 +45,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initApp() {
-    // Check training mode first
-    await checkTrainingMode();
-
     // Check server status
     await checkServerStatus();
 
@@ -67,52 +62,12 @@ async function initApp() {
     loadSnippets();
     loadHealthSummary();
 
-    // Check for existing wallet connection
-    checkExistingWallet();
-}
+    // Show welcome message
+    addWelcomeMessage();
 
-// ============================================
-// TRAINING MODE
-// ============================================
-
-async function checkTrainingMode() {
-    try {
-        const response = await fetch('/api/training-status');
-        const data = await response.json();
-
-        if (data.training_mode) {
-            // Show training banner
-            const banner = document.getElementById('training-banner');
-            if (banner) {
-                banner.classList.add('active');
-                const timer = document.getElementById('training-timer');
-                if (timer && data.remaining) {
-                    timer.textContent = `(${data.remaining} remaining)`;
-                }
-            }
-
-            // Hide wallet section, show training entry
-            const walletSection = document.getElementById('wallet-section');
-            const trainingEntry = document.getElementById('training-entry');
-
-            if (walletSection) walletSection.classList.add('hidden');
-            if (trainingEntry) trainingEntry.classList.remove('hidden');
-
-            // Setup training entry button
-            const enterBtn = document.getElementById('enter-training-btn');
-            if (enterBtn) {
-                enterBtn.addEventListener('click', () => {
-                    enterChatInterface('training-user-' + Math.random().toString(36).slice(2, 8), true);
-                    showToast('🧬 Training Mode: Help us improve Farnsworth!', 'success');
-                });
-            }
-
-            return true;
-        }
-    } catch (error) {
-        console.log('Training mode check failed:', error);
-    }
-    return false;
+    // Focus the input field
+    const input = document.getElementById('user-input');
+    if (input) input.focus();
 }
 
 // ============================================
@@ -249,12 +204,6 @@ function handleWebSocketMessage(data) {
 // ============================================
 
 function setupEventListeners() {
-    // Connect button
-    const connectBtn = document.getElementById('connect-btn');
-    if (connectBtn) {
-        connectBtn.addEventListener('click', connectWallet);
-    }
-
     // Chat input
     const userInput = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
@@ -376,131 +325,6 @@ function autoResizeTextarea(textarea) {
 }
 
 // ============================================
-// WALLET CONNECTION
-// ============================================
-
-async function checkExistingWallet() {
-    // Check if Phantom is available and already connected
-    if (window.solana?.isPhantom && window.solana.isConnected) {
-        try {
-            const publicKey = window.solana.publicKey?.toString();
-            if (publicKey) {
-                await verifyToken(publicKey);
-            }
-        } catch (error) {
-            console.log('No existing wallet connection');
-        }
-    }
-}
-
-async function connectWallet() {
-    const statusEl = document.getElementById('wallet-status');
-    const statusText = statusEl?.querySelector('.status-text');
-
-    try {
-        // Check if Phantom is installed
-        if (!window.solana?.isPhantom) {
-            // Demo mode - bypass wallet
-            if (statusEl) statusEl.classList.remove('hidden');
-            if (statusText) statusText.textContent = 'Demo mode - entering without wallet...';
-
-            setTimeout(() => {
-                enterChatInterface('demo-wallet');
-            }, 1000);
-            return;
-        }
-
-        if (statusEl) statusEl.classList.remove('hidden');
-        if (statusText) statusText.textContent = 'Connecting to Phantom...';
-
-        const response = await window.solana.connect();
-        const publicKey = response.publicKey.toString();
-
-        if (statusText) statusText.textContent = 'Verifying token balance...';
-        await verifyToken(publicKey);
-
-    } catch (error) {
-        console.error('Wallet connection error:', error);
-        if (statusText) statusText.textContent = 'Connection failed. Entering demo mode...';
-
-        setTimeout(() => {
-            enterChatInterface('demo-wallet');
-        }, 1500);
-    }
-}
-
-async function verifyToken(walletAddress) {
-    try {
-        const response = await fetch('/api/verify-token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ wallet_address: walletAddress })
-        });
-
-        const data = await response.json();
-
-        if (data.verified || data.demo_mode) {
-            state.wallet = walletAddress;
-            state.verified = true;
-            enterChatInterface(walletAddress);
-        } else {
-            showToast('Insufficient token balance', 'error');
-            document.getElementById('wallet-status')?.classList.add('hidden');
-        }
-    } catch (error) {
-        console.error('Token verification error:', error);
-        // Enter demo mode on error
-        enterChatInterface(walletAddress);
-    }
-}
-
-function enterChatInterface(walletAddress, isTrainingMode = false) {
-    state.wallet = walletAddress;
-
-    // Hide gate, show chat
-    document.getElementById('token-gate')?.classList.add('hidden');
-    document.getElementById('chat-app')?.classList.remove('hidden');
-
-    // Handle training mode vs wallet mode
-    const walletBadge = document.getElementById('connected-wallet');
-    const trainingIndicator = document.getElementById('training-indicator');
-
-    if (isTrainingMode) {
-        // Training mode: show training indicator, hide wallet badge
-        if (walletBadge) walletBadge.classList.add('hidden');
-        if (trainingIndicator) trainingIndicator.classList.remove('hidden');
-    } else {
-        // Wallet mode: show wallet badge, hide training indicator
-        if (walletBadge) {
-            walletBadge.classList.remove('hidden');
-            const walletAddr = walletBadge.querySelector('.wallet-addr');
-            if (walletAddr) {
-                walletAddr.textContent = walletAddress.slice(0, 4) + '...' + walletAddress.slice(-4);
-            }
-        }
-        if (trainingIndicator) trainingIndicator.classList.add('hidden');
-    }
-
-    // Add welcome message
-    addWelcomeMessage();
-}
-
-function disconnectWallet() {
-    state.wallet = null;
-    state.verified = false;
-
-    // Disconnect Phantom if connected
-    if (window.solana?.isPhantom) {
-        window.solana.disconnect();
-    }
-
-    // Show gate, hide chat
-    document.getElementById('token-gate')?.classList.remove('hidden');
-    document.getElementById('chat-app')?.classList.add('hidden');
-    document.getElementById('wallet-status')?.classList.add('hidden');
-}
-
-// ============================================
 // CHAT FUNCTIONALITY
 // ============================================
 
@@ -509,21 +333,9 @@ function addWelcomeMessage() {
     if (!messagesContainer) return;
     messagesContainer.innerHTML = '';
 
-    // Check if training mode
-    const isTraining = document.getElementById('training-banner')?.classList.contains('active');
-
-    const trainingIntro = isTraining ? `
-🧬 **TRAINING MODE ACTIVE** - Thank you for helping train me!
-
-Your conversations will help improve my responses for everyone. Try the **🐝 Swarm Chat** for community training!
-
----
-
-` : '';
-
     const welcomeMsg = `Good news, everyone! *adjusts spectacles*
 
-${trainingIntro}Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, your AI companion with FULL LOCAL FEATURES!
+Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, your AI companion with FULL LOCAL FEATURES!
 
 **What you can do right now:**
 - 💾 **Memory** - Store and recall information
@@ -533,7 +345,7 @@ ${trainingIntro}Welcome to my Neural Interface v3.0! I'm Professor Farnsworth, y
 - 🎭 **Profiles** - Switch my personality
 - 🏥 **Health** - Track your wellness
 - 🤔 **Thinking** - Step-by-step reasoning
-${isTraining ? '- 🐝 **Swarm Chat** - Train with the community!' : ''}
+- 🐝 **Swarm Chat** - Chat with the community!
 
 **🪙 Crypto Tools - Just Ask Naturally:**
 - "What's the price of SOL?" or "Check $BONK"
@@ -630,7 +442,6 @@ async function sendMessage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: message,
-                wallet: state.wallet,
                 history: state.chatHistory.slice(-10)
             })
         });
@@ -1710,10 +1521,7 @@ function connectSwarmChat() {
 
         state.swarmWs.onopen = () => {
             // Send identification
-            const userName = state.wallet ?
-                `User_${state.wallet.slice(0, 6)}` :
-                `Anon_${Math.random().toString(36).slice(2, 8)}`;
-
+            const userName = `User_${Math.random().toString(36).slice(2, 8)}`;
             state.swarmUserName = userName;
             state.swarmWs.send(JSON.stringify({
                 type: 'identify',

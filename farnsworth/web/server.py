@@ -248,8 +248,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-REQUIRED_TOKEN = os.getenv("FARNSWORTH_REQUIRED_TOKEN", "9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS")
-MIN_TOKEN_BALANCE = int(os.getenv("FARNSWORTH_MIN_TOKEN_BALANCE", "1"))
 SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 PRIMARY_MODEL = os.getenv("FARNSWORTH_PRIMARY_MODEL", "llama3.2:3b")
@@ -278,30 +276,6 @@ def extract_ollama_content(response, max_length: int = 500) -> str:
         logger.error(f"Error extracting Ollama content: {e}")
         return ""
 
-
-# ============================================
-# TRAINING MODE - Open access for 12 hours
-# ============================================
-TRAINING_MODE = True  # SET TO FALSE AFTER 12 HOURS
-TRAINING_MODE_START = datetime(2026, 1, 27, 20, 45)  # When training mode started
-TRAINING_MODE_DURATION_HOURS = 12
-
-def is_training_mode_active() -> bool:
-    """Check if training mode is still active (12 hour window)."""
-    if not TRAINING_MODE:
-        return False
-    elapsed = datetime.now() - TRAINING_MODE_START
-    return elapsed.total_seconds() < (TRAINING_MODE_DURATION_HOURS * 3600)
-
-def get_training_mode_remaining() -> str:
-    """Get remaining time in training mode."""
-    if not is_training_mode_active():
-        return "0h 0m"
-    elapsed = datetime.now() - TRAINING_MODE_START
-    remaining_seconds = (TRAINING_MODE_DURATION_HOURS * 3600) - elapsed.total_seconds()
-    hours = int(remaining_seconds // 3600)
-    minutes = int((remaining_seconds % 3600) // 60)
-    return f"{hours}h {minutes}m"
 
 # ============================================
 # SECURITY: Blocked patterns for chat input
@@ -775,11 +749,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 class ChatRequest(BaseModel):
     message: str
-    wallet: Optional[str] = None
     history: Optional[list] = None
-
-class TokenVerifyRequest(BaseModel):
-    wallet_address: str
 
 class MemoryRequest(BaseModel):
     content: str
@@ -1897,30 +1867,6 @@ if SOLANA_AVAILABLE and not DEMO_MODE:
         logger.warning(f"Failed to connect to Solana: {e}")
 
 
-def get_token_balance(wallet_address: str) -> int:
-    """Get SPL token balance for a wallet."""
-    if not SOLANA_AVAILABLE or not solana_client:
-        return 1  # Demo mode
-
-    try:
-        wallet_pubkey = Pubkey.from_string(wallet_address)
-        token_pubkey = Pubkey.from_string(REQUIRED_TOKEN)
-
-        response = solana_client.get_token_accounts_by_owner(
-            wallet_pubkey,
-            {"mint": token_pubkey}
-        )
-
-        if response.value:
-            return 1  # Has tokens
-
-        return 0
-
-    except Exception as e:
-        logger.error(f"Error checking token balance: {e}")
-        return 0 if not DEMO_MODE else 1
-
-
 FARNSWORTH_PERSONA = """You are Professor Farnsworth, an eccentric genius inventor and AI companion. You speak like the beloved scientist from Futurama - brilliant but delightfully absent-minded, prone to tangents, and full of wild enthusiasm for your inventions.
 
 PERSONALITY TRAITS:
@@ -2148,7 +2094,6 @@ async def chat(request: ChatRequest):
                     "response": response,
                     "demo_mode": DEMO_MODE,
                     "features_available": True,
-                    "training_mode": is_training_mode_active(),
                     "tool_used": tool_result['tool_used'],
                     "crypto_query": True
                 })
@@ -2162,57 +2107,12 @@ async def chat(request: ChatRequest):
         return JSONResponse({
             "response": response,
             "demo_mode": DEMO_MODE,
-            "features_available": True,
-            "training_mode": is_training_mode_active()
+            "features_available": True
         })
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/verify-token")
-async def verify_token(request: TokenVerifyRequest):
-    """Verify wallet holds required token."""
-    try:
-        # Training mode - open access for community training
-        if is_training_mode_active():
-            return JSONResponse({
-                "verified": True,
-                "balance": 1,
-                "training_mode": True,
-                "training_remaining": get_training_mode_remaining(),
-                "message": "🧬 Training Mode Active - Help us train Farnsworth!"
-            })
-
-        if DEMO_MODE:
-            return JSONResponse({
-                "verified": True,
-                "balance": 1,
-                "demo_mode": True
-            })
-
-        balance = get_token_balance(request.wallet_address)
-
-        return JSONResponse({
-            "verified": balance >= MIN_TOKEN_BALANCE,
-            "balance": balance,
-            "required": MIN_TOKEN_BALANCE
-        })
-
-    except Exception as e:
-        logger.error(f"Token verification error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/training-status")
-async def training_status():
-    """Get training mode status."""
-    return JSONResponse({
-        "training_mode": is_training_mode_active(),
-        "remaining": get_training_mode_remaining() if is_training_mode_active() else None,
-        "message": "Help train Farnsworth! Your conversations improve our AI." if is_training_mode_active() else "Training mode inactive"
-    })
 
 
 @app.get("/api/status")

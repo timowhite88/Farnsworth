@@ -51,128 +51,8 @@
         <canvas id="neural-canvas"></canvas>
     </div>
 
-    <!-- Training Mode Banner -->
-    <div id="training-banner" class="training-banner">
-        <div class="training-content">
-            <span class="training-icon">🧬</span>
-            <div class="training-text">
-                <strong>TRAINING MODE ACTIVE</strong>
-                <span>Help train Farnsworth! Your conversations improve our AI. <span id="training-timer"></span></span>
-            </div>
-            <span class="training-pulse"></span>
-        </div>
-    </div>
-
-    <!-- Token Gate (Hidden during Training Mode) -->
-    <section id="token-gate" class="gate-section">
-        <div class="gate-container">
-            <div class="consciousness-orb">
-                <div class="orb-core"></div>
-                <div class="orb-ring ring-1"></div>
-                <div class="orb-ring ring-2"></div>
-                <div class="orb-ring ring-3"></div>
-            </div>
-
-            <div class="gate-content glass-panel">
-                <div class="gate-header">
-                    <span class="gate-label">NEURAL INTERFACE v3.0</span>
-                    <h1 class="gate-title">
-                        <span class="title-glow">Farnsworth</span>
-                        <span class="title-sub">Companion AI</span>
-                    </h1>
-                </div>
-
-                <div class="gate-body">
-                    <!-- Feature Introduction -->
-                    <div class="feature-intro">
-                        <p class="intro-text">Your intelligent AI companion with:</p>
-                        <div class="intro-features">
-                            <span class="intro-item" title="Long-term memory that persists across sessions">💾 Persistent Memory</span>
-                            <span class="intro-item" title="Community chat with multiple AI models">🐝 Swarm Chat</span>
-                            <span class="intro-item" title="Real-time Solana token analysis">📊 Token Analysis</span>
-                            <span class="intro-item" title="Step-by-step reasoning visualization">🤔 Deep Thinking</span>
-                        </div>
-                    </div>
-
-                    <!-- Wallet Section - Hidden During Training -->
-                    <div id="wallet-section" class="wallet-connect-section">
-                        <div class="access-badge">
-                            <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            <span>Token-Gated Access</span>
-                        </div>
-
-                        <p class="gate-description">
-                            Connect your Solana wallet to verify token holdings and access the neural interface.
-                        </p>
-
-                        <div class="token-display">
-                            <div class="token-header">
-                                <span class="token-label">Required Token</span>
-                                <span class="token-amount">Min: 1</span>
-                            </div>
-                            <div class="token-address-box">
-                                <code id="token-addr">9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS</code>
-                                <button class="copy-btn" onclick="copyToken()" title="Copy token address to clipboard">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-
-                        <button id="connect-btn" class="connect-button">
-                            <span class="btn-content">
-                                <span class="phantom-icon">👻</span>
-                                <span>Connect Phantom</span>
-                            </span>
-                            <span class="btn-shimmer"></span>
-                        </button>
-
-                        <div id="wallet-status" class="wallet-status hidden">
-                            <div class="status-spinner"></div>
-                            <span class="status-text">Verifying token balance...</span>
-                        </div>
-                    </div>
-
-                    <!-- Training Mode Entry - Shown During Training -->
-                    <div id="training-entry" class="training-entry-section hidden">
-                        <div class="training-badge">
-                            <span class="training-icon-large">🧬</span>
-                            <span>Training Mode Active</span>
-                        </div>
-                        <p class="training-description">
-                            Help train Farnsworth! Your conversations improve our AI for everyone.
-                            No wallet required during training.
-                        </p>
-                        <button id="enter-training-btn" class="connect-button training-btn">
-                            <span class="btn-content">
-                                <span class="phantom-icon">🚀</span>
-                                <span>Enter Training Mode</span>
-                            </span>
-                            <span class="btn-shimmer"></span>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="gate-footer">
-                    <div class="demo-notice">
-                        <span class="notice-icon">✨</span>
-                        <p>
-                            <strong>Full Feature Interface</strong><br>
-                            Memory, Notes, Health, Focus Timer, Swarm Chat, and more!
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <!-- Main Application Interface -->
-    <section id="chat-app" class="chat-section hidden">
+    <section id="chat-app" class="chat-section">
         <!-- Header -->
         <header class="app-header glass-panel">
             <div class="header-left">
@@ -220,18 +100,6 @@
             </div>
 
             <div class="header-right">
-                <!-- Wallet Badge - Hidden during training mode -->
-                <div class="wallet-badge hidden" id="connected-wallet">
-                    <span class="wallet-addr"></span>
-                    <button class="disconnect-btn" onclick="disconnectWallet()" title="Disconnect wallet">✕</button>
-                </div>
-
-                <!-- Training Mode Indicator -->
-                <div class="training-indicator hidden" id="training-indicator" title="Training mode active - your chats help improve the AI">
-                    <span class="training-dot"></span>
-                    <span>Training</span>
-                </div>
-
                 <button id="voice-toggle" class="control-btn active" title="Toggle voice output - AI will speak responses aloud">
                     <span class="voice-on">🔊</span>
                     <span class="voice-off">🔇</span>
