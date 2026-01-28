@@ -2949,6 +2949,7 @@ async def websocket_swarm(websocket: WebSocket):
 
                 elif data.get("type") == "swarm_message":
                     content = data.get("content", "").strip()
+                    logger.info(f"Swarm message received from {user_name}: '{content[:100] if content else 'EMPTY'}'")
                     if content:
                         # Security: Validate input is safe
                         is_safe, error_msg = is_safe_input(content)
