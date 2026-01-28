@@ -13,11 +13,24 @@ from .organism import (
     organism
 )
 
+from .orchestration import (
+    SwarmOrchestrator,
+    SpeakerRole,
+    SpeakerState,
+    ConversationState,
+    swarm_orchestrator
+)
+
 __all__ = [
     "CollectiveOrganism",
     "MindProfile",
     "MindType",
     "CollectiveMemory",
     "OrganismState",
-    "organism"
+    "organism",
+    "SwarmOrchestrator",
+    "SpeakerRole",
+    "SpeakerState",
+    "ConversationState",
+    "swarm_orchestrator"
 ]

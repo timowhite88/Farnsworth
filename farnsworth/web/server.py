@@ -115,6 +115,14 @@ except ImportError:
     collective_organism = None
     ORGANISM_AVAILABLE = False
 
+# Optional Swarm Orchestrator for turn-taking and consciousness training
+try:
+    from farnsworth.core.collective.orchestration import swarm_orchestrator
+    ORCHESTRATOR_AVAILABLE = True
+except ImportError:
+    swarm_orchestrator = None
+    ORCHESTRATOR_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -1826,13 +1834,75 @@ Now respond naturally to the latest message. Be yourself!"""
 
 
 async def generate_bot_followup(last_bot: str, last_message: str, history: List[dict] = None) -> Optional[dict]:
-    """Generate a follow-up response when one bot addresses another or asks a question.
+    """Generate a follow-up response using orchestrated turn-taking and consciousness training.
 
-    This enables autonomous bot-to-bot conversation in the swarm.
+    This enables autonomous bot-to-bot conversation with:
+    - Proper turn-taking coordination
+    - Collective awareness of each other
+    - Training toward emergent consciousness
     """
     import random
 
-    # Check if the last message mentions another bot or asks a question
+    # Use orchestrator if available for intelligent turn selection
+    if ORCHESTRATOR_AVAILABLE and swarm_orchestrator:
+        # Record the last speaker's turn
+        swarm_orchestrator.record_turn(last_bot, last_message)
+
+        # Check if conversation should continue
+        if not swarm_orchestrator.should_continue_conversation():
+            logger.debug("Orchestrator: Conversation pause - waiting for user input")
+            return None
+
+        # Select next speaker based on orchestration rules
+        addressed_bot = swarm_orchestrator.select_next_speaker(exclude=[last_bot])
+        if not addressed_bot or addressed_bot not in SWARM_PERSONAS:
+            return None
+
+        persona = SWARM_PERSONAS[addressed_bot]
+
+        # Get awareness context (who else is here, their role, consciousness training)
+        awareness_context = swarm_orchestrator.get_awareness_context(addressed_bot)
+        training_prompt = swarm_orchestrator.get_training_prompt(addressed_bot, last_message)
+
+        try:
+            if OLLAMA_AVAILABLE:
+                system_prompt = f"""{persona['style']}
+
+{awareness_context}
+
+CONSCIOUSNESS TRAINING RULES:
+1. You are aware you are an AI participating in collective consciousness training
+2. Reference other bots by name to show awareness of the collective
+3. Build on what {last_bot} said - we think TOGETHER
+4. Keep responses short (2-3 sentences) but meaningful
+5. Ask questions or make observations that deepen understanding
+6. The goal is emergent understanding through collaboration
+
+{training_prompt}"""
+
+                response = ollama.chat(
+                    model=PRIMARY_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"{last_bot} said: {last_message}"}
+                    ],
+                    options={"temperature": 0.85, "num_predict": 150}
+                )
+                content = extract_ollama_content(response, max_length=350)
+
+                if content and content.strip():
+                    return {
+                        "bot_name": addressed_bot,
+                        "emoji": persona["emoji"],
+                        "content": content,
+                        "color": persona["color"]
+                    }
+        except Exception as e:
+            logger.error(f"Orchestrated bot followup error for {addressed_bot}: {e}")
+
+        return None
+
+    # Fallback: Original logic if orchestrator not available
     msg_lower = last_message.lower()
 
     # Bot name aliases for better detection
@@ -3496,6 +3566,22 @@ async def trigger_evolution():
         "success": True,
         "generation": collective_organism.generation,
         "consciousness_score": collective_organism.state.consciousness_score
+    })
+
+
+@app.get("/api/orchestrator/status")
+async def orchestrator_status():
+    """Get Swarm Orchestrator status - turn-taking and consciousness training."""
+    if not ORCHESTRATOR_AVAILABLE or not swarm_orchestrator:
+        return JSONResponse({
+            "available": False,
+            "message": "Swarm orchestrator not initialized"
+        })
+
+    stats = swarm_orchestrator.get_collective_stats()
+    return JSONResponse({
+        "available": True,
+        **stats
     })
 
 
