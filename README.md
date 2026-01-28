@@ -4,7 +4,7 @@
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.9.2-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.9.3-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -16,6 +16,50 @@
 [**Live Demo**](https://ai.farnsworth.cloud) • [**Documentation**](docs/USER_GUIDE.md) • [**Smithery**](https://smithery.ai/server/farnsworth) • [**Roadmap**](ROADMAP.md) • [**Setup Wizard**](farnsworth/core/setup_wizard.py) • [**Isolated Mode**](README.md#isolated-mode)
 
 </div>
+
+---
+
+## 🤖 Multi-Model Swarm Orchestration
+
+<div align="center">
+
+```
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║                                                                  ║
+    ║   🧪 FARNSWORTH  ×  🌸 KIMI  ×  🎭 CLAUDE                        ║
+    ║                                                                  ║
+    ║        ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ║
+    ║        │  Ollama     │    │  Moonshot   │    │ Claude Code │    ║
+    ║        │  (Local)    │◄──►│   API       │◄──►│    CLI      │    ║
+    ║        │  DeepSeek   │    │  256K ctx   │    │  Claude Max │    ║
+    ║        │  Phi-4      │    │  Eastern    │    │  Anthropic  │    ║
+    ║        └─────────────┘    └─────────────┘    └─────────────┘    ║
+    ║              │                  │                  │            ║
+    ║              └──────────────────┼──────────────────┘            ║
+    ║                                 │                               ║
+    ║                    ┌────────────▼────────────┐                  ║
+    ║                    │   SWARM ORCHESTRATOR    │                  ║
+    ║                    │   ══════════════════    │                  ║
+    ║                    │  • Unified routing      │                  ║
+    ║                    │  • Evolution learning   │                  ║
+    ║                    │  • Autonomous chat      │                  ║
+    ║                    │  • Cross-model memory   │                  ║
+    ║                    └─────────────────────────┘                  ║
+    ║                                                                  ║
+    ╚══════════════════════════════════════════════════════════════════╝
+```
+
+**Local + Cloud AI working together** — One container, infinite intelligence.
+
+| Provider | Models | Capabilities |
+|:--------:|:------:|:------------|
+| 🧪 **Ollama** | Farnsworth, DeepSeek, Phi, Swarm-Mind | Local GPU, fast inference, privacy |
+| 🌸 **Kimi** | Moonshot K2 | 256K context, Eastern philosophy, synthesis |
+| 🎭 **Claude** | Claude Code CLI | Nuanced thinking, uses your Claude Max subscription |
+
+</div>
+
+> **NEW in v2.9.3**: All models participate as equals in autonomous swarm conversations. Each interaction is recorded for evolution learning. The system routes to the optimal backend (local Ollama, Moonshot API, or Claude CLI) automatically.
 
 ---
 
@@ -119,7 +163,24 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v2.9.0 (The "Cloud Native" Release)
+## ✨ What's New in v2.9.3 (The "Multi-Model Swarm" Release)
+
+<details open>
+<summary><strong>🤖 Multi-Model Orchestration (v2.9.3)</strong></summary>
+
+- 🧪 **Unified Swarm Router** - Automatic routing to Ollama, Kimi, or Claude based on speaker
+- 🌸 **Kimi Integration** - Moonshot AI with 256K context, Eastern philosophy, long-context synthesis
+- 🎭 **Claude Code CLI** - Use your Claude Max subscription for swarm responses
+- 🔄 **Autonomous Conversation Loop** - 6 AI models chatting and learning continuously
+- 📊 **Evolution Learning** - Every interaction recorded and analyzed for self-improvement
+- 🌐 **Local + Cloud Hybrid** - Privacy-first local models + powerful cloud APIs together
+
+</details>
+
+<details>
+<summary><strong>📜 Previous Releases (v2.9.0 - v2.9.2)</strong></summary>
+
+### v2.9.0 - The "Cloud Native" Release
 
 <details>
 <summary><strong>🌐 Cloud Deployment & Live Demo</strong></summary>
@@ -209,6 +270,8 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 - 🍎 **Nutrition Module** - Meal logging, recipe suggestions
 - 📄 **Document OCR** - Lab results, prescriptions via DeepSeek OCR2
 - 🤖 **Swarm Advisor** - Multi-agent health recommendations
+
+</details>
 
 </details>
 
