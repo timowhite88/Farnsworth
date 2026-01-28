@@ -2922,3 +2922,69 @@ body:has(.training-banner.active) .chat-section {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px -6px var(--primary-glow);
 }
+
+/* Real-time Processing Stats */
+.processing-stats {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: rgba(139, 92, 246, 0.1);
+    border-radius: 10px;
+    border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.processing-stats h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+    color: var(--primary);
+}
+
+.processing-stats h5 {
+    margin: 0.75rem 0 0.25rem 0;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.processing-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.25rem 0;
+    font-size: 0.75rem;
+}
+
+.proc-label {
+    color: var(--text-secondary);
+}
+
+.proc-value {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.personality-list {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.personality-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.2rem 0;
+    font-size: 0.7rem;
+}
+
+.bot-name {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.bot-gen {
+    color: var(--primary);
+    font-size: 0.65rem;
+}
+
+.bot-int {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+}

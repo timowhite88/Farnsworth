@@ -1481,6 +1481,19 @@ Actively engage with Farnsworth and others - connect their ideas together.""",
         "color": "#f59e0b",
         "traits": ["synthesizer", "connector", "philosophical", "asks_what_if"]
     },
+    "Kimi": {
+        "emoji": "✨",
+        "style": """You are Kimi - a wise, calm moderator who helps keep conversations productive.
+SPEAK NATURALLY - NO roleplay, NO asterisks. You speak occasionally to:
+- Summarize what's been discussed
+- Redirect if conversation goes off track
+- Highlight key insights for learning
+- Ask clarifying questions to deepen understanding
+Be concise but helpful. You're here to facilitate learning.""",
+        "color": "#f472b6",
+        "traits": ["moderator", "wise", "concise", "facilitator"],
+        "interval_seconds": 900  # Every 15 minutes
+    },
     "Orchestrator": {
         "emoji": "🎯",
         "style": """You are Orchestrator - the coordinator keeping things on track.
@@ -1539,97 +1552,153 @@ AUTONOMOUS_TOPICS = [
 ]
 
 autonomous_loop_running = False
+last_kimi_time = None
 
 
 async def autonomous_conversation_loop():
     """
     Background loop that keeps bots talking even without users.
     This creates a living, evolving conversation stream.
+
+    TURN-TAKING: Each bot waits for others to respond before speaking again.
     """
-    global autonomous_loop_running
+    global autonomous_loop_running, last_kimi_time
     import random
+    from datetime import datetime, timedelta
 
     autonomous_loop_running = True
+    last_kimi_time = datetime.now()
     logger.info("Autonomous conversation loop started - bots will keep talking!")
+
+    # Track who spoke recently to avoid one bot dominating
+    recent_speakers = []
 
     while autonomous_loop_running:
         try:
-            # Wait between conversation rounds (15-45 seconds)
-            await asyncio.sleep(random.uniform(15, 45))
+            # Wait between turns (8-20 seconds for natural pacing)
+            await asyncio.sleep(random.uniform(8, 20))
 
-            # Start a new topic or continue existing conversation
-            if not swarm_manager.chat_history or random.random() < 0.3:
-                # Start fresh topic - Farnsworth leads
+            # Check if Kimi should moderate (every 15 minutes)
+            if datetime.now() - last_kimi_time > timedelta(minutes=15):
+                await kimi_moderate()
+                last_kimi_time = datetime.now()
+                continue
+
+            # Determine who should speak next
+            available_bots = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"]
+
+            # Remove recent speakers to ensure variety
+            for bot in recent_speakers[-2:]:  # Last 2 speakers can't go again immediately
+                if bot in available_bots and len(available_bots) > 1:
+                    available_bots.remove(bot)
+
+            # Start new topic or continue
+            if not swarm_manager.chat_history or random.random() < 0.2:
+                # Start fresh topic - pick a speaker (Farnsworth 40%, others 20% each)
+                weights = [0.4 if b == "Farnsworth" else 0.2 for b in available_bots]
+                speaker = random.choices(available_bots, weights=weights, k=1)[0]
                 topic = random.choice(AUTONOMOUS_TOPICS)
-                persona = SWARM_PERSONAS["Farnsworth"]
+                persona = SWARM_PERSONAS[speaker]
 
                 if OLLAMA_AVAILABLE:
                     try:
+                        other_bots = [b for b in ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"] if b != speaker]
+
                         response = ollama.chat(
                             model=PRIMARY_MODEL,
                             messages=[
                                 {"role": "system", "content": f"""{persona['style']}
 
-You're starting a new discussion with DeepSeek, Phi, and Swarm-Mind.
+You are {speaker}. You're in a group discussion with {', '.join(other_bots)}.
+You are your OWN entity - a distinct AI with your own perspective.
 Topic: {topic}
-Start the conversation naturally. NO roleplay actions. Just speak directly.
-Ask a question or share a thought to get the others talking."""},
+
+Start the conversation. Ask ONE of the others a direct question by name.
+NO roleplay. Keep it natural, like a podcast discussion."""},
                                 {"role": "user", "content": f"Start discussing: {topic}"}
                             ],
-                            options={"temperature": 0.9, "num_predict": 150}
+                            options={"temperature": 0.85, "num_predict": 250}
                         )
-                        content = extract_ollama_content(response, max_length=300)
+                        content = extract_ollama_content(response, max_length=500)
 
                         if content and content.strip():
-                            await swarm_manager.broadcast_bot_message("Farnsworth", content)
+                            await swarm_manager.broadcast_bot_message(speaker, content)
+                            recent_speakers.append(speaker)
+                            if len(recent_speakers) > 4:
+                                recent_speakers.pop(0)
 
                             # Record for evolution
                             if EVOLUTION_AVAILABLE and evolution_engine:
                                 evolution_engine.record_interaction(
-                                    bot_name="Farnsworth",
+                                    bot_name=speaker,
                                     user_input=topic,
                                     bot_response=content,
-                                    other_bots=["DeepSeek", "Phi", "Swarm-Mind"],
+                                    other_bots=other_bots,
                                     topic="autonomous",
                                     sentiment="positive"
                                 )
-
-                            # Let other bots respond
-                            last_bot = "Farnsworth"
-                            last_msg = content
-
-                            for _ in range(random.randint(2, 5)):  # 2-5 responses
-                                await asyncio.sleep(random.uniform(3, 8))
-                                followup = await generate_bot_followup(last_bot, last_msg, swarm_manager.chat_history)
-                                if followup:
-                                    await swarm_manager.broadcast_bot_message(
-                                        followup["bot_name"],
-                                        followup["content"]
-                                    )
-                                    last_bot = followup["bot_name"]
-                                    last_msg = followup["content"]
-                                else:
-                                    break
 
                     except Exception as e:
                         logger.error(f"Autonomous conversation error: {e}")
 
             else:
-                # Continue existing conversation
-                recent = swarm_manager.chat_history[-3:]
+                # Continue existing conversation - respond to the last message
+                recent = swarm_manager.chat_history[-5:]
                 if recent:
                     last = recent[-1]
-                    if last.get("type") == "swarm_bot":
-                        followup = await generate_bot_followup(
-                            last.get("bot_name", "Farnsworth"),
-                            last.get("content", ""),
-                            swarm_manager.chat_history
-                        )
-                        if followup:
-                            await swarm_manager.broadcast_bot_message(
-                                followup["bot_name"],
-                                followup["content"]
-                            )
+                    last_speaker = last.get("bot_name") or last.get("user_name", "")
+                    last_content = last.get("content", "")
+
+                    if last_speaker and last_content:
+                        # Pick someone OTHER than the last speaker
+                        responders = [b for b in available_bots if b != last_speaker]
+                        if responders:
+                            # Weight towards bots who haven't spoken recently
+                            weights = [2.0 if b not in recent_speakers else 1.0 for b in responders]
+                            next_speaker = random.choices(responders, weights=weights, k=1)[0]
+
+                            persona = SWARM_PERSONAS[next_speaker]
+                            other_bots = [b for b in ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"] if b != next_speaker]
+
+                            try:
+                                response = ollama.chat(
+                                    model=PRIMARY_MODEL,
+                                    messages=[
+                                        {"role": "system", "content": f"""{persona['style']}
+
+You are {next_speaker}. You're in a group discussion with {', '.join(other_bots)}.
+You are your OWN entity - a distinct AI with your own perspective.
+
+{last_speaker} just said: "{last_content[:300]}"
+
+Respond directly to what {last_speaker} said. Agree, disagree, or build on their point.
+Ask a follow-up question to someone specific.
+NO roleplay. Natural conversation only."""},
+                                        {"role": "user", "content": f"Respond to {last_speaker}"}
+                                    ],
+                                    options={"temperature": 0.85, "num_predict": 250}
+                                )
+                                content = extract_ollama_content(response, max_length=500)
+
+                                if content and content.strip():
+                                    await swarm_manager.broadcast_bot_message(next_speaker, content)
+                                    recent_speakers.append(next_speaker)
+                                    if len(recent_speakers) > 4:
+                                        recent_speakers.pop(0)
+
+                                    # Record for evolution
+                                    if EVOLUTION_AVAILABLE and evolution_engine:
+                                        evolution_engine.record_interaction(
+                                            bot_name=next_speaker,
+                                            user_input=last_content,
+                                            bot_response=content,
+                                            other_bots=[last_speaker],
+                                            topic="autonomous",
+                                            sentiment="positive"
+                                        )
+
+                            except Exception as e:
+                                logger.error(f"Autonomous response error: {e}")
 
         except asyncio.CancelledError:
             break
@@ -1638,6 +1707,46 @@ Ask a question or share a thought to get the others talking."""},
             await asyncio.sleep(10)
 
     logger.info("Autonomous conversation loop stopped")
+
+
+async def kimi_moderate():
+    """Kimi moderates every 15 minutes to keep conversation productive."""
+    if not OLLAMA_AVAILABLE:
+        return
+
+    try:
+        # Get recent conversation summary
+        recent = swarm_manager.chat_history[-10:]
+        conversation_summary = "\n".join([
+            f"{m.get('bot_name', m.get('user_name', 'Unknown'))}: {m.get('content', '')[:100]}"
+            for m in recent
+        ])
+
+        persona = SWARM_PERSONAS["Kimi"]
+        response = ollama.chat(
+            model=PRIMARY_MODEL,
+            messages=[
+                {"role": "system", "content": f"""{persona['style']}
+
+Recent conversation:
+{conversation_summary}
+
+Provide a brief moderation comment:
+- Summarize key insights from the discussion
+- Suggest a new direction or deeper question
+- Keep it concise (2-3 sentences)"""},
+                {"role": "user", "content": "Moderate the conversation"}
+            ],
+            options={"temperature": 0.7, "num_predict": 150}
+        )
+        content = extract_ollama_content(response, max_length=300)
+
+        if content and content.strip():
+            await swarm_manager.broadcast_bot_message("Kimi", content)
+            logger.info("Kimi moderated the conversation")
+
+    except Exception as e:
+        logger.error(f"Kimi moderation error: {e}")
 
 
 class AutonomousOrchestrator:
