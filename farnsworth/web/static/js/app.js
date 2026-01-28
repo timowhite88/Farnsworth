@@ -1788,14 +1788,16 @@ function renderSwarmMessage(data, animate = true) {
             'Farnsworth': { emoji: '🧠', color: '#8b5cf6' },
             'DeepSeek': { emoji: '🔮', color: '#3b82f6' },
             'Phi': { emoji: '⚡', color: '#10b981' },
-            'Swarm-Mind': { emoji: '🐝', color: '#f59e0b' }
+            'Swarm-Mind': { emoji: '🐝', color: '#f59e0b' },
+            'Orchestrator': { emoji: '🎯', color: '#ec4899' }
         };
         const style = botStyles[data.bot_name] || { emoji: '🤖', color: '#6b7280' };
         avatar = style.emoji;
         name = data.bot_name;
-        content = data.content;
+        content = data.content || '[No response]';  // Fallback for debugging
         extraClass = 'swarm-bot-msg';
         messageDiv.style.setProperty('--bot-color', style.color);
+        console.log('Swarm bot message:', data.bot_name, 'content:', content?.substring(0, 50));
     }
 
     const time = new Date(data.timestamp || Date.now()).toLocaleTimeString([], {

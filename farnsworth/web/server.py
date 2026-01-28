@@ -2971,15 +2971,18 @@ async def websocket_swarm(websocket: WebSocket):
                         )
 
                         # Broadcast each bot response (skip empty)
+                        logger.info(f"Swarm responses generated: {len(responses)} responses")
                         for resp in responses:
-                            content = resp.get("content", "").strip()
-                            if not content:
+                            bot_content = resp.get("content", "").strip()
+                            logger.info(f"Bot {resp.get('bot_name')}: content length={len(bot_content)}, preview={bot_content[:50] if bot_content else 'EMPTY'}")
+                            if not bot_content:
+                                logger.warning(f"Skipping empty response from {resp.get('bot_name')}")
                                 continue
                             await swarm_manager.broadcast_typing(resp["bot_name"], True)
                             await asyncio.sleep(0.3)
                             await swarm_manager.broadcast_bot_message(
                                 resp["bot_name"],
-                                content
+                                bot_content
                             )
                             await swarm_manager.broadcast_typing(resp["bot_name"], False)
 
