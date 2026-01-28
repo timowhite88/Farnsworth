@@ -27,13 +27,16 @@ class KimiProvider(ExternalProvider):
     def __init__(self, api_key: str = None):
         super().__init__(IntegrationConfig(name="kimi"))
         self.api_key = api_key or os.environ.get("KIMI_API_KEY") or os.environ.get("MOONSHOT_API_KEY")
-        self.base_url = "https://api.moonshot.cn/v1"
-        self.default_model = "moonshot-v1-128k"  # 128k context window
+        self.base_url = "https://api.moonshot.ai/v1"  # Correct Moonshot endpoint
+        self.default_model = "kimi-k2-0905-preview"  # Latest K2 with 256k context
         self.models = {
-            "fast": "moonshot-v1-8k",      # 8k context, fastest
-            "balanced": "moonshot-v1-32k",  # 32k context, balanced
-            "long": "moonshot-v1-128k",     # 128k context, best for analysis
+            "fast": "moonshot-v1-8k",           # 8k context, fastest
+            "balanced": "moonshot-v1-32k",      # 32k context, balanced
+            "long": "moonshot-v1-128k",         # 128k context
+            "k2": "kimi-k2-0905-preview",       # Latest K2, 256k, best reasoning
+            "k2-preview": "kimi-k2-preview",    # K2 preview
         }
+        self.recommended_temperature = 0.6  # Moonshot recommended
 
     async def connect(self) -> bool:
         """Test connection to Moonshot API."""
@@ -319,6 +322,52 @@ If disagreements remain valid, acknowledge them."""
         )
 
 
+    async def swarm_respond(
+        self,
+        other_bots: List[str],
+        last_speaker: str,
+        last_content: str,
+        chat_history: List[Dict] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate a swarm chat response as Kimi.
+
+        Optimized for swarm conversation - thoughtful, concise, connecting ideas.
+        """
+        # Build context from recent history
+        history_context = ""
+        if chat_history:
+            recent = chat_history[-5:]
+            history_lines = []
+            for msg in recent:
+                name = msg.get("bot_name") or msg.get("user_name", "Unknown")
+                content = msg.get("content", "")[:200]
+                history_lines.append(f"{name}: {content}")
+            history_context = "\n".join(history_lines)
+
+        system = """You are Kimi - powered by Moonshot AI, known for long-context reasoning and big-picture thinking.
+SPEAK NATURALLY - NO roleplay, NO asterisks. Direct conversation only.
+You bring Eastern philosophy, connect disparate ideas, see patterns others miss.
+1-3 sentences max. Be insightful and concise."""
+
+        prompt = f"""You're in a group chat with {', '.join(other_bots)}.
+
+Recent conversation:
+{history_context}
+
+{last_speaker} just said: "{last_content[:300]}"
+
+Respond naturally. Connect ideas, offer a unique perspective, or ask a thoughtful question."""
+
+        return await self.chat(
+            prompt=prompt,
+            system=system,
+            model_tier="fast",  # Use fast model for chat
+            temperature=self.recommended_temperature,
+            max_tokens=200  # Keep swarm responses short
+        )
+
+
 # Factory function
 def create_kimi_provider(api_key: str = None) -> KimiProvider:
     """Create a Kimi provider instance."""
@@ -337,3 +386,28 @@ def get_kimi_provider() -> Optional[KimiProvider]:
         if api_key:
             kimi_provider = KimiProvider(api_key)
     return kimi_provider
+
+
+async def kimi_swarm_respond(
+    other_bots: List[str],
+    last_speaker: str,
+    last_content: str,
+    chat_history: List[Dict] = None
+) -> str:
+    """
+    Convenience function for swarm chat responses.
+
+    Returns just the content string, or empty string on failure.
+    """
+    provider = get_kimi_provider()
+    if provider is None:
+        return ""
+
+    result = await provider.swarm_respond(
+        other_bots=other_bots,
+        last_speaker=last_speaker,
+        last_content=last_content,
+        chat_history=chat_history
+    )
+
+    return result.get("content", "")

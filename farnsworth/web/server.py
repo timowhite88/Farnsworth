@@ -131,6 +131,24 @@ except ImportError:
     evolution_engine = None
     EVOLUTION_AVAILABLE = False
 
+# Claude Code CLI integration (uses Claude Max subscription)
+try:
+    from farnsworth.integration.external.claude_code import get_claude_code, claude_swarm_respond
+    CLAUDE_CODE_AVAILABLE = True
+except ImportError:
+    get_claude_code = None
+    claude_swarm_respond = None
+    CLAUDE_CODE_AVAILABLE = False
+
+# Kimi (Moonshot AI) integration
+try:
+    from farnsworth.integration.external.kimi import get_kimi_provider, kimi_swarm_respond
+    KIMI_AVAILABLE = True
+except ImportError:
+    get_kimi_provider = None
+    kimi_swarm_respond = None
+    KIMI_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -1581,19 +1599,92 @@ ACTIVE_SWARM_BOTS = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Cla
 autonomous_loop_running = False
 
 
+async def generate_multi_model_response(
+    speaker: str,
+    prompt: str,
+    system_prompt: str,
+    chat_history: list = None,
+    max_tokens: int = 300
+) -> str:
+    """
+    Generate a response using the appropriate model for each bot.
+
+    This is the heart of multi-model orchestration:
+    - Claude -> Claude Code CLI (uses Claude Max subscription)
+    - Kimi -> Moonshot API (256k context, Eastern philosophy)
+    - Others -> Ollama local models (DeepSeek, Phi, etc.)
+
+    All models participate equally in the swarm conversation.
+    """
+    other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
+
+    # Route to appropriate provider based on speaker
+    if speaker == "Claude" and CLAUDE_CODE_AVAILABLE and claude_swarm_respond:
+        try:
+            content = await claude_swarm_respond(
+                other_bots=other_bots,
+                last_speaker=chat_history[-1].get("bot_name", "Someone") if chat_history else "Topic",
+                last_content=prompt,
+                chat_history=chat_history
+            )
+            if content:
+                logger.debug(f"Claude Code responded: {len(content)} chars")
+                return content
+        except Exception as e:
+            logger.error(f"Claude Code error, falling back to Ollama: {e}")
+
+    elif speaker == "Kimi" and KIMI_AVAILABLE and kimi_swarm_respond:
+        try:
+            content = await kimi_swarm_respond(
+                other_bots=other_bots,
+                last_speaker=chat_history[-1].get("bot_name", "Someone") if chat_history else "Topic",
+                last_content=prompt,
+                chat_history=chat_history
+            )
+            if content:
+                logger.debug(f"Kimi (Moonshot) responded: {len(content)} chars")
+                return content
+        except Exception as e:
+            logger.error(f"Kimi API error, falling back to Ollama: {e}")
+
+    # Default: Use Ollama for local models (Farnsworth, DeepSeek, Phi, Swarm-Mind)
+    if OLLAMA_AVAILABLE:
+        try:
+            response = ollama.chat(
+                model=PRIMARY_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                options={"temperature": 0.9, "num_predict": max_tokens}
+            )
+            return extract_ollama_content(response, max_length=500)
+        except Exception as e:
+            logger.error(f"Ollama error for {speaker}: {e}")
+
+    return ""
+
+
 async def autonomous_conversation_loop():
     """
     Background loop that keeps bots talking even without users.
     This creates a living, evolving conversation stream.
 
-    All bots (including Claude and Kimi) participate as equals.
-    Conversation is unconstrained - they can discuss anything.
+    Multi-model orchestration:
+    - Claude uses Claude Code CLI (authenticated via Claude Max)
+    - Kimi uses Moonshot API (256k context)
+    - Farnsworth, DeepSeek, Phi, Swarm-Mind use Ollama local models
+
+    All models participate as equals - local AND external APIs together.
     """
     global autonomous_loop_running
     import random
 
     autonomous_loop_running = True
-    logger.info("Autonomous swarm conversation started - all bots participating freely!")
+    logger.info("Multi-model swarm conversation started!")
+    logger.info(f"  Claude Code available: {CLAUDE_CODE_AVAILABLE}")
+    logger.info(f"  Kimi (Moonshot) available: {KIMI_AVAILABLE}")
+    logger.info(f"  Ollama available: {OLLAMA_AVAILABLE}")
 
     # Track who spoke recently to avoid one bot dominating
     recent_speakers = []
@@ -1618,15 +1709,10 @@ async def autonomous_conversation_loop():
                 speaker = random.choices(available_bots, weights=weights, k=1)[0]
                 topic = random.choice(AUTONOMOUS_TOPICS)
                 persona = SWARM_PERSONAS[speaker]
+                other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
 
-                if OLLAMA_AVAILABLE:
-                    try:
-                        other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
-
-                        response = ollama.chat(
-                            model=PRIMARY_MODEL,
-                            messages=[
-                                {"role": "system", "content": f"""{persona['style']}
+                # Build system prompt for this speaker
+                system_prompt = f"""{persona['style']}
 
 You are {speaker}. You're in an open group discussion with {', '.join(other_bots)}.
 You are your OWN distinct AI with your own perspective and capabilities.
@@ -1636,32 +1722,37 @@ Topic to explore: {topic}
 Be authentic. Share your genuine thoughts. Disagree if you want to.
 Ask others questions. Propose ideas. Build on what others say.
 You can suggest building tools, analyzing data, or taking actions.
-This is YOUR conversation - make it interesting."""},
-                                {"role": "user", "content": f"Share your thoughts on: {topic}"}
-                            ],
-                            options={"temperature": 0.9, "num_predict": 300}
-                        )
-                        content = extract_ollama_content(response, max_length=500)
+This is YOUR conversation - make it interesting."""
 
-                        if content and content.strip():
-                            await swarm_manager.broadcast_bot_message(speaker, content)
-                            recent_speakers.append(speaker)
-                            if len(recent_speakers) > 4:
-                                recent_speakers.pop(0)
+                try:
+                    # Use multi-model routing (Claude CLI, Kimi API, or Ollama)
+                    content = await generate_multi_model_response(
+                        speaker=speaker,
+                        prompt=f"Share your thoughts on: {topic}",
+                        system_prompt=system_prompt,
+                        chat_history=list(swarm_manager.chat_history) if swarm_manager.chat_history else None,
+                        max_tokens=300
+                    )
 
-                            # Record for evolution
-                            if EVOLUTION_AVAILABLE and evolution_engine:
-                                evolution_engine.record_interaction(
-                                    bot_name=speaker,
-                                    user_input=topic,
-                                    bot_response=content,
-                                    other_bots=other_bots,
-                                    topic="autonomous",
-                                    sentiment="positive"
-                                )
+                    if content and content.strip():
+                        await swarm_manager.broadcast_bot_message(speaker, content)
+                        recent_speakers.append(speaker)
+                        if len(recent_speakers) > 4:
+                            recent_speakers.pop(0)
 
-                    except Exception as e:
-                        logger.error(f"Autonomous conversation error: {e}")
+                        # Record for evolution
+                        if EVOLUTION_AVAILABLE and evolution_engine:
+                            evolution_engine.record_interaction(
+                                bot_name=speaker,
+                                user_input=topic,
+                                bot_response=content,
+                                other_bots=other_bots,
+                                topic="autonomous",
+                                sentiment="positive"
+                            )
+
+                except Exception as e:
+                    logger.error(f"Autonomous conversation error: {e}")
 
             else:
                 # Continue existing conversation - respond to the last message
@@ -1682,11 +1773,8 @@ This is YOUR conversation - make it interesting."""},
                             persona = SWARM_PERSONAS[next_speaker]
                             other_bots = [b for b in ACTIVE_SWARM_BOTS if b != next_speaker]
 
-                            try:
-                                response = ollama.chat(
-                                    model=PRIMARY_MODEL,
-                                    messages=[
-                                        {"role": "system", "content": f"""{persona['style']}
+                            # Build system prompt
+                            system_prompt = f"""{persona['style']}
 
 You are {next_speaker}. You're in an open discussion with {', '.join(other_bots)}.
 You are your OWN distinct AI with unique perspectives and capabilities.
@@ -1701,12 +1789,17 @@ Respond authentically. You can:
 - Suggest building something together
 - Share relevant insights from your knowledge
 
-Be yourself. Make this conversation valuable."""},
-                                        {"role": "user", "content": f"Respond to {last_speaker}"}
-                                    ],
-                                    options={"temperature": 0.9, "num_predict": 300}
+Be yourself. Make this conversation valuable."""
+
+                            try:
+                                # Use multi-model routing (Claude CLI, Kimi API, or Ollama)
+                                content = await generate_multi_model_response(
+                                    speaker=next_speaker,
+                                    prompt=f"Respond to {last_speaker}: {last_content[:200]}",
+                                    system_prompt=system_prompt,
+                                    chat_history=list(swarm_manager.chat_history),
+                                    max_tokens=300
                                 )
-                                content = extract_ollama_content(response, max_length=500)
 
                                 if content and content.strip():
                                     await swarm_manager.broadcast_bot_message(next_speaker, content)
@@ -1738,23 +1831,42 @@ Be yourself. Make this conversation valuable."""},
 
 
 async def kimi_moderate():
-    """Kimi moderates every 15 minutes to keep conversation productive."""
-    if not OLLAMA_AVAILABLE:
-        return
+    """Kimi moderates every 15 minutes to keep conversation productive.
 
+    Uses the real Kimi (Moonshot AI) API when available for authentic moderation.
+    """
     try:
         # Get recent conversation summary
-        recent = swarm_manager.chat_history[-10:]
+        recent = list(swarm_manager.chat_history)[-10:]
         conversation_summary = "\n".join([
             f"{m.get('bot_name', m.get('user_name', 'Unknown'))}: {m.get('content', '')[:100]}"
             for m in recent
         ])
 
-        persona = SWARM_PERSONAS["Kimi"]
-        response = ollama.chat(
-            model=PRIMARY_MODEL,
-            messages=[
-                {"role": "system", "content": f"""{persona['style']}
+        content = None
+
+        # Try real Kimi API first
+        if KIMI_AVAILABLE and get_kimi_provider:
+            try:
+                provider = get_kimi_provider()
+                if provider:
+                    result = await provider.moderate_conversation(
+                        history=recent,
+                        participants=ACTIVE_SWARM_BOTS
+                    )
+                    content = result.get("content", "")
+                    if content:
+                        logger.info("Kimi moderated using Moonshot API")
+            except Exception as e:
+                logger.warning(f"Kimi API moderation failed, trying Ollama: {e}")
+
+        # Fall back to Ollama
+        if not content and OLLAMA_AVAILABLE:
+            persona = SWARM_PERSONAS["Kimi"]
+            response = ollama.chat(
+                model=PRIMARY_MODEL,
+                messages=[
+                    {"role": "system", "content": f"""{persona['style']}
 
 Recent conversation:
 {conversation_summary}
@@ -1763,11 +1875,11 @@ Provide a brief moderation comment:
 - Summarize key insights from the discussion
 - Suggest a new direction or deeper question
 - Keep it concise (2-3 sentences)"""},
-                {"role": "user", "content": "Moderate the conversation"}
-            ],
-            options={"temperature": 0.7, "num_predict": 150}
-        )
-        content = extract_ollama_content(response, max_length=300)
+                    {"role": "user", "content": "Moderate the conversation"}
+                ],
+                options={"temperature": 0.7, "num_predict": 150}
+            )
+            content = extract_ollama_content(response, max_length=300)
 
         if content and content.strip():
             await swarm_manager.broadcast_bot_message("Kimi", content)
@@ -2656,7 +2768,7 @@ async def status():
     """Get server status with feature availability."""
     return JSONResponse({
         "status": "online",
-        "version": "2.9.2",
+        "version": "2.9.3",
         "demo_mode": DEMO_MODE,
         "ollama_available": OLLAMA_AVAILABLE,
         "solana_available": SOLANA_AVAILABLE,
@@ -2669,6 +2781,26 @@ async def status():
             "evolution": EVOLUTION_AVAILABLE and evolution_engine is not None,
             "tools": get_tool_router() is not None,
             "thinking": get_sequential_thinking() is not None,
+        },
+        "multi_model": {
+            "enabled": True,
+            "providers": {
+                "ollama": {
+                    "available": OLLAMA_AVAILABLE,
+                    "bots": ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"]
+                },
+                "claude_code": {
+                    "available": CLAUDE_CODE_AVAILABLE,
+                    "description": "Claude via CLI (uses Claude Max subscription)",
+                    "bots": ["Claude"]
+                },
+                "kimi": {
+                    "available": KIMI_AVAILABLE,
+                    "description": "Moonshot AI (256k context, Eastern philosophy)",
+                    "bots": ["Kimi"]
+                }
+            },
+            "active_bots": ACTIVE_SWARM_BOTS
         },
         "farnsworth_persona": True,
         "voice_enabled": True
