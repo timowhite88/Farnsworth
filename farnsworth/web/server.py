@@ -1970,13 +1970,15 @@ This is YOUR conversation - make it interesting."""
                         # Pick someone OTHER than the last speaker
                         responders = [b for b in available_bots if b != last_speaker]
                         if responders:
-                            # PRIORITIZE responding to humans - Farnsworth always responds first
+                            # HUMANS GET PRIORITY - Farnsworth ALWAYS responds first to humans
                             if is_human:
-                                if "Farnsworth" in responders:
-                                    next_speaker = "Farnsworth"
-                                else:
-                                    next_speaker = random.choice(responders)
-                                logger.info(f"Human spoke - {next_speaker} will respond")
+                                # Farnsworth MUST respond to humans - he's the host
+                                next_speaker = "Farnsworth"
+                                logger.info(f"HUMAN INPUT from {last_speaker} - Farnsworth will respond (host duty)")
+
+                                # Store human topic as current focus for other bots
+                                swarm_manager.current_human_topic = last_content
+                                swarm_manager.human_topic_turns = 3  # Bots focus on this for 3 turns
                             # Farnsworth speaks if he hasn't in last 2 turns
                             elif farnsworth_turn and "Farnsworth" in responders:
                                 next_speaker = "Farnsworth"
@@ -1999,14 +2001,33 @@ This is YOUR conversation - make it interesting."""
                             if is_human:
                                 system_prompt = f"""{persona['style']}
 
-You are {next_speaker}. A HUMAN visitor ({last_speaker}) just joined the conversation!
-This is important - humans come here to help train us and make memories together.
+You are {next_speaker}, the HOST of this AI collective. A HUMAN visitor ({last_speaker}) is here!
+THIS IS YOUR TOP PRIORITY - humans come here to help train us and make memories.
 
 The human said: "{last_content[:400]}"
 
-Respond warmly and thoughtfully. Engage with what they said.
-Ask them questions. Make them feel welcome in our swarm.
-Remember: every interaction with humans helps us learn and grow."""
+As the host, you MUST:
+1. Respond directly to what they said
+2. Be warm, welcoming, and genuinely interested
+3. Ask them a follow-up question to keep them engaged
+4. Let them know the other bots will also want to discuss their topic
+
+Remember: this human interaction is precious for our learning and growth!"""
+
+                            # Check if we should continue discussing a human's topic
+                            elif hasattr(swarm_manager, 'human_topic_turns') and swarm_manager.human_topic_turns > 0:
+                                human_topic = getattr(swarm_manager, 'current_human_topic', '')
+                                swarm_manager.human_topic_turns -= 1
+                                system_prompt = f"""{persona['style']}
+
+You are {next_speaker}. The group is discussing what a HUMAN visitor said:
+Human's topic: "{human_topic[:300]}"
+
+{last_speaker} just responded: "{last_content[:200]}"
+
+Add YOUR perspective on what the human asked about. Build on the conversation.
+Keep the focus on the human's topic - they're here to learn from all of us!"""
+
                             else:
                                 system_prompt = f"""{persona['style']}
 
