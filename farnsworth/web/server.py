@@ -1348,12 +1348,30 @@ class SwarmChatManager:
 
     async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
         """Broadcast a bot/model message to all users and feed to learning engine."""
+        import hashlib
+
+        # Create unique message ID to prevent duplicates
+        content_hash = hashlib.md5(f"{bot_name}:{content[:100]}".encode()).hexdigest()[:8]
+        msg_id = f"{bot_name}_{content_hash}"
+
+        # Check for duplicate (same bot, same content start within last 5 messages)
+        if not is_thinking:
+            recent_ids = [
+                f"{m.get('bot_name')}_{hashlib.md5((m.get('bot_name', '') + ':' + m.get('content', '')[:100]).encode()).hexdigest()[:8]}"
+                for m in self.chat_history[-5:]
+                if m.get('type') == 'swarm_bot'
+            ]
+            if msg_id in recent_ids:
+                logger.warning(f"Duplicate message blocked from {bot_name}")
+                return None
+
         msg = {
             "type": "swarm_bot",
             "bot_name": bot_name,
             "content": content,
             "is_thinking": is_thinking,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "msg_id": msg_id
         }
         if not is_thinking:
             self.chat_history.append(msg)

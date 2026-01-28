@@ -1805,12 +1805,30 @@ function handleSwarmMessage(data) {
     }
 }
 
+// Track rendered messages to prevent duplicates
+const renderedMessageIds = new Set();
+
 function renderSwarmMessage(data, animate = true) {
     const messagesContainer = document.getElementById('messages');
     if (!messagesContainer) return;
 
+    // Deduplication: check if we've already rendered this message
+    const msgId = data.msg_id || `${data.bot_name || data.user_name}_${data.timestamp}_${(data.content || '').substring(0, 20)}`;
+    if (renderedMessageIds.has(msgId)) {
+        console.log('[Swarm] Skipping duplicate message:', msgId);
+        return;
+    }
+    renderedMessageIds.add(msgId);
+
+    // Keep set size manageable
+    if (renderedMessageIds.size > 100) {
+        const oldest = Array.from(renderedMessageIds).slice(0, 50);
+        oldest.forEach(id => renderedMessageIds.delete(id));
+    }
+
     const messageDiv = document.createElement('div');
     messageDiv.className = `message swarm-message ${data.type === 'swarm_user' ? 'user' : 'bot'}`;
+    messageDiv.setAttribute('data-msg-id', msgId);
     if (animate) messageDiv.classList.add('animate-in');
 
     let avatar, name, content, extraClass = '';
