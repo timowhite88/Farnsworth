@@ -65,8 +65,8 @@ async function initApp() {
     // Start evolution stats auto-refresh (every 60 seconds)
     setInterval(loadEvolutionStats, 60000);
 
-    // Show welcome message
-    addWelcomeMessage();
+    // Auto-start in Swarm mode
+    initSwarmMode();
 
     // Focus the input field
     const input = document.getElementById('user-input');
@@ -1651,32 +1651,25 @@ window.deleteNote = deleteNote;
 // ============================================
 
 function switchChatMode(toSwarm) {
-    state.swarmMode = toSwarm;
+    // Always swarm mode now - this function kept for compatibility
+    state.swarmMode = true;
 
-    // Update UI
-    document.getElementById('personal-chat-btn')?.classList.toggle('active', !toSwarm);
-    document.getElementById('swarm-chat-btn')?.classList.toggle('active', toSwarm);
+    // Show learning widget
+    document.getElementById('swarm-learning-widget')?.classList.remove('hidden');
 
-    // Toggle learning widget visibility
-    document.getElementById('swarm-learning-widget')?.classList.toggle('hidden', !toSwarm);
-
-    // Clear messages
-    const messagesContainer = document.getElementById('messages');
-    if (messagesContainer) {
-        messagesContainer.innerHTML = '';
-    }
-
-    if (toSwarm) {
-        // Connect to Swarm Chat
+    // Connect to Swarm Chat if not already
+    if (!state.swarmConnected) {
         connectSwarmChat();
         addSwarmWelcomeMessage();
-    } else {
-        // Disconnect from Swarm
-        disconnectSwarmChat();
-        addWelcomeMessage();
     }
+}
 
-    showToast(toSwarm ? '🐝 Switched to Swarm Chat - Community Mode!' : '💬 Switched to Personal Chat', 'success');
+function initSwarmMode() {
+    // Auto-start in swarm mode
+    state.swarmMode = true;
+    document.getElementById('swarm-learning-widget')?.classList.remove('hidden');
+    connectSwarmChat();
+    addSwarmWelcomeMessage();
 }
 
 function connectSwarmChat() {
