@@ -3096,17 +3096,52 @@ async def speak_text_api(request: SpeakRequest):
                 detail="Reference audio not found. Add farnsworth_reference.wav to static/audio/"
             )
 
-        # Generate speech with voice cloning
+        # Generate speech with voice cloning using optimized XTTS parameters
         logger.info(f"TTS: Generating speech for: {text[:50]}...")
 
         # Generate to temp path first
         temp_path = cache_dir / f"{text_hash}_temp.wav"
-        model.tts_to_file(
-            text=text,
-            speaker_wav=str(reference_audio),
-            language="en",
-            file_path=str(temp_path)
-        )
+
+        # Use lower-level synthesis for better voice cloning control
+        # XTTS v2 parameters for more natural Farnsworth voice:
+        # - Lower temperature = more consistent with reference voice
+        # - Higher repetition_penalty = less robotic repetition
+        # - Longer gpt_cond_len = better voice capture from reference
+        try:
+            # Try using the synthesizer directly for more control
+            if hasattr(model, 'synthesizer') and hasattr(model.synthesizer, 'tts'):
+                wav = model.synthesizer.tts(
+                    text=text,
+                    speaker_wav=str(reference_audio),
+                    language="en",
+                    gpt_cond_len=30,  # Use more of reference for conditioning
+                    gpt_cond_chunk_len=4,
+                    temperature=0.65,  # Lower = more consistent voice
+                    length_penalty=1.0,
+                    repetition_penalty=5.0,  # Reduce robotic repetition
+                    top_k=50,
+                    top_p=0.85,
+                    speed=1.0
+                )
+                # Save wav to file
+                import scipy.io.wavfile as wavfile
+                wavfile.write(str(temp_path), 24000, wav)
+            else:
+                # Fallback to standard method
+                model.tts_to_file(
+                    text=text,
+                    speaker_wav=str(reference_audio),
+                    language="en",
+                    file_path=str(temp_path)
+                )
+        except Exception as synth_error:
+            logger.warning(f"TTS: Advanced synthesis failed, using default: {synth_error}")
+            model.tts_to_file(
+                text=text,
+                speaker_wav=str(reference_audio),
+                language="en",
+                file_path=str(temp_path)
+            )
 
         # Read generated audio
         with open(temp_path, "rb") as f:
