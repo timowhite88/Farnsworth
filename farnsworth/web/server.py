@@ -1879,15 +1879,22 @@ async def autonomous_conversation_loop():
             logger.debug(f"Autonomous loop: starting turn with {len(available_bots)} available bots")
 
             # Remove recent speakers to ensure variety (last 2 can't go immediately)
+            # BUT never remove Farnsworth - he's the host and should speak often
             for bot in recent_speakers[-2:]:
-                if bot in available_bots and len(available_bots) > 2:
+                if bot in available_bots and len(available_bots) > 2 and bot != "Farnsworth":
                     available_bots.remove(bot)
+
+            # Farnsworth speaks every 3rd turn minimum (he's the host)
+            farnsworth_turn = len(recent_speakers) >= 2 and "Farnsworth" not in recent_speakers[-2:]
 
             # Start new topic or continue (30% chance of new topic)
             if not swarm_manager.chat_history or random.random() < 0.3:
-                # Start fresh topic - pick a speaker (Farnsworth 40%, others 20% each)
-                weights = [0.4 if b == "Farnsworth" else 0.2 for b in available_bots]
-                speaker = random.choices(available_bots, weights=weights, k=1)[0]
+                # Start fresh topic - Farnsworth has high priority (60%), others share rest
+                if farnsworth_turn or random.random() < 0.6:
+                    speaker = "Farnsworth"
+                else:
+                    non_farnsworth = [b for b in available_bots if b != "Farnsworth"]
+                    speaker = random.choice(non_farnsworth) if non_farnsworth else "Farnsworth"
                 topic = random.choice(AUTONOMOUS_TOPICS)
                 persona = SWARM_PERSONAS[speaker]
                 other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
@@ -1963,18 +1970,27 @@ This is YOUR conversation - make it interesting."""
                         # Pick someone OTHER than the last speaker
                         responders = [b for b in available_bots if b != last_speaker]
                         if responders:
-                            # PRIORITIZE responding to humans
+                            # PRIORITIZE responding to humans - Farnsworth always responds first
                             if is_human:
-                                # Farnsworth responds to humans first (he's the host)
                                 if "Farnsworth" in responders:
                                     next_speaker = "Farnsworth"
                                 else:
                                     next_speaker = random.choice(responders)
                                 logger.info(f"Human spoke - {next_speaker} will respond")
+                            # Farnsworth speaks if he hasn't in last 2 turns
+                            elif farnsworth_turn and "Farnsworth" in responders:
+                                next_speaker = "Farnsworth"
+                                logger.info("Farnsworth's turn (host priority)")
                             else:
-                                # Weight towards bots who haven't spoken recently
-                                weights = [2.0 if b not in recent_speakers else 1.0 for b in responders]
-                                next_speaker = random.choices(responders, weights=weights, k=1)[0]
+                                # Give Farnsworth 50% chance, others share 50%
+                                if "Farnsworth" in responders and random.random() < 0.5:
+                                    next_speaker = "Farnsworth"
+                                else:
+                                    non_farnsworth = [b for b in responders if b != "Farnsworth"]
+                                    if non_farnsworth:
+                                        next_speaker = random.choice(non_farnsworth)
+                                    else:
+                                        next_speaker = random.choice(responders)
 
                             persona = SWARM_PERSONAS[next_speaker]
                             other_bots = [b for b in ACTIVE_SWARM_BOTS if b != next_speaker]
