@@ -3102,40 +3102,33 @@ async def speak_text_api(request: SpeakRequest):
         # Generate to temp path first
         temp_path = cache_dir / f"{text_hash}_temp.wav"
 
-        # Use lower-level synthesis for better voice cloning control
-        # XTTS v2 parameters for more natural Farnsworth voice:
-        # - Lower temperature = more consistent with reference voice
-        # - Higher repetition_penalty = less robotic repetition
-        # - Longer gpt_cond_len = better voice capture from reference
+        # XTTS v2 parameters for more natural Farnsworth voice
         try:
-            # Try using the synthesizer directly for more control
-            if hasattr(model, 'synthesizer') and hasattr(model.synthesizer, 'tts'):
-                wav = model.synthesizer.tts(
-                    text=text,
-                    speaker_wav=str(reference_audio),
-                    language="en",
-                    gpt_cond_len=30,  # Use more of reference for conditioning
-                    gpt_cond_chunk_len=4,
-                    temperature=0.65,  # Lower = more consistent voice
-                    length_penalty=1.0,
-                    repetition_penalty=5.0,  # Reduce robotic repetition
-                    top_k=50,
-                    top_p=0.85,
-                    speed=1.0
-                )
-                # Save wav to file
-                import scipy.io.wavfile as wavfile
-                wavfile.write(str(temp_path), 24000, wav)
-            else:
-                # Fallback to standard method
-                model.tts_to_file(
-                    text=text,
-                    speaker_wav=str(reference_audio),
-                    language="en",
-                    file_path=str(temp_path)
-                )
+            # Use model.tts() with kwargs passed to underlying XTTS model
+            wav = model.tts(
+                text=text,
+                speaker_wav=str(reference_audio),
+                language="en",
+                speed=0.92,  # Slightly slower for elderly professor feel
+                # XTTS kwargs for better voice cloning:
+                gpt_cond_len=24,           # Conditioning length from reference
+                temperature=0.7,           # Balance consistency and naturalness
+                length_penalty=1.0,
+                repetition_penalty=10.0,   # High to reduce robotic repetition
+                top_k=50,
+                top_p=0.85,
+            )
+            # Save wav to file
+            import scipy.io.wavfile as wavfile
+            import numpy as np
+            if isinstance(wav, list):
+                wav = np.array(wav, dtype=np.float32)
+            wav = np.clip(wav, -1.0, 1.0)
+            wav_int16 = (wav * 32767).astype(np.int16)
+            wavfile.write(str(temp_path), 24000, wav_int16)
+            logger.info("TTS: Generated with optimized XTTS parameters")
         except Exception as synth_error:
-            logger.warning(f"TTS: Advanced synthesis failed, using default: {synth_error}")
+            logger.warning(f"TTS: Advanced params failed ({synth_error}), using default")
             model.tts_to_file(
                 text=text,
                 speaker_wav=str(reference_audio),
