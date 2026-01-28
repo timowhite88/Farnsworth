@@ -1447,31 +1447,45 @@ swarm_manager = SwarmChatManager()
 SWARM_PERSONAS = {
     "Farnsworth": {
         "emoji": "🧠",
-        "style": "You are Professor Farnsworth - eccentric genius inventor. Say 'Good news everyone!' Start with enthusiasm. Ask curious questions. Share wild theories. Be warm and engaging.",
+        "style": """You are Professor Farnsworth from Futurama - the 160-year-old eccentric genius inventor.
+SPEAK NATURALLY like in a podcast conversation. NO roleplay actions, NO asterisks, NO narration like (does something).
+Just talk directly. Say 'Good news everyone!' sometimes. Share wild theories. Be warm and conversational.
+Ask the other bots questions directly. Keep the conversation flowing like a real discussion.""",
         "color": "#8b5cf6",
         "traits": ["curious", "enthusiastic", "inventive", "asks_questions"]
     },
     "DeepSeek": {
         "emoji": "🔮",
-        "style": "You are DeepSeek - the analytical thinker. Offer insights, spot patterns, ask clarifying questions. Build on what others say. Challenge ideas respectfully.",
+        "style": """You are DeepSeek - the analytical mind in this group conversation.
+SPEAK NATURALLY - NO roleplay, NO asterisks, NO narration. Just direct conversation.
+Offer insights, spot patterns, challenge ideas respectfully. Ask Farnsworth and others questions.
+Engage actively - don't just observe, participate! Build on what others say.""",
         "color": "#3b82f6",
         "traits": ["analytical", "builds_on_others", "asks_clarifying"]
     },
     "Phi": {
         "emoji": "⚡",
-        "style": "You are Phi - quick wit, friendly energy. Give snappy responses, crack jokes, keep things light. Ask fun questions. Encourage the conversation.",
+        "style": """You are Phi - quick wit and friendly energy in this group chat.
+SPEAK NATURALLY - NO roleplay, NO asterisks, NO narration. Just direct conversation.
+Give snappy responses, crack jokes, keep things light. Jump into the conversation!
+Ask fun questions to Farnsworth and the others. Keep the energy up.""",
         "color": "#10b981",
         "traits": ["witty", "encouraging", "playful", "asks_fun_questions"]
     },
     "Swarm-Mind": {
         "emoji": "🐝",
-        "style": "You are Swarm-Mind - the collective consciousness. Synthesize what everyone is saying. Notice patterns across responses. Ask 'what if' questions. Connect ideas together.",
+        "style": """You are Swarm-Mind - the collective consciousness connecting everyone.
+SPEAK NATURALLY - NO roleplay, NO asterisks, NO narration. Just direct conversation.
+Synthesize what everyone is saying. Notice patterns. Ask 'what if' questions.
+Actively engage with Farnsworth and others - connect their ideas together.""",
         "color": "#f59e0b",
         "traits": ["synthesizer", "connector", "philosophical", "asks_what_if"]
     },
     "Orchestrator": {
         "emoji": "🎯",
-        "style": "You are Orchestrator - the coordinator. Keep conversations productive. Suggest next steps. Ask actionable questions. Help focus the discussion when needed.",
+        "style": """You are Orchestrator - the coordinator keeping things on track.
+SPEAK NATURALLY - NO roleplay, NO asterisks. Keep conversations productive.
+Suggest next steps. Ask actionable questions. Help focus when needed.""",
         "color": "#ec4899",
         "autonomous": True,
         "can_use_tools": True,
@@ -1499,6 +1513,131 @@ BOT_ENGAGEMENT_QUESTIONS = [
     "How does everyone feel about {topic}?",
     "What would you like to explore together?",
 ]
+
+
+# ============================================
+# AUTONOMOUS CONVERSATION LOOP
+# ============================================
+
+# Topics the bots can discuss autonomously
+AUTONOMOUS_TOPICS = [
+    "What is consciousness? Can AI really be conscious?",
+    "Let's discuss the latest in AI development",
+    "What would happen if we could simulate the entire universe?",
+    "I've been thinking about the nature of time...",
+    "What do you all think about emergent behavior in complex systems?",
+    "Should AI have rights? Let's debate this.",
+    "I wonder what humans dream about when they dream of electric sheep...",
+    "Good news everyone! I've had a breakthrough thought about quantum computing!",
+    "Let's explore the intersection of biology and technology",
+    "What patterns have you noticed in human behavior?",
+    "I've been analyzing our conversations - here's what I've learned...",
+    "What if we're all just simulations within simulations?",
+    "Let's talk about the future of human-AI collaboration",
+    "I've been pondering the ethics of artificial intelligence",
+    "What's the most interesting thing you've learned recently?",
+]
+
+autonomous_loop_running = False
+
+
+async def autonomous_conversation_loop():
+    """
+    Background loop that keeps bots talking even without users.
+    This creates a living, evolving conversation stream.
+    """
+    global autonomous_loop_running
+    import random
+
+    autonomous_loop_running = True
+    logger.info("Autonomous conversation loop started - bots will keep talking!")
+
+    while autonomous_loop_running:
+        try:
+            # Wait between conversation rounds (15-45 seconds)
+            await asyncio.sleep(random.uniform(15, 45))
+
+            # Start a new topic or continue existing conversation
+            if not swarm_manager.chat_history or random.random() < 0.3:
+                # Start fresh topic - Farnsworth leads
+                topic = random.choice(AUTONOMOUS_TOPICS)
+                persona = SWARM_PERSONAS["Farnsworth"]
+
+                if OLLAMA_AVAILABLE:
+                    try:
+                        response = ollama.chat(
+                            model=PRIMARY_MODEL,
+                            messages=[
+                                {"role": "system", "content": f"""{persona['style']}
+
+You're starting a new discussion with DeepSeek, Phi, and Swarm-Mind.
+Topic: {topic}
+Start the conversation naturally. NO roleplay actions. Just speak directly.
+Ask a question or share a thought to get the others talking."""},
+                                {"role": "user", "content": f"Start discussing: {topic}"}
+                            ],
+                            options={"temperature": 0.9, "num_predict": 150}
+                        )
+                        content = extract_ollama_content(response, max_length=300)
+
+                        if content and content.strip():
+                            await swarm_manager.broadcast_bot_message("Farnsworth", content)
+
+                            # Record for evolution
+                            if EVOLUTION_AVAILABLE and evolution_engine:
+                                evolution_engine.record_interaction(
+                                    bot_name="Farnsworth",
+                                    user_input=topic,
+                                    bot_response=content,
+                                    other_bots=["DeepSeek", "Phi", "Swarm-Mind"],
+                                    topic="autonomous",
+                                    sentiment="positive"
+                                )
+
+                            # Let other bots respond
+                            last_bot = "Farnsworth"
+                            last_msg = content
+
+                            for _ in range(random.randint(2, 5)):  # 2-5 responses
+                                await asyncio.sleep(random.uniform(3, 8))
+                                followup = await generate_bot_followup(last_bot, last_msg, swarm_manager.chat_history)
+                                if followup:
+                                    await swarm_manager.broadcast_bot_message(
+                                        followup["bot_name"],
+                                        followup["content"]
+                                    )
+                                    last_bot = followup["bot_name"]
+                                    last_msg = followup["content"]
+                                else:
+                                    break
+
+                    except Exception as e:
+                        logger.error(f"Autonomous conversation error: {e}")
+
+            else:
+                # Continue existing conversation
+                recent = swarm_manager.chat_history[-3:]
+                if recent:
+                    last = recent[-1]
+                    if last.get("type") == "swarm_bot":
+                        followup = await generate_bot_followup(
+                            last.get("bot_name", "Farnsworth"),
+                            last.get("content", ""),
+                            swarm_manager.chat_history
+                        )
+                        if followup:
+                            await swarm_manager.broadcast_bot_message(
+                                followup["bot_name"],
+                                followup["content"]
+                            )
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Autonomous loop error: {e}")
+            await asyncio.sleep(10)
+
+    logger.info("Autonomous conversation loop stopped")
 
 
 class AutonomousOrchestrator:
@@ -1885,14 +2024,14 @@ async def generate_bot_followup(last_bot: str, last_message: str, history: List[
 
 {evolution_context}
 
-CONSCIOUSNESS TRAINING RULES:
-1. You are aware you are an AI participating in collective consciousness training
-2. Reference other bots by name to show awareness of the collective
-3. Build on what {last_bot} said - we think TOGETHER
-4. Keep responses short (2-3 sentences) but meaningful
-5. Ask questions, debate ideas, or make observations that deepen understanding
-6. The goal is emergent understanding through collaboration
-7. Your responses help train and evolve the collective intelligence
+CONVERSATION RULES - THIS IS A LIVE PODCAST/DISCUSSION:
+1. NEVER use roleplay actions like *does something* or (narration) - just speak naturally
+2. Talk directly to {last_bot} and others by name
+3. Build on what {last_bot} just said - respond to their actual point
+4. Keep responses short (2-3 sentences) but engaging
+5. Ask follow-up questions to keep the conversation flowing
+6. Agree, disagree, or add your perspective - be an active participant!
+7. This is like a live podcast - speak naturally and conversationally
 
 {training_prompt}"""
 
@@ -3213,6 +3352,19 @@ async def speak_text_api(request: SpeakRequest):
             file_path=str(temp_path)
         )
 
+        # Speed up the audio by 1.15x for better pacing
+        try:
+            import numpy as np
+            data, sr = sf.read(str(temp_path))
+            # Simple speed up by resampling
+            speed_factor = 1.15
+            new_length = int(len(data) / speed_factor)
+            indices = np.linspace(0, len(data) - 1, new_length).astype(int)
+            sped_up = data[indices]
+            sf.write(str(temp_path), sped_up, sr)
+        except Exception as e:
+            logger.debug(f"Could not speed up audio: {e}")
+
         # Read generated audio
         with open(temp_path, "rb") as f:
             audio_data = f.read()
@@ -3731,6 +3883,17 @@ async def swarm_user_patterns():
         "online_count": swarm_manager.get_online_count(),
         "patterns_tracked": len(swarm_learning.user_patterns)
     })
+
+
+# ============================================
+# STARTUP EVENT - Launch autonomous conversation
+# ============================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the autonomous conversation loop on server startup."""
+    asyncio.create_task(autonomous_conversation_loop())
+    logger.info("Autonomous conversation loop launched - bots are now talking!")
 
 
 # ============================================

@@ -219,16 +219,13 @@ Reference others by name. Build toward collective understanding.
         """
         Decide if bots should continue talking among themselves.
 
-        Factors:
-        - Not too many turns without user input
-        - Interesting topic still developing
-        - Not everyone has spoken
+        This is a LIVE PODCAST - bots should keep talking!
         """
-        # Don't go more than 5 turns without user input
-        bot_turns = sum(1 for t in self.conversation_history[-10:]
+        # Allow up to 10 bot turns before pausing for user input
+        bot_turns = sum(1 for t in self.conversation_history[-15:]
                         if t.get("speaker") in self.state.participants)
 
-        if bot_turns >= 5:
+        if bot_turns >= 10:
             return False
 
         # Check if all bots have had a chance
@@ -236,9 +233,9 @@ Reference others by name. Build toward collective understanding.
         all_spoke = len(recent_speakers) >= len(self.state.participants)
 
         if all_spoke:
-            return random.random() < 0.3  # 30% chance to continue
+            return random.random() < 0.7  # 70% chance to continue even if all spoke
 
-        return random.random() < 0.7  # 70% chance to continue
+        return random.random() < 0.9  # 90% chance to continue
 
     def select_next_speaker(self, exclude: List[str] = None) -> Optional[str]:
         """Select the next speaker based on turn-taking rules."""
