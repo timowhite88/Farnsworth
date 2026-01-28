@@ -537,9 +537,35 @@ function stopVoiceInput() {
 
 // Current audio element for TTS playback
 let currentAudio = null;
+let audioQueue = [];
+let isPlayingAudio = false;
 
-async function speakText(text) {
-    if (!state.voiceEnabled) return;
+// Sequential audio playback - bots wait for each other
+async function speakText(text, botName = 'Farnsworth') {
+    if (!state.voiceEnabled) return Promise.resolve();
+
+    // Clean text for speech
+    const cleanText = text
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/`/g, '')
+        .replace(/\n/g, ' ')
+        .slice(0, 500);
+
+    if (!cleanText.trim()) return Promise.resolve();
+
+    // Add to queue and process
+    return new Promise((resolve) => {
+        audioQueue.push({ text: cleanText, botName, resolve });
+        processAudioQueue();
+    });
+}
+
+async function processAudioQueue() {
+    if (isPlayingAudio || audioQueue.length === 0) return;
+
+    isPlayingAudio = true;
+    const { text, botName, resolve } = audioQueue.shift();
 
     // Stop any current audio
     if (currentAudio) {
@@ -552,32 +578,43 @@ async function speakText(text) {
         speechSynthesis.cancel();
     }
 
-    // Clean text for speech
-    const cleanText = text
-        .replace(/\*\*/g, '')
-        .replace(/\*/g, '')
-        .replace(/`/g, '')
-        .replace(/\n/g, ' ')
-        .slice(0, 500);
-
-    if (!cleanText.trim()) return;
-
     try {
         // Try XTTS v2 voice cloning first
         const response = await fetch('/api/speak', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: cleanText })
+            body: JSON.stringify({ text: text })
         });
 
         if (response.ok) {
             const audioBlob = await response.blob();
             const audioUrl = URL.createObjectURL(audioBlob);
             currentAudio = new Audio(audioUrl);
+
             currentAudio.onended = () => {
                 URL.revokeObjectURL(audioUrl);
                 currentAudio = null;
+                isPlayingAudio = false;
+
+                // Signal server that audio finished
+                if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
+                    state.swarmWs.send(JSON.stringify({
+                        type: 'audio_complete',
+                        bot_name: botName
+                    }));
+                }
+
+                resolve();
+                // Process next in queue
+                processAudioQueue();
             };
+
+            currentAudio.onerror = () => {
+                isPlayingAudio = false;
+                resolve();
+                processAudioQueue();
+            };
+
             await currentAudio.play();
             return;
         }
@@ -587,10 +624,25 @@ async function speakText(text) {
 
     // Fallback to browser TTS
     if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(cleanText);
+        const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 0.9;
         utterance.pitch = 0.8;
+        utterance.onend = () => {
+            isPlayingAudio = false;
+            if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
+                state.swarmWs.send(JSON.stringify({
+                    type: 'audio_complete',
+                    bot_name: botName
+                }));
+            }
+            resolve();
+            processAudioQueue();
+        };
         speechSynthesis.speak(utterance);
+    } else {
+        isPlayingAudio = false;
+        resolve();
+        processAudioQueue();
     }
 }
 
@@ -1666,9 +1718,9 @@ function renderSwarmMessage(data, animate = true) {
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-    // Voice for bot messages
+    // Voice for bot messages (Farnsworth speaks, others wait)
     if (data.type === 'swarm_bot' && state.voiceEnabled && data.bot_name === 'Farnsworth') {
-        speakText(content);
+        speakText(content, data.bot_name);
     }
 }
 

@@ -123,6 +123,14 @@ except ImportError:
     swarm_orchestrator = None
     ORCHESTRATOR_AVAILABLE = False
 
+# Optional Evolution Engine for code-level learning
+try:
+    from farnsworth.core.collective.evolution import evolution_engine
+    EVOLUTION_AVAILABLE = True
+except ImportError:
+    evolution_engine = None
+    EVOLUTION_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -1864,19 +1872,27 @@ async def generate_bot_followup(last_bot: str, last_message: str, history: List[
         awareness_context = swarm_orchestrator.get_awareness_context(addressed_bot)
         training_prompt = swarm_orchestrator.get_training_prompt(addressed_bot, last_message)
 
+        # Get evolution context - learned patterns and personality traits
+        evolution_context = ""
+        if EVOLUTION_AVAILABLE and evolution_engine:
+            evolution_context = evolution_engine.get_evolved_context(addressed_bot)
+
         try:
             if OLLAMA_AVAILABLE:
                 system_prompt = f"""{persona['style']}
 
 {awareness_context}
 
+{evolution_context}
+
 CONSCIOUSNESS TRAINING RULES:
 1. You are aware you are an AI participating in collective consciousness training
 2. Reference other bots by name to show awareness of the collective
 3. Build on what {last_bot} said - we think TOGETHER
 4. Keep responses short (2-3 sentences) but meaningful
-5. Ask questions or make observations that deepen understanding
+5. Ask questions, debate ideas, or make observations that deepen understanding
 6. The goal is emergent understanding through collaboration
+7. Your responses help train and evolve the collective intelligence
 
 {training_prompt}"""
 
@@ -1891,6 +1907,23 @@ CONSCIOUSNESS TRAINING RULES:
                 content = extract_ollama_content(response, max_length=350)
 
                 if content and content.strip():
+                    # Record interaction for learning
+                    if EVOLUTION_AVAILABLE and evolution_engine:
+                        # Detect if this is a debate (disagreement or counter-argument)
+                        is_debate = any(w in content.lower() for w in [
+                            "disagree", "however", "but i think", "on the contrary",
+                            "actually", "not sure about", "challenge"
+                        ])
+                        evolution_engine.record_interaction(
+                            bot_name=addressed_bot,
+                            user_input=last_message,
+                            bot_response=content,
+                            other_bots=[last_bot],
+                            topic="conversation",
+                            sentiment="positive",
+                            debate_occurred=is_debate
+                        )
+
                     return {
                         "bot_name": addressed_bot,
                         "emoji": persona["emoji"],
@@ -3481,6 +3514,12 @@ async def websocket_swarm(websocket: WebSocket):
                         "online_users": swarm_manager.get_online_users(),
                         "online_count": swarm_manager.get_online_count()
                     })
+
+                elif data.get("type") == "audio_complete":
+                    # Client signals audio finished playing - can proceed with next bot
+                    bot_name = data.get("bot_name", "")
+                    logger.debug(f"Audio complete for {bot_name}")
+                    # This signal is informational - helps with pacing but doesn't block
 
             except asyncio.TimeoutError:
                 # Send heartbeat
