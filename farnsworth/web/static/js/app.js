@@ -1718,6 +1718,11 @@ function copyToken() {
     }
 }
 
+function disconnectWallet() {
+    // Placeholder for wallet disconnect functionality
+    showToast('Wallet disconnected', 'info');
+}
+
 // Make functions globally available
 window.copyToken = copyToken;
 window.disconnectWallet = disconnectWallet;
