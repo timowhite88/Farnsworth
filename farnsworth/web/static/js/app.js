@@ -1753,10 +1753,44 @@ function switchChatMode(toSwarm) {
 }
 
 function initSwarmMode() {
-    // Initialize in personal mode by default, user can switch to swarm
-    console.log('[Chat] Initializing in personal mode (click 🐝 Swarm to join swarm chat)');
-    state.swarmMode = false;
-    addWelcomeMessage();
+    // Auto-connect to swarm mode - community chat where everyone talks together!
+    console.log('[Chat] Auto-connecting to Global Swarm!');
+    switchChatMode(true);  // Start in swarm mode by default
+}
+
+// Username management for swarm chat
+function getOrPromptUsername() {
+    let username = localStorage.getItem("swarmUsername");
+    if (!username) {
+        username = prompt("Welcome to the Swarm! Enter a display name:", "");
+        if (username && username.trim()) {
+            username = username.trim().slice(0, 20);
+            localStorage.setItem("swarmUsername", username);
+        } else {
+            username = "User_" + Math.random().toString(36).slice(2, 8);
+            localStorage.setItem("swarmUsername", username);
+        }
+    }
+    return username;
+}
+
+function changeUsername() {
+    const currentName = localStorage.getItem("swarmUsername") || state.swarmUserName || "";
+    const newName = prompt("Enter new display name:", currentName);
+    if (newName && newName.trim()) {
+        const username = newName.trim().slice(0, 20);
+        localStorage.setItem("swarmUsername", username);
+        state.swarmUserName = username;
+        showToast("Username changed to: " + username, "success");
+        // Update display
+        const usernameSpan = document.getElementById("current-username");
+        if (usernameSpan) usernameSpan.textContent = username;
+        // Reconnect to apply new name
+        if (state.swarmConnected) {
+            disconnectSwarmChat();
+            setTimeout(connectSwarmChat, 500);
+        }
+    }
 }
 
 function connectSwarmChat() {
@@ -1776,9 +1810,12 @@ function connectSwarmChat() {
 
         state.swarmWs.onopen = () => {
             console.log('[Swarm] WebSocket connected!');
-            // Send identification
-            const userName = `User_${Math.random().toString(36).slice(2, 8)}`;
+            // Use stored username or prompt for one
+            const userName = getOrPromptUsername();
             state.swarmUserName = userName;
+            // Update username display
+            const usernameSpan = document.getElementById("current-username");
+            if (usernameSpan) usernameSpan.textContent = userName;
             console.log('[Swarm] Sending identification as:', userName);
             state.swarmWs.send(JSON.stringify({
                 type: 'identify',
@@ -1840,6 +1877,11 @@ function handleSwarmMessage(data) {
             break;
 
         case 'swarm_user':
+            // Skip if this is our own message (already shown via optimistic UI)
+            if (data.user_id === state.swarmUserId) {
+                console.log('[Swarm] Skipping own message (already displayed)');
+                break;
+            }
             renderSwarmMessage(data);
             break;
 
@@ -2203,6 +2245,17 @@ async function sendSwarmMessage() {
     document.getElementById('send-btn').disabled = true;
     input.style.height = 'auto';
 
+    // Optimistic UI: Show own message immediately
+    const timestamp = new Date().toISOString();
+    renderSwarmMessage({
+        type: 'swarm_user',
+        user_name: state.swarmUserName || 'You',
+        user_id: state.swarmUserId,
+        content: message,
+        timestamp: timestamp,
+        msg_id: `own_${timestamp}_${message.substring(0, 10)}`
+    }, true);
+
     // Send to swarm
     state.swarmWs.send(JSON.stringify({
         type: 'swarm_message',
@@ -2214,3 +2267,5 @@ async function sendSwarmMessage() {
 window.switchChatMode = switchChatMode;
 window.connectSwarmChat = connectSwarmChat;
 window.disconnectSwarmChat = disconnectSwarmChat;
+window.changeUsername = changeUsername;
+window.getOrPromptUsername = getOrPromptUsername;
