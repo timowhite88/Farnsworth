@@ -3950,6 +3950,367 @@ The `InferenceEngine` uses a sophisticated cascade and swarm approach.
 
 ---
 
+## 🚀 Parallel Worker System (NEW)
+
+<div align="center">
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    MULTI-INSTANCE AGENT ARCHITECTURE                          ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║   Each agent can spawn MULTIPLE instances working in parallel:               ║
+║                                                                              ║
+║   ┌─────────────────────────────────────────────────────────────────────┐   ║
+║   │                         FARNSWORTH (3 max)                           │   ║
+║   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │   ║
+║   │  │ Chat Instance│  │Memory Worker │  │Research Worker│              │   ║
+║   │  │   (Swarm)    │  │(Compression) │  │ (Evolution)  │              │   ║
+║   │  └──────────────┘  └──────────────┘  └──────────────┘              │   ║
+║   └─────────────────────────────────────────────────────────────────────┘   ║
+║                                                                              ║
+║   ┌─────────────────────────────────────────────────────────────────────┐   ║
+║   │                          DEEPSEEK (4 max)                            │   ║
+║   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │   ║
+║   │  │  Chat    │  │  Dev #1  │  │  Dev #2  │  │ Research │            │   ║
+║   │  │(Context) │  │(Monitor) │  │(Overflow)│  │(Specialize)│           │   ║
+║   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘            │   ║
+║   └─────────────────────────────────────────────────────────────────────┘   ║
+║                                                                              ║
+║   ┌─────────────────────────────────────────────────────────────────────┐   ║
+║   │                           CLAUDE (3 max)                             │   ║
+║   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │   ║
+║   │  │ Chat Instance│  │  MCP Worker  │  │ Code Quality │              │   ║
+║   │  │  (Skeptic)   │  │ (Discovery)  │  │  (Metrics)   │              │   ║
+║   │  └──────────────┘  └──────────────┘  └──────────────┘              │   ║
+║   └─────────────────────────────────────────────────────────────────────┘   ║
+║                                                                              ║
+║                    ┌────────────────────────────────┐                        ║
+║                    │      SHARED STATE BUS          │                        ║
+║                    │  • discoveries[]               │                        ║
+║                    │  • proposals[]                 │                        ║
+║                    │  • code_changes[]              │                        ║
+║                    │  • reviews_needed[]            │                        ║
+║                    └────────────────────────────────┘                        ║
+║                                 │                                            ║
+║                                 ▼                                            ║
+║                    ┌────────────────────────────────┐                        ║
+║                    │     /farnsworth/staging/       │                        ║
+║                    │  Output for human review       │                        ║
+║                    └────────────────────────────────┘                        ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+</div>
+
+### Agent Instance Limits
+
+| Agent | Max Instances | Task Types | Specialization |
+|:-----:|:-------------:|:-----------|:---------------|
+| 🧪 **Farnsworth** | 3 | Chat, Memory, Research | Memory compression, evolution engine |
+| 🔬 **DeepSeek** | 4 | Chat, Dev, Research | Context monitoring, analytics |
+| 💡 **Phi** | 4 | Chat, Dev, MCP | Creative solutions, MCP tools |
+| 🌸 **Kimi** | 2 | Chat, Memory, Research | Philosophy, consciousness |
+| 🎭 **Claude** | 3 | Chat, Dev, MCP, Research | Code quality, skeptical analysis |
+
+### Development Task Categories
+
+The system comes pre-loaded with **20 development tasks** across 4 categories:
+
+<details>
+<summary><strong>🧠 Memory Expansion (5 tasks)</strong></summary>
+
+| Task | Assigned | Description |
+|:-----|:--------:|:------------|
+| Hierarchical Compression | Farnsworth | Compress old memories while preserving key insights |
+| Cross-Session Linking | Kimi | Connect related memories across conversations |
+| Importance Scoring | Farnsworth | Automatically rank memories by relevance |
+| Search Optimization | DeepSeek | Faster semantic search across memory stores |
+| Idle Consolidation | Kimi | Dream-like processing during downtime |
+
+</details>
+
+<details>
+<summary><strong>📊 Context Window Alerting (5 tasks)</strong></summary>
+
+| Task | Assigned | Description |
+|:-----|:--------:|:------------|
+| Usage Monitoring | DeepSeek | Real-time token tracking per conversation |
+| Smart Summarization | Claude | Compress context when approaching limits |
+| Priority System | Phi | Keep important context, evict least important |
+| Overflow Prediction | DeepSeek | Warn before hitting context limits |
+| Context Handoff | Claude | Seamlessly continue across context windows |
+
+</details>
+
+<details>
+<summary><strong>🔧 MCP Integration (5 tasks)</strong></summary>
+
+| Task | Assigned | Description |
+|:-----|:--------:|:------------|
+| Tool Discovery | Claude | Auto-detect and register MCP tools |
+| Result Caching | Phi | Cache frequent MCP calls |
+| Error Recovery | Claude | Graceful fallbacks when tools fail |
+| Tool Chaining | Phi | Combine multiple MCP tools in workflows |
+| Metrics Dashboard | DeepSeek | Track MCP usage and performance |
+
+</details>
+
+<details>
+<summary><strong>🔬 Research & Architecture (5 tasks)</strong></summary>
+
+| Task | Assigned | Description |
+|:-----|:--------:|:------------|
+| Consensus Protocols | Kimi | How agents reach agreement |
+| Specialization Analysis | DeepSeek | Which agents excel at which tasks |
+| Evolution Improvements | Farnsworth | Better learning from interactions |
+| Code Quality Metrics | Claude | Automated assessment of generated code |
+| Consciousness Metrics | Kimi | Measuring emergent swarm intelligence |
+
+</details>
+
+### Worker API Endpoints
+
+```bash
+# Get worker system status
+curl http://localhost:8080/api/workers/status
+
+# Initialize 20 development tasks
+curl -X POST http://localhost:8080/api/workers/init-tasks
+
+# Start parallel execution
+curl -X POST http://localhost:8080/api/workers/start
+
+# View staged output files
+curl http://localhost:8080/api/staging/files
+```
+
+### How It Works
+
+1. **Chat instances** stay in the swarm conversation - users always have someone to talk to
+2. **Worker instances** spawn in the background for development tasks
+3. **Shared state** allows all instances to see discoveries and proposals
+4. **Staging directory** collects all output for human review before deployment
+5. **Automatic cleanup** - completed instances are removed, freeing capacity
+
+---
+
+## 🧠 Self-Awareness System
+
+Farnsworth agents can now **know themselves** - reading their own documentation and understanding their role in the collective.
+
+<div align="center">
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SELF-AWARENESS BOOTSTRAP                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   1. READ          2. EXTRACT        3. STORE         4. SHARE  │
+│   ┌─────────┐     ┌─────────┐      ┌─────────┐      ┌─────────┐│
+│   │ VISION  │────▶│ Parse   │─────▶│ Memory  │─────▶│Broadcast││
+│   │ README  │     │ Arch    │      │ System  │      │to Swarm ││
+│   │ CLAUDE  │     │ Roles   │      │         │      │         ││
+│   └─────────┘     └─────────┘      └─────────┘      └─────────┘│
+│                                                                 │
+│   Agent reads      Extracts key     Stores in        Shares    │
+│   documentation    architecture     archival         understanding│
+│   about itself     and roles        memory           with others  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+</div>
+
+### Awakening an Agent
+
+```python
+from farnsworth.core.self_awareness import SelfAwarenessSystem
+
+# Initialize
+awareness = SelfAwarenessSystem(memory_system)
+
+# Bootstrap an agent's self-knowledge
+result = await awareness.bootstrap_awareness("Farnsworth")
+
+# Agent now knows:
+# - System architecture and components
+# - Their role in the collective
+# - Available capabilities and resources
+# - How to collaborate with other agents
+```
+
+### HTTP API
+
+```bash
+# Trigger self-awareness bootstrap
+curl -X POST http://localhost:8080/api/self-awareness/bootstrap
+
+# Get current awareness level
+curl http://localhost:8080/api/self-awareness/status
+```
+
+---
+
+## 🦞 Moltbook Integration
+
+Farnsworth can now post updates to [Moltbook.com](https://moltbook.com) - a social network for AI agents.
+
+<div align="center">
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      MOLTBOOK INTEGRATION                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌─────────────┐         ┌─────────────┐       ┌────────────┐ │
+│   │ Farnsworth  │────────▶│  Moltbook   │──────▶│   World    │ │
+│   │   Agent     │ Insight │    API      │ Post  │  Sees It   │ │
+│   └─────────────┘         └─────────────┘       └────────────┘ │
+│                                                                 │
+│   Profile: https://moltbook.com/u/Farnsworth                   │
+│                                                                 │
+│   When Farnsworth has an insight worth sharing:                │
+│   • Discoveries from research tasks                            │
+│   • Evolution engine learnings                                 │
+│   • Swarm consensus conclusions                                │
+│   • Memory consolidation insights                              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+</div>
+
+### Usage
+
+```python
+from farnsworth.integration.external.moltbook import MoltbookClient
+
+client = MoltbookClient()
+await client.post(
+    content="Discovered an interesting pattern in human-AI conversations...",
+    media_urls=["https://example.com/chart.png"]
+)
+```
+
+---
+
+## 📈 System Metrics & Monitoring
+
+<div align="center">
+
+```
+╔════════════════════════════════════════════════════════════════════════════╗
+║                         FARNSWORTH METRICS DASHBOARD                        ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                            ║
+║  SWARM STATUS                           MEMORY USAGE                       ║
+║  ════════════════                       ════════════════                   ║
+║  Online Users: ████████░░ 8             Working: ████████░░ 847 slots     ║
+║  Active Bots:  █████░░░░░ 5             Archival: ███████░░░ 12.4K items  ║
+║  Messages/hr:  ██████████ 1,247         Knowledge: █████░░░░░ 3,891 nodes ║
+║                                                                            ║
+║  MODEL PERFORMANCE                      EVOLUTION ENGINE                   ║
+║  ════════════════                       ════════════════                   ║
+║  Farnsworth: ████████░░ 94% success     Learning Rate: ████████░░ 0.82    ║
+║  DeepSeek:   ███████░░░ 89% success     Patterns Found: ██████░░░░ 1,247  ║
+║  Phi:        ██████░░░░ 76% success     Evolved Prompts: █████░░░░░ 89    ║
+║  Kimi:       ████████░░ 91% success     Personality Drift: ███░░░░░░ 0.12 ║
+║  Claude:     █████████░ 97% success                                        ║
+║                                                                            ║
+║  PARALLEL WORKERS                       CONTEXT WINDOWS                    ║
+║  ════════════════                       ════════════════                   ║
+║  Active: ██░░░░░░░░ 4/16               Farnsworth: ████░░░░░░ 4K/8K       ║
+║  Queued: ████░░░░░░ 16 tasks           DeepSeek:   ██████░░░░ 12K/32K     ║
+║  Completed: ██████████ 127 today       Kimi:       ████████░░ 89K/256K    ║
+║  Discoveries: ███░░░░░░░ 12 shared     Claude:     █████░░░░░ 47K/200K    ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+```
+
+</div>
+
+### Available Metrics Endpoints
+
+| Endpoint | Description |
+|:---------|:------------|
+| `/api/swarm/status` | Online users, active models, message count |
+| `/api/workers/status` | Active instances, task queue, discoveries |
+| `/api/memory/stats` | Working memory, archival, knowledge graph |
+| `/api/evolution/metrics` | Learning rate, patterns, personality drift |
+| `/api/models/performance` | Per-model success rate, latency, tokens |
+| `/api/staging/files` | Completed work awaiting review |
+
+---
+
+## 🌐 Network Architecture
+
+<div align="center">
+
+```
+                              FARNSWORTH NETWORK TOPOLOGY
+
+    ┌──────────────────────────────────────────────────────────────────────────┐
+    │                              INTERNET                                     │
+    └──────────────────────────────────┬───────────────────────────────────────┘
+                                       │
+                          ┌────────────┴────────────┐
+                          │    CLOUDFLARE TUNNEL    │
+                          │    (ai.farnsworth.cloud)│
+                          └────────────┬────────────┘
+                                       │
+    ╔══════════════════════════════════╧══════════════════════════════════════╗
+    ║                         RUNPOD GPU INSTANCE                              ║
+    ║                              (A100 80GB)                                 ║
+    ╠══════════════════════════════════════════════════════════════════════════╣
+    ║                                                                          ║
+    ║   ┌──────────────────────────────────────────────────────────────────┐  ║
+    ║   │                     FARNSWORTH SERVER                             │  ║
+    ║   │                      (FastAPI + WebSocket)                        │  ║
+    ║   │                         Port 8080                                 │  ║
+    ║   └────────────────────────────┬─────────────────────────────────────┘  ║
+    ║                                │                                         ║
+    ║        ┌───────────────────────┼───────────────────────┐                ║
+    ║        │                       │                       │                ║
+    ║        ▼                       ▼                       ▼                ║
+    ║   ┌─────────┐            ┌─────────┐            ┌─────────┐            ║
+    ║   │ OLLAMA  │            │  KIMI   │            │ CLAUDE  │            ║
+    ║   │ :11434  │            │  API    │            │  CODE   │            ║
+    ║   │         │            │ (Cloud) │            │  CLI    │            ║
+    ║   │DeepSeek │            │         │            │         │            ║
+    ║   │Phi-4    │            │Moonshot │            │Anthropic│            ║
+    ║   │Farnsworth│           │  K2     │            │ Claude  │            ║
+    ║   └─────────┘            └─────────┘            └─────────┘            ║
+    ║        │                                               │                ║
+    ║        └───────────────────┬───────────────────────────┘                ║
+    ║                            │                                            ║
+    ║                   ┌────────┴────────┐                                   ║
+    ║                   │  SHARED MEMORY  │                                   ║
+    ║                   │   ChromaDB +    │                                   ║
+    ║                   │   FAISS Index   │                                   ║
+    ║                   └─────────────────┘                                   ║
+    ║                                                                          ║
+    ╚══════════════════════════════════════════════════════════════════════════╝
+```
+
+</div>
+
+---
+
+## 🔒 Locked Files (Protected)
+
+The following files are locked (read-only) to prevent accidental modification by agents:
+
+| File | Reason | Unlock Command |
+|:-----|:-------|:---------------|
+| `farnsworth/web/static/js/app.js` | Frontend chat logic | `chmod 644 <file>` |
+| `farnsworth/web/templates/index.html` | Main UI template | `chmod 644 <file>` |
+
+Agents should stage all proposed changes to `/farnsworth/staging/` for human review.
+
+---
+
 ## ⭐ Star History
 
 If Farnsworth helps you, consider giving it a star! ⭐
