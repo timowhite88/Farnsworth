@@ -2536,6 +2536,39 @@ body:has(.training-banner.active) .chat-section {
     transform: scale(1);
 }
 
+/* Username Button */
+.username-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    border-radius: 16px;
+    padding: 4px 12px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-left: 8px;
+}
+
+.username-btn:hover {
+    background: rgba(139, 92, 246, 0.35);
+    border-color: rgba(139, 92, 246, 0.6);
+    transform: translateY(-1px);
+}
+
+.username-btn .username-icon {
+    font-size: 0.9rem;
+}
+
+#current-username {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Swarm Welcome Message */
 .swarm-welcome {
     max-width: 600px;

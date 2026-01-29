@@ -35,7 +35,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260129a">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
 
     <!-- Chart.js for health metrics -->
@@ -92,6 +92,10 @@
                     <span class="swarm-title">Global Swarm</span>
                     <span class="online-badge" id="swarm-online-count">0</span>
                     <span class="swarm-live-dot"></span>
+                    <button class="username-btn" onclick="changeUsername()" title="Change your display name">
+                        <span class="username-icon">👤</span>
+                        <span id="current-username">You</span>
+                    </button>
                 </div>
 
                 <!-- Profile Switcher -->
@@ -505,6 +509,6 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20260129a"></script>
 </body>
 </html>
