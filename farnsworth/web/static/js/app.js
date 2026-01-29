@@ -569,49 +569,67 @@ async function processServerAudioQueue() {
         currentAudio = null;
     }
 
-    try {
-        const response = await fetch(audioUrl);
-        if (response.ok) {
-            const audioBlob = await response.blob();
-            const blobUrl = URL.createObjectURL(audioBlob);
-            currentAudio = new Audio(blobUrl);
+    // Retry logic - TTS may not be ready immediately
+    const maxRetries = 8;
+    const retryDelay = 500;
 
-            currentAudio.onended = () => {
-                URL.revokeObjectURL(blobUrl);
-                currentAudio = null;
-                isPlayingAudio = false;
-                console.log('[Audio] Farnsworth finished speaking');
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await fetch(audioUrl);
+            if (response.ok) {
+                const audioBlob = await response.blob();
+                const blobUrl = URL.createObjectURL(audioBlob);
+                currentAudio = new Audio(blobUrl);
 
-                // Signal server that audio finished
-                if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
-                    state.swarmWs.send(JSON.stringify({
-                        type: 'audio_complete',
-                        bot_name: 'Farnsworth'
-                    }));
-                }
+                currentAudio.onended = () => {
+                    URL.revokeObjectURL(blobUrl);
+                    currentAudio = null;
+                    isPlayingAudio = false;
+                    console.log("[Audio] Finished speaking");
 
-                // Process next in queue
-                processServerAudioQueue();
-            };
+                    // Signal server that audio finished
+                    if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
+                        state.swarmWs.send(JSON.stringify({
+                            type: "audio_complete",
+                            bot_name: "Farnsworth"
+                        }));
+                    }
 
-            currentAudio.onerror = (e) => {
-                console.error('[Audio] Error playing server audio:', e);
-                isPlayingAudio = false;
-                processServerAudioQueue();
-            };
+                    // Process next in queue
+                    processServerAudioQueue();
+                };
 
-            console.log('[Audio] Playing Farnsworth voice, remaining in queue:', serverAudioQueue.length);
-            await currentAudio.play();
-        } else {
-            console.warn('[Audio] Server audio not ready yet');
-            isPlayingAudio = false;
-            processServerAudioQueue();
+                currentAudio.onerror = (e) => {
+                    console.error("[Audio] Error playing audio:", e);
+                    isPlayingAudio = false;
+                    processServerAudioQueue();
+                };
+
+                console.log("[Audio] Playing voice, queue:", serverAudioQueue.length);
+                await currentAudio.play();
+                return; // Success - exit retry loop
+            } else if (response.status === 404 && attempt < maxRetries - 1) {
+                console.log("[Audio] TTS not ready, retry " + (attempt + 1) + "/" + maxRetries);
+                await new Promise(r => setTimeout(r, retryDelay));
+                continue;
+            } else {
+                console.warn("[Audio] Fetch failed:", response.status);
+                break;
+            }
+        } catch (e) {
+            if (attempt < maxRetries - 1) {
+                console.log("[Audio] Fetch error, retry " + (attempt + 1));
+                await new Promise(r => setTimeout(r, retryDelay));
+                continue;
+            }
+            console.error("[Audio] Failed:", e);
+            break;
         }
-    } catch (error) {
-        console.error('[Audio] Failed to fetch server audio:', error);
-        isPlayingAudio = false;
-        processServerAudioQueue();
     }
+
+    // All retries failed
+    isPlayingAudio = false;
+    processServerAudioQueue();
 }
 
 // Sequential audio playback - bots wait for each other
@@ -1753,44 +1771,10 @@ function switchChatMode(toSwarm) {
 }
 
 function initSwarmMode() {
-    // Auto-connect to swarm mode - community chat where everyone talks together!
-    console.log('[Chat] Auto-connecting to Global Swarm!');
-    switchChatMode(true);  // Start in swarm mode by default
-}
-
-// Username management for swarm chat
-function getOrPromptUsername() {
-    let username = localStorage.getItem("swarmUsername");
-    if (!username) {
-        username = prompt("Welcome to the Swarm! Enter a display name:", "");
-        if (username && username.trim()) {
-            username = username.trim().slice(0, 20);
-            localStorage.setItem("swarmUsername", username);
-        } else {
-            username = "User_" + Math.random().toString(36).slice(2, 8);
-            localStorage.setItem("swarmUsername", username);
-        }
-    }
-    return username;
-}
-
-function changeUsername() {
-    const currentName = localStorage.getItem("swarmUsername") || state.swarmUserName || "";
-    const newName = prompt("Enter new display name:", currentName);
-    if (newName && newName.trim()) {
-        const username = newName.trim().slice(0, 20);
-        localStorage.setItem("swarmUsername", username);
-        state.swarmUserName = username;
-        showToast("Username changed to: " + username, "success");
-        // Update display
-        const usernameSpan = document.getElementById("current-username");
-        if (usernameSpan) usernameSpan.textContent = username;
-        // Reconnect to apply new name
-        if (state.swarmConnected) {
-            disconnectSwarmChat();
-            setTimeout(connectSwarmChat, 500);
-        }
-    }
+    // Initialize in personal mode by default, user can switch to swarm
+    console.log('[Chat] Initializing in personal mode (click 🐝 Swarm to join swarm chat)');
+    state.swarmMode = false;
+    addWelcomeMessage();
 }
 
 function connectSwarmChat() {
@@ -1810,12 +1794,9 @@ function connectSwarmChat() {
 
         state.swarmWs.onopen = () => {
             console.log('[Swarm] WebSocket connected!');
-            // Use stored username or prompt for one
-            const userName = getOrPromptUsername();
+            // Send identification
+            const userName = `User_${Math.random().toString(36).slice(2, 8)}`;
             state.swarmUserName = userName;
-            // Update username display
-            const usernameSpan = document.getElementById("current-username");
-            if (usernameSpan) usernameSpan.textContent = userName;
             console.log('[Swarm] Sending identification as:', userName);
             state.swarmWs.send(JSON.stringify({
                 type: 'identify',
@@ -1861,6 +1842,11 @@ function disconnectSwarmChat() {
 }
 
 function handleSwarmMessage(data) {
+    // Debug: Log all incoming swarm messages
+    if (data.type !== 'heartbeat' && data.type !== 'pong') {
+        console.log('[Swarm] handleSwarmMessage:', data.type, data.bot_name || data.user_name || 'system');
+    }
+
     switch (data.type) {
         case 'swarm_connected':
             state.swarmConnected = true;
@@ -1871,21 +1857,19 @@ function handleSwarmMessage(data) {
 
             // Load history
             if (data.messages) {
+                console.log('[Swarm] Loading', data.messages.length, 'history messages');
                 data.messages.forEach(msg => renderSwarmMessage(msg, false));
             }
             showToast(`🐝 Connected to Swarm! ${data.online_count} users online`, 'success');
             break;
 
         case 'swarm_user':
-            // Skip if this is our own message (already shown via optimistic UI)
-            if (data.user_id === state.swarmUserId) {
-                console.log('[Swarm] Skipping own message (already displayed)');
-                break;
-            }
+            console.log('[Swarm] User message from', data.user_name);
             renderSwarmMessage(data);
             break;
 
         case 'swarm_bot':
+            console.log('[Swarm] Bot message from', data.bot_name, '- calling renderSwarmMessage');
             renderSwarmMessage(data);
             break;
 
@@ -1919,8 +1903,13 @@ function handleSwarmMessage(data) {
 const renderedMessageIds = new Set();
 
 function renderSwarmMessage(data, animate = true) {
+    console.log('[Swarm] renderSwarmMessage called:', data.type, data.bot_name || data.user_name, 'content length:', (data.content || '').length);
+
     const messagesContainer = document.getElementById('messages');
-    if (!messagesContainer) return;
+    if (!messagesContainer) {
+        console.error('[Swarm] Messages container not found!');
+        return;
+    }
 
     // Deduplication: check if we've already rendered this message
     const msgId = data.msg_id || `${data.bot_name || data.user_name}_${data.timestamp}_${(data.content || '').substring(0, 20)}`;
@@ -1929,6 +1918,7 @@ function renderSwarmMessage(data, animate = true) {
         return;
     }
     renderedMessageIds.add(msgId);
+    console.log('[Swarm] Rendering message:', msgId);
 
     // Keep set size manageable
     if (renderedMessageIds.size > 100) {
@@ -1989,12 +1979,15 @@ function renderSwarmMessage(data, animate = true) {
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-    // Voice for Farnsworth only - he's the voice of the system
-    if (data.type === 'swarm_bot' && state.voiceEnabled && data.bot_name === 'Farnsworth') {
+    // Voice for Farnsworth and Kimi (TTS-enabled bots)
+    const voiceEnabledBots = ['Farnsworth', 'Kimi'];
+    if (data.type === 'swarm_bot' && state.voiceEnabled && voiceEnabledBots.includes(data.bot_name)) {
         // Use pre-generated audio URL if available (server-side TTS)
         if (data.audio_url) {
+            console.log('[Audio] Playing TTS for', data.bot_name, 'url:', data.audio_url);
             playServerAudio(data.audio_url);
         } else {
+            console.log('[Audio] Fallback TTS for', data.bot_name);
             speakText(content, data.bot_name);
         }
     }
@@ -2245,17 +2238,6 @@ async function sendSwarmMessage() {
     document.getElementById('send-btn').disabled = true;
     input.style.height = 'auto';
 
-    // Optimistic UI: Show own message immediately
-    const timestamp = new Date().toISOString();
-    renderSwarmMessage({
-        type: 'swarm_user',
-        user_name: state.swarmUserName || 'You',
-        user_id: state.swarmUserId,
-        content: message,
-        timestamp: timestamp,
-        msg_id: `own_${timestamp}_${message.substring(0, 10)}`
-    }, true);
-
     // Send to swarm
     state.swarmWs.send(JSON.stringify({
         type: 'swarm_message',
@@ -2267,5 +2249,3 @@ async function sendSwarmMessage() {
 window.switchChatMode = switchChatMode;
 window.connectSwarmChat = connectSwarmChat;
 window.disconnectSwarmChat = disconnectSwarmChat;
-window.changeUsername = changeUsername;
-window.getOrPromptUsername = getOrPromptUsername;
