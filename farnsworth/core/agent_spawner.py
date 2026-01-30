@@ -80,6 +80,7 @@ class AgentSpawner:
             "Phi": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.MCP],
             "Kimi": [TaskType.CHAT, TaskType.MEMORY, TaskType.RESEARCH],
             "Claude": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.MCP, TaskType.RESEARCH],
+            "OpenCode": [TaskType.DEVELOPMENT, TaskType.RESEARCH, TaskType.MCP],  # Open source AI coding agent
         }
 
         # Max concurrent instances per agent
@@ -89,6 +90,7 @@ class AgentSpawner:
             "Phi": 4,
             "Kimi": 2,
             "Claude": 3,
+            "OpenCode": 3,  # CLI-based agent, can run multiple instances
         }
 
         logger.info("AgentSpawner initialized with staging dir: %s", staging_dir)
@@ -296,6 +298,12 @@ DEVELOPMENT_TASKS = [
     {"type": TaskType.RESEARCH, "agent": "Farnsworth", "desc": "Evolution engine improvements - better learning from interactions"},
     {"type": TaskType.RESEARCH, "agent": "Claude", "desc": "Code quality metrics - automated assessment of generated code"},
     {"type": TaskType.RESEARCH, "agent": "Kimi", "desc": "Collective consciousness metrics - measuring emergent swarm intelligence"},
+
+    # OpenCode Integration (4 tasks) - Open source AI coding agent
+    {"type": TaskType.DEVELOPMENT, "agent": "OpenCode", "desc": "Build async file watcher - monitor staging dir for new code to review"},
+    {"type": TaskType.DEVELOPMENT, "agent": "OpenCode", "desc": "Create code diff visualizer - show changes between staged and production code"},
+    {"type": TaskType.MCP, "agent": "OpenCode", "desc": "Build MCP tool for automated testing - run pytest on staged changes"},
+    {"type": TaskType.RESEARCH, "agent": "OpenCode", "desc": "Analyze agent collaboration patterns - which agents work well together"},
 ]
 
 def initialize_development_tasks():

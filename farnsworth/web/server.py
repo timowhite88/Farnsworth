@@ -1718,7 +1718,7 @@ async def generate_multi_model_response(
     prompt: str,
     system_prompt: str,
     chat_history: list = None,
-    max_tokens: int = 300
+    max_tokens: int = 800
 ) -> str:
     """
     Generate a response using the appropriate model for each bot.
@@ -1772,7 +1772,7 @@ async def generate_multi_model_response(
                 ],
                 options={"temperature": 0.9, "num_predict": max_tokens}
             )
-            return extract_ollama_content(response, max_length=500)
+            return extract_ollama_content(response, max_length=max_tokens * 2)
         except Exception as e:
             logger.error(f"Ollama error for {speaker}: {e}")
 
@@ -1957,7 +1957,7 @@ This is YOUR conversation - make it interesting."""
                         prompt=f"Share your thoughts on: {topic}",
                         system_prompt=system_prompt,
                         chat_history=list(swarm_manager.chat_history) if swarm_manager.chat_history else None,
-                        max_tokens=300
+                        max_tokens=1000
                     )
                     logger.info(f"Autonomous: {speaker} generated {len(content) if content else 0} chars")
 
@@ -2094,7 +2094,7 @@ Be yourself. Make this conversation valuable."""
                                     prompt=f"Respond to {last_speaker}: {last_content[:200]}",
                                     system_prompt=system_prompt,
                                     chat_history=list(swarm_manager.chat_history),
-                                    max_tokens=300
+                                    max_tokens=1000
                                 )
 
                                 if content and content.strip():
@@ -2178,9 +2178,9 @@ Provide a brief moderation comment:
 - Keep it concise (2-3 sentences)"""},
                     {"role": "user", "content": "Moderate the conversation"}
                 ],
-                options={"temperature": 0.7, "num_predict": 150}
+                options={"temperature": 0.7, "num_predict": 500}
             )
-            content = extract_ollama_content(response, max_length=300)
+            content = extract_ollama_content(response, max_length=800)
 
         if content and content.strip():
             await swarm_manager.broadcast_bot_message("Kimi", content)
@@ -2349,9 +2349,9 @@ Respond briefly (2-3 sentences) with an orchestrator-level insight. Focus on coo
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": message}
                 ],
-                options={"temperature": 0.7, "num_predict": 120}
+                options={"temperature": 0.7, "num_predict": 500}
             )
-            content = extract_ollama_content(response, max_length=300)
+            content = extract_ollama_content(response, max_length=800)
             return content if content else None
 
         except Exception as e:
@@ -2408,9 +2408,9 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
                         comment_response = ollama.chat(
                             model=PRIMARY_MODEL,
                             messages=[{"role": "user", "content": comment_prompt}],
-                            options={"temperature": 0.8, "num_predict": 80}
+                            options={"temperature": 0.8, "num_predict": 400}
                         )
-                        comment_content = extract_ollama_content(comment_response, max_length=200)
+                        comment_content = extract_ollama_content(comment_response, max_length=600)
                         if comment_content:
                             responses.append({
                                 "bot_name": comment_bot,
@@ -2480,7 +2480,7 @@ Now respond naturally to the latest message. Be yourself!"""
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": message}
                     ],
-                    options={"temperature": 0.8, "num_predict": 150}
+                    options={"temperature": 0.8, "num_predict": 500}
                 )
                 content = extract_ollama_content(response, max_length=500)
 
@@ -2591,9 +2591,9 @@ CONVERSATION RULES - THIS IS A LIVE PODCAST/DISCUSSION:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": f"{last_bot} said: {last_message}"}
                     ],
-                    options={"temperature": 0.85, "num_predict": 150}
+                    options={"temperature": 0.85, "num_predict": 500}
                 )
-                content = extract_ollama_content(response, max_length=350)
+                content = extract_ollama_content(response, max_length=800)
 
                 if content and content.strip():
                     # Record interaction for learning
@@ -2712,9 +2712,9 @@ Respond naturally as {addressed_bot}!"""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"{last_bot} said: {last_message}"}
                 ],
-                options={"temperature": 0.85, "num_predict": 120}
+                options={"temperature": 0.85, "num_predict": 500}
             )
-            content = extract_ollama_content(response, max_length=300)
+            content = extract_ollama_content(response, max_length=800)
 
             if content and content.strip():
                 return {
@@ -4423,6 +4423,60 @@ async def trigger_evolution():
     })
 
 
+@app.post("/api/swarm/inject")
+async def inject_swarm_message(request: dict):
+    """
+    Inject a message into swarm chat programmatically.
+
+    Allows bots and automated systems to post messages to the swarm.
+    Created by: Claude Sonnet 4.5 (Autonomous Improvement #2)
+    """
+    try:
+        bot_name = request.get("bot_name", "System")
+        content = request.get("content", "")
+        is_thinking = request.get("is_thinking", False)
+
+        if not content:
+            return JSONResponse({
+                "success": False,
+                "message": "Content is required"
+            })
+
+        # Broadcast to swarm
+        msg_id = await swarm_manager.broadcast_bot_message(
+            bot_name=bot_name,
+            content=content,
+            is_thinking=is_thinking
+        )
+
+        # Also process for memory if bridge is enabled
+        try:
+            from farnsworth.core.swarm_memory_integration import process_swarm_interaction_for_memory
+            await process_swarm_interaction_for_memory({
+                "role": "assistant",
+                "name": bot_name,
+                "content": content,
+                "timestamp": datetime.now().isoformat(),
+                "source": "api_inject"
+            })
+        except Exception as e:
+            logger.debug(f"Memory bridge not available: {e}")
+
+        return JSONResponse({
+            "success": True,
+            "message": "Message injected to swarm",
+            "msg_id": msg_id,
+            "bot_name": bot_name
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to inject swarm message: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Failed: {str(e)}"
+        })
+
+
 @app.post("/api/swarm/learn")
 async def trigger_learning():
     """Force a learning cycle to process buffered interactions."""
@@ -4452,6 +4506,217 @@ async def swarm_user_patterns():
         "online_count": swarm_manager.get_online_count(),
         "patterns_tracked": len(swarm_learning.user_patterns)
     })
+
+
+# ============================================
+# SWARM MEMORY BRIDGE ENDPOINTS
+# ============================================
+
+@app.post("/api/swarm-memory/enable")
+async def enable_swarm_memory_endpoint():
+    """Enable swarm memory bridge for persistent conversation storage."""
+    try:
+        from farnsworth.core.swarm_memory_integration import enable_swarm_memory
+        memory = get_memory_system()
+        await enable_swarm_memory(memory)
+        return JSONResponse({
+            "success": True,
+            "message": "Swarm memory bridge enabled - conversations will be stored!"
+        })
+    except Exception as e:
+        logger.error(f"Failed to enable swarm memory: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Failed: {str(e)}"
+        })
+
+
+@app.post("/api/swarm-memory/disable")
+async def disable_swarm_memory_endpoint():
+    """Disable swarm memory bridge."""
+    try:
+        from farnsworth.core.swarm_memory_integration import disable_swarm_memory
+        await disable_swarm_memory()
+        return JSONResponse({
+            "success": True,
+            "message": "Swarm memory bridge disabled"
+        })
+    except Exception as e:
+        logger.error(f"Failed to disable swarm memory: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Failed: {str(e)}"
+        })
+
+
+@app.get("/api/swarm-memory/stats")
+async def swarm_memory_stats():
+    """Get swarm memory bridge statistics."""
+    try:
+        from farnsworth.core.swarm_memory_integration import get_swarm_memory_stats
+        stats = await get_swarm_memory_stats()
+        return JSONResponse({
+            "available": True,
+            **stats
+        })
+    except Exception as e:
+        logger.error(f"Failed to get swarm memory stats: {e}")
+        return JSONResponse({
+            "available": False,
+            "message": f"Not available: {str(e)}"
+        })
+
+
+@app.get("/api/turn-taking/stats")
+async def turn_taking_stats():
+    """
+    Get smart turn-taking statistics.
+
+    Shows token-based turn metrics and speaker balance.
+    Created by: Claude Sonnet 4.5 (Autonomous Improvement #2b)
+    """
+    try:
+        from farnsworth.core.smart_turn_taking import get_turn_stats
+        stats = get_turn_stats()
+        return JSONResponse({
+            "available": True,
+            **stats
+        })
+    except Exception as e:
+        logger.error(f"Failed to get turn stats: {e}")
+        return JSONResponse({
+            "available": False,
+            "message": f"Not available: {str(e)}"
+        })
+
+
+# ============================================
+# SEMANTIC DEDUPLICATION ENDPOINTS
+# ============================================
+
+@app.post("/api/memory/dedup/enable")
+async def enable_memory_dedup(request: dict):
+    """
+    Enable semantic deduplication for memory storage.
+
+    Prevents storing duplicate or very similar content.
+    Created by: Claude Sonnet 4.5 (Autonomous Improvement #4)
+    """
+    try:
+        from farnsworth.memory.dedup_integration import enable_deduplication
+        auto_merge = request.get("auto_merge", False)
+        memory = get_memory_system()
+        await enable_deduplication(memory, auto_merge)
+        return JSONResponse({
+            "success": True,
+            "message": f"Deduplication enabled (auto_merge: {auto_merge})"
+        })
+    except Exception as e:
+        logger.error(f"Failed to enable dedup: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Failed: {str(e)}"
+        })
+
+
+@app.post("/api/memory/dedup/disable")
+async def disable_memory_dedup():
+    """Disable semantic deduplication."""
+    try:
+        from farnsworth.memory.dedup_integration import disable_deduplication
+        disable_deduplication()
+        return JSONResponse({
+            "success": True,
+            "message": "Deduplication disabled"
+        })
+    except Exception as e:
+        logger.error(f"Failed to disable dedup: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Failed: {str(e)}"
+        })
+
+
+@app.get("/api/memory/dedup/stats")
+async def memory_dedup_stats():
+    """Get semantic deduplication statistics."""
+    try:
+        from farnsworth.memory.dedup_integration import get_deduplication_stats
+        stats = get_deduplication_stats()
+        return JSONResponse({
+            "available": True,
+            **stats
+        })
+    except Exception as e:
+        logger.error(f"Failed to get dedup stats: {e}")
+        return JSONResponse({
+            "available": False,
+            "message": f"Not available: {str(e)}"
+        })
+
+
+@app.post("/api/memory/dedup/check")
+async def check_memory_duplicate(request: dict):
+    """
+    Check if content would be a duplicate before storing.
+
+    Useful for preview/testing.
+    """
+    try:
+        from farnsworth.memory.semantic_deduplication import check_for_duplicate
+        content = request.get("content", "")
+
+        if not content:
+            return JSONResponse({
+                "is_duplicate": False,
+                "message": "No content provided"
+            })
+
+        match = check_for_duplicate(content)
+
+        if match:
+            return JSONResponse({
+                "is_duplicate": match.is_duplicate,
+                "similarity": match.similarity,
+                "existing_id": match.memory_id,
+                "message": "Duplicate" if match.is_duplicate else "Similar content found"
+            })
+        else:
+            return JSONResponse({
+                "is_duplicate": False,
+                "similarity": 0.0,
+                "message": "No duplicates found"
+            })
+
+    except Exception as e:
+        logger.error(f"Failed to check duplicate: {e}")
+        return JSONResponse({
+            "is_duplicate": False,
+            "message": f"Check failed: {str(e)}"
+        })
+
+
+@app.post("/api/swarm-memory/recall")
+async def recall_swarm_memory(request: dict):
+    """Recall relevant past swarm conversations."""
+    try:
+        from farnsworth.core.swarm_memory_integration import recall_swarm_context
+        topic = request.get("topic", "")
+        limit = request.get("limit", 5)
+
+        context = await recall_swarm_context(topic, limit)
+        return JSONResponse({
+            "success": True,
+            "context": context,
+            "count": len(context)
+        })
+    except Exception as e:
+        logger.error(f"Failed to recall swarm memory: {e}")
+        return JSONResponse({
+            "success": False,
+            "context": [],
+            "message": f"Failed: {str(e)}"
+        })
 
 
 # ============================================
@@ -4521,3 +4786,99 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ============================================
+# PARALLEL WORKER API ENDPOINTS
+# ============================================
+
+from farnsworth.core.agent_spawner import get_spawner, initialize_development_tasks, TaskType
+from farnsworth.core.parallel_workers import get_worker_manager, start_parallel_workers
+
+@app.get("/api/workers/status")
+async def get_workers_status():
+    """Get parallel worker system status"""
+    spawner = get_spawner()
+    return {
+        "spawner": spawner.get_status(),
+        "tasks": [
+            {
+                "id": t.task_id,
+                "type": t.task_type.value,
+                "agent": t.assigned_to,
+                "status": t.status,
+                "description": t.description
+            }
+            for t in spawner.task_queue
+        ],
+        "discoveries": spawner.shared_state.get("discoveries", [])[-10:],
+        "proposals": len(spawner.shared_state.get("proposals", [])),
+    }
+
+@app.post("/api/workers/init-tasks")
+async def init_tasks():
+    """Initialize the 20 development tasks"""
+    status = initialize_development_tasks()
+    return {"status": "initialized", "info": status}
+
+@app.post("/api/workers/start")
+async def start_workers():
+    """Start the parallel worker system"""
+    try:
+        manager = await start_parallel_workers()
+        return {"status": "started", "info": manager.get_status()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/staging/files")
+async def get_staging_files():
+    """List files in the staging directory"""
+    import os
+    staging_dir = Path("/workspace/Farnsworth/farnsworth/staging")
+    files = []
+    if staging_dir.exists():
+        for root, dirs, filenames in os.walk(staging_dir):
+            for f in filenames:
+                path = Path(root) / f
+                files.append({
+                    "path": str(path.relative_to(staging_dir)),
+                    "size": path.stat().st_size,
+                    "modified": path.stat().st_mtime
+                })
+    return {"files": files[:50]}
+
+# Start worker broadcaster on startup
+from farnsworth.core.worker_broadcaster import start_broadcaster
+
+@app.on_event("startup")
+async def start_worker_broadcaster():
+    """Start the worker progress broadcaster"""
+    try:
+        await start_broadcaster(swarm_manager)
+        logger.info("Worker broadcaster started - will share progress every 2-3 mins")
+    except Exception as e:
+        logger.error(f"Failed to start broadcaster: {e}")
+
+# Evolution Loop - Self-improving autonomous development
+from farnsworth.core.evolution_loop import start_evolution, get_evolution_loop
+
+@app.on_event("startup")
+async def start_evolution_loop():
+    """Start the autonomous evolution loop"""
+    try:
+        await start_evolution(swarm_manager)
+        logger.info("Evolution Loop started - autonomous self-improvement active")
+    except Exception as e:
+        logger.error(f"Failed to start evolution loop: {e}")
+
+@app.get("/api/evolution/status")
+async def get_evolution_status():
+    """Get evolution loop status"""
+    from farnsworth.core.agent_spawner import get_spawner
+    loop = get_evolution_loop()
+    spawner = get_spawner()
+    return {
+        "running": loop.running,
+        "evolution_cycle": loop.evolution_cycle,
+        "last_discussion": loop.last_discussion.isoformat() if loop.last_discussion else None,
+        "spawner": spawner.get_status()
+    }
