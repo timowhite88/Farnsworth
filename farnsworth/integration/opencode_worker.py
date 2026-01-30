@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # OpenCode configuration
 OPENCODE_CONFIG = {
     "provider": "ollama",  # Use local Ollama by default
-    "model": "deepseek-r1:14b",
+    "model": "deepseek-r1:1.5b",  # Use available model
     "max_tokens": 4096,
     "timeout": 300,  # 5 minute timeout per task
 }
@@ -104,24 +104,21 @@ Start coding:"""
         output_file = self.staging_dir / f"{task_id}_output.py"
 
         try:
-            # Run OpenCode in non-interactive mode
-            # OpenCode can be run with a prompt via stdin
+            # Run OpenCode using 'opencode run' command (correct CLI syntax)
+            # This runs non-interactively with the message as argument
             process = await asyncio.create_subprocess_exec(
-                "opencode",
-                "--provider", OPENCODE_CONFIG["provider"],
-                "--model", OPENCODE_CONFIG["model"],
-                "--no-interactive",
-                stdin=asyncio.subprocess.PIPE,
+                "opencode", "run", prompt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workspace)
+                cwd=str(self.workspace),
+                env={**os.environ, "NO_COLOR": "1"}  # Disable color output for parsing
             )
 
             self.active_processes[task_id] = process
 
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(input=prompt.encode()),
+                    process.communicate(),
                     timeout=OPENCODE_CONFIG["timeout"]
                 )
             except asyncio.TimeoutError:
@@ -132,17 +129,26 @@ Start coding:"""
                 if task_id in self.active_processes:
                     del self.active_processes[task_id]
 
-            if process.returncode == 0:
-                result = stdout.decode().strip()
+            result = stdout.decode().strip()
+            stderr_out = stderr.decode().strip()
+
+            # OpenCode run may return 0 even with partial results
+            if result:
                 # Extract code from response
                 code = self._extract_code(result)
                 if code:
                     output_file.write_text(code)
-                    logger.info(f"OpenCode completed task {task_id}")
+                    logger.info(f"OpenCode completed task {task_id}, saved to {output_file}")
                     return code
+                # If no code block found, save raw result
+                output_file.write_text(result)
+                logger.info(f"OpenCode completed task {task_id} (raw output)")
                 return result
+            elif stderr_out:
+                logger.error(f"OpenCode error: {stderr_out}")
+                return None
             else:
-                logger.error(f"OpenCode error: {stderr.decode()}")
+                logger.warning(f"OpenCode returned empty result for task {task_id}")
                 return None
 
         except Exception as e:
