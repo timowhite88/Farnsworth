@@ -191,18 +191,18 @@ Back to work on the next task!"""
             except Exception as e:
                 logger.error(f"Chat broadcast failed: {e}")
 
-        # Post to social media (Moltbook + X)
-        try:
-            from farnsworth.integration.x_automation.social_poster import post_task_completion
-            asyncio.create_task(post_task_completion(
-                agent=task.assigned_to,
-                task_desc=task.description,
-                task_type=task.task_type.value,
-                code_preview=code_preview
-            ))
-            logger.info(f"Social media post queued for {task.assigned_to}'s completion")
-        except Exception as e:
-            logger.error(f"Social media post failed: {e}")
+        # Post to social media (Moltbook + X) - DISABLED: Puppeteer fails on headless server
+        # try:
+        #     from farnsworth.integration.x_automation.social_poster import post_task_completion
+        #     asyncio.create_task(post_task_completion(
+        #         agent=task.assigned_to,
+        #         task_desc=task.description,
+        #         task_type=task.task_type.value,
+        #         code_preview=code_preview
+        #     ))
+        #     logger.info(f"Social media post queued for {task.assigned_to}'s completion")
+        # except Exception as e:
+        #     logger.error(f"Social media post failed: {e}")
 
     async def _discussion_loop(self):
         """Every 30 minutes, swarm discusses what to build next"""
@@ -264,13 +264,13 @@ Share your ideas for the next evolution cycle!"""
             except Exception as e:
                 logger.error(f"Discussion trigger failed: {e}")
 
-        # Post progress update to social media (Moltbook + X)
-        try:
-            from farnsworth.integration.x_automation.social_poster import post_progress_update
-            asyncio.create_task(post_progress_update(status))
-            logger.info("Progress update posted to social media")
-        except Exception as e:
-            logger.error(f"Social progress post failed: {e}")
+        # Post progress update to social media (Moltbook + X) - DISABLED: Puppeteer fails on headless server
+        # try:
+        #     from farnsworth.integration.x_automation.social_poster import post_progress_update
+        #     asyncio.create_task(post_progress_update(status))
+        #     logger.info("Progress update posted to social media")
+        # except Exception as e:
+        #     logger.error(f"Social progress post failed: {e}")
 
     async def _task_discovery_loop(self):
         """When tasks run low, generate new ones"""

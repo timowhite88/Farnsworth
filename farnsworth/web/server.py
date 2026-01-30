@@ -1110,8 +1110,8 @@ class SwarmLearningEngine:
 
                 # Add user node
                 if hasattr(self._knowledge_graph, 'add_entity'):
-                    self._knowledge_graph.add_entity(
-                        entity_id=f"user:{user}",
+                    await self._knowledge_graph.add_entity(
+                        name=f"user:{user}",
                         entity_type="user",
                         properties={"name": user, "active": True}
                     )
@@ -1119,8 +1119,8 @@ class SwarmLearningEngine:
                 # Extract and add concepts as nodes
                 for concept, importance in list(self.concept_cache.items())[:20]:
                     if importance > 0.3:
-                        self._knowledge_graph.add_entity(
-                            entity_id=f"concept:{concept}",
+                        await self._knowledge_graph.add_entity(
+                            name=f"concept:{concept}",
                             entity_type="concept",
                             properties={"importance": importance}
                         )
@@ -3833,6 +3833,185 @@ async def market_sentiment():
     except Exception as e:
         logger.error(f"Market sentiment error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# CODE ANALYSIS API
+# ============================================
+
+@app.post("/api/code/analyze")
+async def analyze_code_api(request: Request):
+    """
+    Analyze Python code for complexity, security issues, and patterns.
+
+    Body: {"code": "python code string"} or {"file": "path/to/file.py"}
+    """
+    try:
+        from farnsworth.tools.code_analyzer import analyze_python_code, analyze_python_file, scan_code_security
+
+        body = await request.json()
+        code = body.get("code")
+        filepath = body.get("file")
+
+        if code:
+            metrics = analyze_python_code(code)
+            security = scan_code_security(code)
+        elif filepath:
+            metrics = analyze_python_file(filepath)
+            with open(filepath, 'r') as f:
+                security = scan_code_security(f.read())
+        else:
+            raise HTTPException(status_code=400, detail="Provide 'code' or 'file' in request body")
+
+        if not metrics:
+            raise HTTPException(status_code=400, detail="Failed to parse code")
+
+        return JSONResponse({
+            "success": True,
+            "metrics": {
+                "path": metrics.path,
+                "lines": metrics.num_lines,
+                "functions": metrics.num_functions,
+                "classes": metrics.num_classes,
+                "imports": list(metrics.imports),
+                "todos": metrics.todos,
+                "fixmes": metrics.fixmes,
+                "function_details": [
+                    {
+                        "name": f.name,
+                        "line": f.lineno,
+                        "complexity": f.complexity,
+                        "cognitive_complexity": f.cognitive_complexity,
+                        "params": f.num_params,
+                        "lines": f.num_lines
+                    }
+                    for f in metrics.functions
+                ]
+            },
+            "security_issues": security
+        })
+    except Exception as e:
+        logger.error(f"Code analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/code/analyze-project")
+async def analyze_project_api(request: Request):
+    """
+    Analyze an entire project directory.
+
+    Body: {"directory": "/path/to/project"}
+    """
+    try:
+        from farnsworth.tools.code_analyzer import analyze_project
+
+        body = await request.json()
+        directory = body.get("directory", "/workspace/Farnsworth")
+
+        report = analyze_project(directory)
+
+        return JSONResponse({
+            "success": True,
+            "report": report
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to analyze project: {e}")
+        return JSONResponse({
+            "success": False,
+            "message": f"Failed: {str(e)}"
+        })
+
+
+# ============================================
+# AIRLLM BACKGROUND PROCESSING API
+# ============================================
+
+@app.get("/api/airllm/stats")
+async def airllm_stats():
+    """Get AirLLM side swarm statistics."""
+    try:
+        from farnsworth.core.airllm_swarm import get_airllm_swarm
+        swarm = get_airllm_swarm()
+        if swarm:
+            return swarm.get_stats()
+        return {"available": False, "message": "AirLLM swarm not initialized"}
+    except ImportError:
+        return {"available": False, "message": "AirLLM module not installed"}
+
+
+@app.post("/api/airllm/start")
+async def airllm_start():
+    """Initialize and start the AirLLM side swarm."""
+    try:
+        from farnsworth.core.airllm_swarm import initialize_airllm_swarm
+        swarm = await initialize_airllm_swarm()
+        return {"success": True, "message": "AirLLM side swarm started", "stats": swarm.get_stats()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/airllm/stop")
+async def airllm_stop():
+    """Stop the AirLLM side swarm."""
+    try:
+        from farnsworth.core.airllm_swarm import get_airllm_swarm
+        swarm = get_airllm_swarm()
+        if swarm:
+            await swarm.stop()
+            return {"success": True, "message": "AirLLM side swarm stopped"}
+        return {"success": False, "message": "AirLLM swarm not running"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class AirLLMTaskRequest(BaseModel):
+    task_type: str = "analyze"  # code_review, summarize, research, analyze
+    prompt: str
+    priority: int = 5  # 1-10, lower = higher priority
+
+
+@app.post("/api/airllm/queue")
+async def airllm_queue_task(request: AirLLMTaskRequest):
+    """Queue a task for background processing by AirLLM."""
+    try:
+        from farnsworth.core.airllm_swarm import get_airllm_swarm, initialize_airllm_swarm
+
+        swarm = get_airllm_swarm()
+        if not swarm:
+            swarm = await initialize_airllm_swarm()
+
+        task_id = swarm.queue_task(
+            task_type=request.task_type,
+            prompt=request.prompt,
+            priority=request.priority
+        )
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "message": "Task queued for background processing",
+            "queue_size": len(swarm.task_queue)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/airllm/result/{task_id}")
+async def airllm_get_result(task_id: str):
+    """Get result of a background task."""
+    try:
+        from farnsworth.core.airllm_swarm import get_airllm_swarm
+        swarm = get_airllm_swarm()
+        if not swarm:
+            return {"success": False, "message": "AirLLM swarm not running"}
+
+        result = swarm.get_result(task_id)
+        if result:
+            return {"success": True, "result": result}
+        return {"success": False, "message": "Task not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ============================================
