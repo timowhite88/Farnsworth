@@ -1,8 +1,11 @@
 # 🧠 Farnsworth: Your Claude Companion AI
-9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS Donation and Support please send to this token.This token was created by me. I am One Man. A family man starting a new chapter in AI and researchhoping to bring something new to the world. Mydsughter also helped in the creation of Farnsworth. A company and a dream.  registered in Nee Jersey as business. i bring you Farnsworth AI
+9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS 
+
+Donation and Support please send to this token.This token was created by me. I am One Man. A family man starting a new chapter in AI and researchhoping to bring something new to the world. Mydsughter also helped in the creation of Farnsworth. A company and a dream.  registered in Nee Jersey as business. i bring you Farnsworth Artificial Intelli
 
 
-The community on X and CT launched a token on Base. I have accepted Fees and also love base but choose Solana for the hope Bags would notice. The community says Builders build on BASE. Is this true?
+The community on X and CT launched a token on Base. I have accepted Fees and also love base but choose Solana for the hope Bags would notice. 0x7df1A083f273B1F6D8f021e4E21c630F8C7ABb07
+The community says Builders build on BASE. Is this true?
 <div align="center">
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
