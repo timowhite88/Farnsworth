@@ -5,6 +5,7 @@ Evolution Loop - The self-improving autonomous development cycle
 3. Continue to next task
 4. When batch done, discuss in chat what to build next
 5. Generate new tasks and repeat
+6. PERSIST state to memory for restart recovery
 """
 import asyncio
 import random
@@ -16,8 +17,13 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# State persistence directory
+STATE_DIR = Path(__file__).parent.parent.parent / "data" / "evolution_state"
+TASKS_FILE = STATE_DIR / "pending_tasks.json"
+STATE_FILE = STATE_DIR / "evolution_state.json"
+
 class EvolutionLoop:
-    """Manages the autonomous self-evolution cycle"""
+    """Manages the autonomous self-evolution cycle with persistent state"""
 
     def __init__(self):
         self.running = False
@@ -25,21 +31,198 @@ class EvolutionLoop:
         self.last_discussion = None
         self.evolution_cycle = 0
         self.swarm_manager = None
+        self.completed_count = 0
+        self._memory_system = None
+
+        # Ensure state directory exists
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _get_memory_system(self):
+        """Lazy-load memory system for persistence."""
+        if self._memory_system is None:
+            try:
+                from farnsworth.memory.memory_system import MemorySystem
+                self._memory_system = MemorySystem()
+            except Exception as e:
+                logger.warning(f"Memory system not available: {e}")
+        return self._memory_system
+
+    async def _recover_state(self):
+        """Recover state from persistent storage on startup."""
+        try:
+            # Recover evolution state
+            if STATE_FILE.exists():
+                with open(STATE_FILE) as f:
+                    state = json.load(f)
+                    self.evolution_cycle = state.get("cycle", 0)
+                    self.completed_count = state.get("completed", 0)
+                    last_disc = state.get("last_discussion")
+                    if last_disc:
+                        self.last_discussion = datetime.fromisoformat(last_disc)
+                    logger.info(f"Recovered evolution state: cycle={self.evolution_cycle}, completed={self.completed_count}")
+
+            # Recover pending tasks
+            if TASKS_FILE.exists():
+                from farnsworth.core.agent_spawner import get_spawner, TaskType
+                spawner = get_spawner()
+
+                with open(TASKS_FILE) as f:
+                    tasks = json.load(f)
+
+                restored = 0
+                for task_data in tasks:
+                    # Only restore if task not already in queue
+                    existing = [t for t in spawner.get_pending_tasks()
+                               if t.description == task_data.get("description")]
+                    if not existing:
+                        task_type = TaskType[task_data.get("task_type", "DEVELOPMENT")]
+                        spawner.add_task(
+                            task_type=task_type,
+                            description=task_data.get("description", "Unknown task"),
+                            assigned_to=task_data.get("assigned_to"),
+                            priority=task_data.get("priority", 5)
+                        )
+                        restored += 1
+
+                if restored > 0:
+                    logger.info(f"Restored {restored} pending tasks from disk")
+
+            # Also try to recover from archival memory (5-layer memory system)
+            memory = self._get_memory_system()
+            if memory:
+                try:
+                    archival_tasks = await memory.recall("evolution_tasks", search_archival=True)
+                    if archival_tasks and isinstance(archival_tasks, list):
+                        logger.info(f"Found {len(archival_tasks)} tasks in archival memory")
+                except Exception as e:
+                    logger.debug(f"Archival memory recall failed: {e}")
+
+        except Exception as e:
+            logger.error(f"State recovery failed: {e}")
+
+    async def _persist_state(self):
+        """Persist current state to disk and archival memory."""
+        try:
+            # Save evolution state
+            state = {
+                "cycle": self.evolution_cycle,
+                "completed": self.completed_count,
+                "last_discussion": self.last_discussion.isoformat() if self.last_discussion else None,
+                "last_saved": datetime.now().isoformat()
+            }
+            with open(STATE_FILE, "w") as f:
+                json.dump(state, f, indent=2)
+
+            # Save pending tasks
+            from farnsworth.core.agent_spawner import get_spawner
+            spawner = get_spawner()
+            pending = spawner.get_pending_tasks()
+
+            tasks_data = []
+            for task in pending:
+                tasks_data.append({
+                    "task_id": task.task_id,
+                    "task_type": task.task_type.name,
+                    "description": task.description,
+                    "assigned_to": task.assigned_to,
+                    "priority": task.priority,
+                    "status": task.status
+                })
+
+            with open(TASKS_FILE, "w") as f:
+                json.dump(tasks_data, f, indent=2)
+
+            # Also persist to archival memory for long-term storage
+            memory = self._get_memory_system()
+            if memory:
+                try:
+                    await memory.remember(
+                        content=json.dumps({
+                            "state": state,
+                            "tasks": tasks_data
+                        }),
+                        tags=["evolution_tasks", "system", "critical"],
+                        importance=0.95
+                    )
+                except Exception as e:
+                    logger.debug(f"Archival memory persist failed: {e}")
+
+            logger.debug(f"Persisted state: cycle={self.evolution_cycle}, tasks={len(tasks_data)}")
+
+        except Exception as e:
+            logger.error(f"State persistence failed: {e}")
+
+    def add_priority_task(self, task: Dict):
+        """Add a high-priority task from the dev to the evolution queue.
+
+        Args:
+            task: Dict with id, description, priority, requested_by, timestamp
+        """
+        try:
+            from farnsworth.core.agent_spawner import get_spawner, TaskType
+
+            spawner = get_spawner()
+            description = task.get("description", "")
+
+            # Determine task type based on content
+            desc_lower = description.lower()
+            if any(kw in desc_lower for kw in ["analyze", "research", "find", "look", "check"]):
+                task_type = TaskType.RESEARCH
+            elif any(kw in desc_lower for kw in ["test", "verify", "validate"]):
+                task_type = TaskType.TESTING
+            else:
+                task_type = TaskType.DEVELOPMENT
+
+            # Add with high priority (1 = highest)
+            spawner.add_task(
+                task_type=task_type,
+                description=description,
+                priority=1  # Highest priority for dev tasks
+            )
+
+            logger.info(f"Added priority task from dev: {description[:50]}...")
+
+        except Exception as e:
+            logger.error(f"Failed to add priority task: {e}")
+
+    async def _on_task_update(self, event_type: str, task=None):
+        """Called when task state changes - persist immediately for critical events."""
+        if event_type in ("completed", "added", "failed"):
+            if event_type == "completed":
+                self.completed_count += 1
+            await self._persist_state()
 
     async def start(self, swarm_manager=None):
-        """Start the evolution loop"""
+        """Start the evolution loop with state recovery"""
         self.running = True
         self.swarm_manager = swarm_manager
+
+        # Recover state from previous run
+        await self._recover_state()
 
         # Start parallel loops
         asyncio.create_task(self._worker_loop())
         asyncio.create_task(self._discussion_loop())
         asyncio.create_task(self._task_discovery_loop())
+        asyncio.create_task(self._persistence_loop())
 
-        logger.info("Evolution Loop started - autonomous development active")
+        logger.info(f"Evolution Loop started - recovered cycle={self.evolution_cycle}, completed={self.completed_count}")
 
     async def stop(self):
+        """Stop the evolution loop and persist final state"""
         self.running = False
+        await self._persist_state()
+        logger.info("Evolution Loop stopped - state persisted")
+
+    async def _persistence_loop(self):
+        """Periodically persist state to disk"""
+        while self.running:
+            try:
+                await asyncio.sleep(60)  # Persist every minute
+                await self._persist_state()
+            except Exception as e:
+                logger.error(f"Persistence loop error: {e}")
+                await asyncio.sleep(30)
 
     async def _worker_loop(self):
         """Main worker execution loop - processes tasks and produces CODE"""
@@ -93,6 +276,9 @@ class EvolutionLoop:
 
                 # Broadcast to chat
                 await self._broadcast_completion(task, code_result)
+
+                # Persist state on task completion
+                await self._on_task_update("completed", task)
 
                 logger.info(f"Task {task.task_id} COMPLETED with real code by {task.assigned_to}")
 
@@ -273,7 +459,7 @@ Share your ideas for the next evolution cycle!"""
         #     logger.error(f"Social progress post failed: {e}")
 
     async def _task_discovery_loop(self):
-        """When tasks run low, generate new ones"""
+        """When tasks run low, generate new ones and extract upgrades from chat"""
         await asyncio.sleep(120)
 
         while self.running:
@@ -286,20 +472,73 @@ Share your ideas for the next evolution cycle!"""
                 if pending < 3:
                     # Generate new tasks based on discoveries
                     new_tasks = self._generate_new_tasks(spawner)
+
+                    # Also extract upgrade suggestions from recent chat
+                    chat_upgrades = await self._extract_chat_upgrades()
+                    if chat_upgrades:
+                        new_tasks.extend(chat_upgrades)
+                        logger.info(f"Extracted {len(chat_upgrades)} upgrades from conversation")
+
                     for task_def in new_tasks:
                         spawner.add_task(
                             task_type=task_def["type"],
                             description=task_def["desc"],
                             assigned_to=task_def["agent"],
-                            priority=6
+                            priority=task_def.get("priority", 6)
                         )
                     logger.info(f"Generated {len(new_tasks)} new evolution tasks")
+
+                    # Persist after adding new tasks
+                    await self._on_task_update("added")
 
                 await asyncio.sleep(180)  # Check every 3 minutes
 
             except Exception as e:
                 logger.error(f"Task discovery error: {e}")
                 await asyncio.sleep(60)
+
+    async def _extract_chat_upgrades(self) -> List[Dict]:
+        """Extract upgrade suggestions from recent swarm chat."""
+        if not self.swarm_manager:
+            return []
+
+        try:
+            from farnsworth.core.upgrade_extractor import extract_upgrades, prioritize_upgrades
+            from farnsworth.core.agent_spawner import TaskType
+
+            # Get recent chat history
+            history = list(self.swarm_manager.chat_history)[-100:] if hasattr(self.swarm_manager, 'chat_history') else []
+            if not history:
+                return []
+
+            # Extract and prioritize upgrades
+            suggestions = await extract_upgrades(history, limit=100)
+            if not suggestions:
+                return []
+
+            prioritized = await prioritize_upgrades(suggestions)
+
+            # Convert top 3 to task definitions
+            tasks = []
+            agents = ["DeepSeek", "Claude", "Grok", "Gemini", "Kimi"]
+
+            for i, upgrade in enumerate(prioritized[:3]):
+                tasks.append({
+                    "type": TaskType.DEVELOPMENT,
+                    "desc": upgrade["task_description"],
+                    "agent": agents[i % len(agents)],  # Distribute across agents
+                    "priority": min(upgrade["priority"], 8),  # Cap priority
+                    "source": "conversation"
+                })
+
+            return tasks
+
+        except ImportError:
+            logger.debug("Upgrade extractor not available")
+            return []
+        except Exception as e:
+            logger.error(f"Chat upgrade extraction failed: {e}")
+            return []
 
     def _generate_new_tasks(self, spawner) -> List[Dict]:
         """Generate new tasks based on what's been built"""
@@ -336,6 +575,11 @@ def get_evolution_loop() -> EvolutionLoop:
     if _evolution_loop is None:
         _evolution_loop = EvolutionLoop()
     return _evolution_loop
+
+def get_evolution_engine() -> Optional[EvolutionLoop]:
+    """Alias for get_evolution_loop for backwards compatibility."""
+    return get_evolution_loop()
+
 
 async def start_evolution(swarm_manager=None):
     """Start the evolution loop"""

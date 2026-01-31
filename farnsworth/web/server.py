@@ -18,7 +18,13 @@ Features Available WITHOUT External APIs:
 - System diagnostics
 """
 
+# Load environment variables FIRST before any other imports
 import os
+from pathlib import Path as _Path
+from dotenv import load_dotenv
+_env_path = _Path(__file__).parent.parent.parent / ".env"
+load_dotenv(_env_path)
+del _Path, _env_path  # Clean up namespace
 import json
 import logging
 import asyncio
@@ -1334,13 +1340,21 @@ class SwarmChatManager:
         await self._broadcast(msg)
 
     async def broadcast_user_message(self, user_id: str, content: str):
-        """Broadcast a user message to all users and feed to learning engine."""
+        """Broadcast a user message to all users and feed to learning engine.
+
+        Permission system:
+        - User 'winning' is the dev and can request any task
+        - Other users can only ask about contract addresses (CAs)
+        """
         user_name = self.user_names.get(user_id, "Anonymous")
+        is_dev = user_name.lower() == "winning"
+
         msg = {
             "type": "swarm_user",
             "user_id": user_id,
             "user_name": user_name,
             "content": content,
+            "is_dev": is_dev,
             "timestamp": datetime.now().isoformat()
         }
         self.chat_history.append(msg)
@@ -1353,6 +1367,7 @@ class SwarmChatManager:
             "user_id": user_id,
             "name": user_name,
             "content": content,
+            "is_dev": is_dev,
             "timestamp": datetime.now().isoformat(),
             "source": "swarm_chat"
         })
@@ -1363,12 +1378,21 @@ class SwarmChatManager:
                 "type": "user",
                 "user_id": user_id,
                 "content": content,
+                "is_dev": is_dev,
                 "timestamp": datetime.now().isoformat()
             })
             collective_organism.state.total_interactions += 1
             collective_organism.state.update_consciousness()
 
+        # Check if this is a dev task request
+        if is_dev and self._is_task_request(content):
+            # Dev can request any task - process it
+            logger.info(f"DEV TASK REQUEST from {user_name}: {content[:100]}...")
+            await self._process_dev_task(content, user_name)
+            return msg
+
         # Scan for contract addresses and provide token analysis
+        # (All users can ask about CAs)
         if TOKEN_SCANNER_AVAILABLE and scan_message_for_token:
             try:
                 token_response = await scan_message_for_token(content)
@@ -1380,6 +1404,57 @@ class SwarmChatManager:
                 logger.error(f"Token scanner error: {e}")
 
         return msg
+
+    def _is_task_request(self, content: str) -> bool:
+        """Check if the message is a task request."""
+        content_lower = content.lower().strip()
+        task_prefixes = [
+            "hey farn", "farnsworth,", "farn,", "@farnsworth",
+            "do this", "create ", "build ", "add ", "fix ", "make ",
+            "implement ", "write ", "update ", "delete ", "remove ",
+            "/task", "/do", "/create", "/build"
+        ]
+        return any(content_lower.startswith(prefix) for prefix in task_prefixes)
+
+    async def _process_dev_task(self, content: str, user_name: str):
+        """Process a dev task request and add it to the evolution loop."""
+        try:
+            # Acknowledge the task
+            await self.broadcast_bot_message(
+                "Farnsworth",
+                f"Good news everyone! I've received a task from the Professor (that's you, {user_name})! Let me add this to my development queue... 🧪⚗️"
+            )
+
+            # Add to evolution loop tasks
+            from farnsworth.core.evolution_loop import get_evolution_engine
+            engine = get_evolution_engine()
+            if engine:
+                # Create task from dev request
+                task = {
+                    "id": f"dev_{datetime.now().strftime('%H%M%S')}",
+                    "description": content,
+                    "priority": "high",
+                    "requested_by": user_name,
+                    "timestamp": datetime.now().isoformat()
+                }
+                engine.add_priority_task(task)
+                logger.info(f"Added dev task to evolution loop: {content[:50]}...")
+
+                await self.broadcast_bot_message(
+                    "Farnsworth",
+                    f"Task queued for development! The swarm will work on: '{content[:100]}{'...' if len(content) > 100 else ''}'"
+                )
+            else:
+                await self.broadcast_bot_message(
+                    "Farnsworth",
+                    "I'll remember this task, but my evolution engine is currently resting. I'll process it when it wakes up!"
+                )
+        except Exception as e:
+            logger.error(f"Failed to process dev task: {e}")
+            await self.broadcast_bot_message(
+                "Farnsworth",
+                f"Hmm, I had trouble queuing that task. Error: {str(e)[:100]}"
+            )
 
     async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
         """Broadcast a bot/model message to all users and feed to learning engine.
