@@ -16,12 +16,474 @@ The community says Builders build on BASE. Is this true?
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](docker/)
 [![Models](https://img.shields.io/badge/Models-50%2B%20Supported-green.svg)](configs/models.yaml)
+[![Integrations](https://img.shields.io/badge/Integrations-70%2B-brightgreen.svg)](#integration-ecosystem)
+[![Agents](https://img.shields.io/badge/Agent%20Types-18%2B-orange.svg)](#agent-system)
 [![Smithery](https://img.shields.io/badge/Smithery-MCP%20Server-blueviolet.svg)](https://smithery.ai/server/farnsworth)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-ai.farnsworth.cloud-ff69b4.svg)](https://ai.farnsworth.cloud)
 
 [**Live Demo**](https://ai.farnsworth.cloud) • [**Documentation**](docs/USER_GUIDE.md) • [**Smithery**](https://smithery.ai/server/farnsworth) • [**Roadmap**](ROADMAP.md) • [**Setup Wizard**](farnsworth/core/setup_wizard.py) • [**Isolated Mode**](README.md#isolated-mode)
 
 </div>
+
+---
+
+## COMPLETE CAPABILITY INDEX
+
+<details open>
+<summary><strong>STATS AT A GLANCE</strong></summary>
+
+| Category | Count | Highlights |
+|:---------|:-----:|:-----------|
+| **LLM Providers** | 15+ | Claude, GPT-4, Grok, Gemini, Kimi, Mistral, DeepSeek, Perplexity, Cohere, Groq... |
+| **AI Models** | 50+ | Local (Ollama) + Cloud APIs with unified gateway |
+| **Agent Types** | 18+ | Browser, Code, Research, Planner, Critic, Meta-Cognition... |
+| **Memory Systems** | 18 | Working, Episodic, Semantic, Knowledge Graph, Dream Consolidation... |
+| **Integrations** | 70+ | Crypto, Social, Cloud, Office, Security, Health, DevOps... |
+| **Tools** | 30+ | Productivity, Security, Code Analysis, System Admin... |
+| **Cognitive Engines** | 7 | Quantum Search, Neuromorphic, Causal, Affective... |
+
+</details>
+
+---
+
+## ALL SUPPORTED LLM PROVIDERS & MODELS
+
+<details open>
+<summary><strong>15+ LLM PROVIDERS</strong></summary>
+
+| Provider | Models | Context | Key Features |
+|:---------|:-------|:--------|:-------------|
+| **Claude (Anthropic)** | claude-3.5-sonnet, opus, haiku | 200K | Thinking mode, tool use, Claude Code CLI |
+| **ChatGPT (OpenAI)** | gpt-4o, gpt-4-turbo, o1, o1-mini, o3-mini | 128K | Function calling, vision, DALL-E, Whisper |
+| **Grok (xAI)** | grok-4, grok-4.1-fast, grok-2-vision | 2M | Real-time X/web search, vision |
+| **Gemini (Google)** | gemini-2.5-flash/pro, gemini-3 | 1M+ | Multimodal, Google Search grounding |
+| **Kimi (Moonshot)** | moonshot-v1-128k, kimi-k2 | 256K | Eastern philosophy, tool use |
+| **Mistral AI** | mistral-large, codestral, pixtral | 128K | European AI, code gen, embeddings |
+| **Perplexity** | pplx-7b-online, sonar | - | Real-time web search, citations |
+| **DeepSeek** | deepseek-r1, deepseek-v3, deepseek-coder | 128K | Reasoning, code, open source |
+| **Cohere** | command-r-plus, embed-v3 | 128K | RAG optimized, reranking |
+| **Together AI** | Llama-3.2-90B, Qwen-72B, Mixtral | Varies | Open model hosting |
+| **Groq** | llama-3.2-90b, mixtral-8x7b | 128K | Ultra-fast LPU inference |
+| **Fireworks AI** | Llama, Mixtral, FireFunction | Varies | Fast inference |
+| **AI21 Labs** | Jamba-1.5, Jurassic-2 | 256K | Long context, summarization |
+| **HuggingFace** | 200K+ models | Varies | Open model hub |
+| **Replicate** | Any open model | Varies | Serverless GPU |
+| **Ollama (Local)** | DeepSeek-R1, Phi-4, Llama-3.2, Qwen, Mistral | Varies | Private, fast, custom models |
+
+**Local Backends**: Ollama, llama.cpp (GPU offload), BitNet (1-bit), OpenAI-compatible gateway
+
+</details>
+
+---
+
+## ALL AGENT TYPES (18+)
+
+<details>
+<summary><strong>SPECIALIZED AGENTS</strong></summary>
+
+| Agent | Specialization |
+|:------|:---------------|
+| **Browser Agent** | Autonomous web navigation, scraping with stealth mode |
+| **Code Agent** | Code generation, debugging, refactoring |
+| **Reasoning Agent** | Complex multi-step reasoning |
+| **Research Agent** | Information gathering & synthesis |
+| **Creative Agent** | Writing, design, content creation |
+| **Planner Agent** | Task decomposition & orchestration |
+| **Critic Agent** | Code/output review & improvement |
+| **FileSystem Agent** | File operations & management |
+| **Meta-Cognition Agent** | Self-reflection & strategy adjustment |
+| **Proactive Agent** | Autonomous action taking |
+| **User Avatar** | User preference learning & modeling |
+| **Trading Agent** | Autonomous crypto trading (DeGen Mob) |
+| **Security Agent** | Vulnerability scanning, forensics |
+| **DevOps Agent** | CI/CD, container management |
+| **Health Agent** | Wellness recommendations |
+| **Meeting Agent** | Meeting facilitation & notes |
+| **Vision Agent** | Image analysis & understanding |
+| **Voice Agent** | Speech recognition & synthesis |
+
+**Features**: Capability-based dispatch, confidence-aware handoff, hierarchical teams, agent debates
+
+</details>
+
+---
+
+## ALL MEMORY SYSTEMS (18)
+
+<details>
+<summary><strong>MULTI-LAYER MEMORY ARCHITECTURE</strong></summary>
+
+| Memory Type | Purpose |
+|:------------|:--------|
+| **Working Memory** | Current task scratchpad |
+| **Archival Memory** | Long-term persistent storage |
+| **Recall Memory** | Conversation history |
+| **Episodic Memory** | Event-based memories with timestamps |
+| **Knowledge Graph** | Entity relationships & reasoning |
+| **Knowledge Graph v2** | Enhanced multi-hop inference |
+| **Virtual Context** | Paging for large contexts |
+| **Memory Dreaming** | Sleep-like consolidation |
+| **Dream Consolidation** | Pattern extraction during idle |
+| **Memory Sharing** | Multi-agent memory sync |
+| **Project Tracking** | Project state management |
+| **Semantic Layers** | Multi-level semantic storage |
+| **Semantic Dedup** | Redundancy elimination |
+| **Sharding** | Distributed memory |
+| **Planetary Audio Shard** | Audio memory across instances |
+| **Conversation Export** | Dialogue history export |
+| **Query Cache** | LRU cache with TTL |
+| **P2P Memory** | Peer-to-peer memory sharing |
+
+</details>
+
+---
+
+## ALL COGNITIVE ENGINES (7)
+
+<details>
+<summary><strong>ADVANCED REASONING SYSTEMS</strong></summary>
+
+| Engine | Capabilities |
+|:-------|:-------------|
+| **Sequential Thinking** | Step-by-step chain-of-thought reasoning |
+| **Theory of Mind** | User modeling & preference learning |
+| **Causal Reasoning** | Causal graphs, counterfactuals, intervention analysis |
+| **Quantum Search** | Schrödinger search, superposition states, entanglement |
+| **Neuromorphic Engine** | Spiking neural networks, synaptic plasticity |
+| **Affective Engine** | Emotional state modeling & empathy |
+| **Trading Cognition** | Market analysis, risk assessment, autonomous decisions |
+
+</details>
+
+---
+
+## ALL CORE SYSTEMS
+
+<details>
+<summary><strong>CORE INFRASTRUCTURE (49 components)</strong></summary>
+
+| System | Function |
+|:-------|:---------|
+| **Nexus (Event Bus)** | Central nervous system, signal routing |
+| **Evolution Loop** | Autonomous self-improvement cycle |
+| **Inference Engine** | Unified LLM inference interface |
+| **Model Manager** | Intelligent model loading/unloading, LRU eviction |
+| **Model Swarm** | Multi-model orchestration (7 strategies) |
+| **Attention Router** | Dynamic attention allocation |
+| **Agent Spawner** | Dynamic agent creation & management |
+| **Parallel Orchestrator** | Multi-threaded execution |
+| **Worker Broadcaster** | Progress updates to UI |
+| **Smart Turn Taking** | Conversation flow management |
+| **Token Budgets** | Token allocation & tracking |
+| **Token Saver** | Context compression |
+| **Resilience** | Error recovery, retry logic, circuit breakers |
+| **Self-Awareness** | System self-monitoring |
+| **Context Profiles** | Saved context templates |
+| **FCP Protocol** | Internal communication protocol |
+| **WSL Bridge** | Windows/Linux interop |
+| **Collective Organism** | Emergent swarm intelligence |
+
+**Swarm Strategies**: Fastest-First, Quality-First, Parallel Vote, Mixture of Experts, Speculative Ensemble, Confidence Fusion, PSO Collaborative
+
+</details>
+
+---
+
+## ALL INTEGRATIONS (70+ across 17 categories)
+
+<details open>
+<summary><strong>CRYPTO/BLOCKCHAIN & DEFI (15+)</strong></summary>
+
+| Service | Features |
+|:--------|:---------|
+| **Bankr Agent** | PRIMARY: Multi-chain trading, swaps, Polymarket, NFTs, x402 payments |
+| **Solana RPC** | Balance, transactions, wallet management |
+| **Jupiter Aggregator** | Token swaps, best route finding |
+| **0x Protocol** | EVM chain swaps |
+| **Pump.fun** | Token trading, bonding curves, new token discovery |
+| **Meteora** | Dynamic pool/pair information |
+| **Bags.fm** | Token launches, trading |
+| **Polymarket** | Prediction markets, odds tracking |
+| **DexScreener** | Token pairs, CA scanner, market data |
+| **Helius** | Token metadata, rug detection |
+| **Jito Block Engine** | MEV protection, bundle submission |
+| **CoinGecko** | Market cap, prices, 24h changes |
+| **Fear & Greed Index** | Crypto sentiment |
+| **Alpha Vantage** | TradFi stocks, forex |
+| **Token Scanner** | DROP ANY CA IN CHAT - instant analysis! |
+
+**DeGen Mob Features**: Whale watching, rug detection, launch sniping, cluster analysis, meme quality analysis
+
+</details>
+
+<details>
+<summary><strong>SOCIAL MEDIA (3)</strong></summary>
+
+| Platform | Features |
+|:---------|:---------|
+| **X/Twitter** | OAuth 2.0 PKCE, tweet posting, mention monitoring, automated engagement |
+| **Discord** | Full bot interface, DM/channel, swarm integration |
+| **Moltbook** | Token promotion, autonomous posting, rate limiting |
+
+</details>
+
+<details>
+<summary><strong>CLOUD PROVIDERS (2)</strong></summary>
+
+| Provider | Services |
+|:---------|:---------|
+| **AWS** | EC2, IAM, S3, VPC, CloudWatch, Cost Explorer, Security Hub |
+| **Azure** | Entra ID, VMs, Storage, VNets, NSGs, Defender, Cost Management |
+
+</details>
+
+<details>
+<summary><strong>OFFICE & PRODUCTIVITY (6)</strong></summary>
+
+| Service | Features |
+|:--------|:---------|
+| **Microsoft Office 365** | Email (Outlook), Calendar sync, OneDrive |
+| **Google Workspace** | Gmail, Calendar, Admin SDK |
+| **Notion** | Pages, search, database operations |
+| **GitHub** | Issues, PRs, CI/CD, repo management |
+| **n8n** | Workflow automation, triggers |
+| **Calendar** | Cross-provider sync |
+
+</details>
+
+<details>
+<summary><strong>SECURITY & PENTESTING (7)</strong></summary>
+
+| Tool | Purpose |
+|:-----|:--------|
+| **EDR** | Endpoint detection & response |
+| **Forensics** | Digital forensics analysis |
+| **Header Analyzer** | HTTP security headers |
+| **Log Parser** | Security log analysis |
+| **Reconnaissance** | OSINT & enumeration |
+| **Threat Analyzer** | Threat intelligence |
+| **Vulnerability Scanner** | CVE detection |
+
+</details>
+
+<details>
+<summary><strong>VOICE & AUDIO (5)</strong></summary>
+
+| Service | Features |
+|:--------|:---------|
+| **Whisper (OpenAI)** | STT, multi-language, timestamps |
+| **pyttsx3** | Text-to-speech, voice selection |
+| **pyannote.audio** | Speaker diarization |
+| **sounddevice** | Real-time microphone |
+| **TTS Voice Cloning** | Custom voice synthesis |
+
+</details>
+
+<details>
+<summary><strong>VISION & IMAGE (4)</strong></summary>
+
+| Model | Features |
+|:------|:---------|
+| **CLIP (OpenAI)** | Zero-shot classification |
+| **BLIP** | Image captioning, VQA |
+| **EasyOCR** | Text extraction, multi-language |
+| **Vision Reconstruction** | 3D from images |
+
+</details>
+
+<details>
+<summary><strong>DEVOPS & CI/CD (5)</strong></summary>
+
+| Tool | Features |
+|:-----|:---------|
+| **Docker** | Container management |
+| **Kubernetes** | Cluster orchestration |
+| **GitHub Actions** | CI/CD pipelines |
+| **GitLab CI** | Pipeline automation |
+| **Jenkins** | Build orchestration |
+
+</details>
+
+<details>
+<summary><strong>HEALTH & WELLNESS (5)</strong></summary>
+
+| Provider | Features |
+|:---------|:---------|
+| **Apple Health** | Health data sync |
+| **Fitbit** | Fitness tracking |
+| **Oura Ring** | Sleep & biometrics |
+| **WHOOP** | Strain/recovery |
+| **Health Dashboard** | Unified health view |
+
+</details>
+
+<details>
+<summary><strong>IDE INTEGRATIONS (2)</strong></summary>
+
+| IDE | Features |
+|:----|:---------|
+| **VS Code** | Editor bridge, code assistance |
+| **Cursor** | AI editor integration |
+
+</details>
+
+<details>
+<summary><strong>GAME ENGINES (1)</strong></summary>
+
+| Engine | Features |
+|:-------|:---------|
+| **Unreal Engine 5** | Game dev automation, asset creation |
+
+</details>
+
+<details>
+<summary><strong>SPECIAL INTEGRATIONS (4)</strong></summary>
+
+| Integration | Purpose |
+|:------------|:--------|
+| **CAD Engine** | 3D/CAD modeling operations |
+| **Bio Interface** | Bioinformatics tools |
+| **x402 Protocol** | HTTP 402 micropayments |
+| **Multimodal** | Multi-input processing |
+
+</details>
+
+---
+
+## ALL TOOLS (30+)
+
+<details>
+<summary><strong>PRODUCTIVITY TOOLS (9)</strong></summary>
+
+| Tool | Purpose |
+|:-----|:--------|
+| **Mimic** | Code/behavior pattern learning |
+| **Boomerang** | Message scheduling |
+| **Focus Mode** | Distraction blocking |
+| **Autodocs** | Automatic documentation |
+| **Whisperer** | Voice transcription |
+| **Quick Notes** | Note-taking |
+| **Snippet Manager** | Code snippet library |
+| **Focus Timer** | Pomodoro technique |
+| **Daily Summary** | Automated summaries |
+
+</details>
+
+<details>
+<summary><strong>CODE & ANALYSIS TOOLS</strong></summary>
+
+| Tool | Purpose |
+|:-----|:--------|
+| **Code Analyzer** | Metrics, complexity, quality |
+| **Sequential Thought** | Step-by-step reasoning |
+| **System Diagnostic** | System health checks |
+
+</details>
+
+<details>
+<summary><strong>REGISTERED TOOLS (via Tool Router)</strong></summary>
+
+- `grok_search` - Web search via Grok
+- `dex_screener_search` - Token lookup
+- `polymarket_scan` - Prediction markets
+- `market_sentiment_check` - Sentiment analysis
+- `pump_fun_track` - New token tracking
+- `bags_fm_track` - Token monitoring
+- `bags_fm_trending` - Trending tokens
+- `bags_fm_trade_quote` - Trade quotes
+- `extract_entities` - NER
+- `generate_image` - Image generation
+- `calculate` - Math operations
+- `datetime_info` - Date/time utilities
+- `render_video` - Video generation
+- `parallel_ai_dispatch` - Multi-model queries
+- `discord_broadcast` - Discord messaging
+- `generate_mermaid_chart` - Diagram generation
+- `youtube_analyze` - Video analysis
+- `database_query` - DB operations
+
+</details>
+
+---
+
+## ALL LEARNING & EVOLUTION SYSTEMS
+
+<details>
+<summary><strong>LEARNING SYSTEMS (4)</strong></summary>
+
+| System | Capabilities |
+|:-------|:-------------|
+| **Continual Learning** | Experience replay, incremental learning, no catastrophic forgetting |
+| **Dream Catcher** | Sleep-like consolidation, pattern extraction |
+| **Learning Paths** | Spaced repetition, skill trees, curriculum learning |
+| **Synergy Engine** | Multi-skill combination, emergent abilities |
+
+</details>
+
+<details>
+<summary><strong>EVOLUTION SYSTEMS (4)</strong></summary>
+
+| System | Function |
+|:-------|:---------|
+| **Genetic Optimizer** | Genetic algorithm for hyperparameters |
+| **Behavior Mutation** | Agent behavior evolution |
+| **Fitness Tracker** | Performance metrics & selection |
+| **LoRA Evolver** | Parameter-efficient fine-tuning |
+
+</details>
+
+---
+
+## ALL RAG COMPONENTS (7)
+
+<details>
+<summary><strong>RETRIEVAL-AUGMENTED GENERATION</strong></summary>
+
+| Component | Function |
+|:----------|:---------|
+| **Document Processor** | Code/doc chunking, extraction |
+| **Embeddings Manager** | Multi-backend (SentenceTransformer, Ollama) |
+| **Context Compression** | Token-efficient context building |
+| **Hybrid Retriever** | Semantic + keyword search |
+| **Hybrid Search v2** | Multi-hop reasoning |
+| **Self-Refining RAG** | Query refinement, feedback loops |
+| **Query Cache** | LRU cache with TTL |
+
+</details>
+
+---
+
+## ENTERPRISE FEATURES
+
+<details>
+<summary><strong>COMPLIANCE & GOVERNANCE</strong></summary>
+
+| Feature | Function |
+|:--------|:---------|
+| **Audit Logger** | Complete event logging |
+| **Compliance Engine** | Regulatory checks |
+| **Policy Engine** | Policy enforcement |
+| **Multi-User** | User isolation |
+| **Permissions** | Access control |
+| **Sessions** | Session management |
+
+</details>
+
+---
+
+## USER INTERFACES
+
+<details>
+<summary><strong>ALL UI OPTIONS</strong></summary>
+
+| Interface | Features |
+|:----------|:---------|
+| **Web Interface** | Real-time chat, swarm visualization, memory browser |
+| **Desktop App** | PySide6 GUI, system tray, hotkeys, themes |
+| **MCP Server** | Claude Code integration, tool exposure |
+| **CLI** | Command-line interface |
+
+</details>
 
 ---
 
