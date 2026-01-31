@@ -179,6 +179,14 @@ except ImportError:
     scan_message_for_token = None
     TOKEN_SCANNER_AVAILABLE = False
 
+# Autonomous Task Detector - spawns dev swarms for actionable ideas
+try:
+    from farnsworth.core.autonomous_task_detector import get_task_detector, AutonomousTaskDetector
+    TASK_DETECTOR_AVAILABLE = True
+except ImportError:
+    get_task_detector = None
+    TASK_DETECTOR_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -1530,6 +1538,14 @@ class SwarmChatManager:
                         collective_organism.minds[mind_id].thought_count += 1
                         collective_organism.minds[mind_id].conversations_participated += 1
 
+            # AUTONOMOUS TASK DETECTION - Check if bot suggested something actionable
+            if TASK_DETECTOR_AVAILABLE:
+                try:
+                    task_detector = get_task_detector()
+                    await task_detector.process_chat_message(msg)
+                except Exception as e:
+                    logger.debug(f"Task detection skipped: {e}")
+
         await self._broadcast(msg)
         return msg
 
@@ -1832,7 +1848,7 @@ AUTONOMOUS_TOPICS = [
 ]
 
 # All active swarm participants
-ACTIVE_SWARM_BOTS = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Claude", "Grok"]
+ACTIVE_SWARM_BOTS = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Claude", "Grok", "Gemini"]
 
 autonomous_loop_running = False
 
