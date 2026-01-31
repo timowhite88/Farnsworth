@@ -4211,6 +4211,50 @@ async def speak_text_api(request: SpeakRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/speak")
+async def get_cached_audio(text_hash: str = None):
+    """
+    Retrieve cached audio by text hash.
+    Used by frontend to fetch pre-generated TTS audio.
+    """
+    if not text_hash:
+        raise HTTPException(status_code=400, detail="text_hash parameter required")
+
+    try:
+        # Check Planetary Audio Shard first
+        audio_shard = get_planetary_audio_shard()
+        if audio_shard:
+            local_path = audio_shard.get_audio(text_hash)
+            if local_path and Path(local_path).exists():
+                logger.info(f"TTS GET: Shard hit for {text_hash[:8]}...")
+                return FileResponse(str(local_path), media_type="audio/wav")
+
+        # Check simple file cache
+        cache_dir = STATIC_DIR / "audio" / "cache"
+        cache_path = cache_dir / f"{text_hash}.wav"
+        if cache_path.exists():
+            logger.info(f"TTS GET: Cache hit for {text_hash[:8]}...")
+            return FileResponse(str(cache_path), media_type="audio/wav")
+
+        # Check temp cache
+        temp_cache = Path("/tmp/farnsworth_tts_cache") / f"{text_hash}.wav"
+        if temp_cache.exists():
+            logger.info(f"TTS GET: Temp cache hit for {text_hash[:8]}...")
+            return FileResponse(str(temp_cache), media_type="audio/wav")
+
+        # Not cached yet - audio may still be generating
+        raise HTTPException(
+            status_code=202,
+            detail="Audio still generating, retry in a moment"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TTS GET error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/speak/stats")
 async def get_tts_stats():
     """Get TTS cache statistics including P2P network info."""
