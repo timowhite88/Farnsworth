@@ -7,6 +7,7 @@ Handles:
 - Data directory creation
 - Model downloading
 - Claude Code configuration
+- Optional module installation (Bankr, x402, Desktop, Browser, IDE, UE5, CAD)
 """
 
 import os
@@ -15,6 +16,7 @@ import subprocess
 import platform
 import json
 from pathlib import Path
+from typing import List, Optional
 
 # Colors for terminal output
 class Colors:
@@ -191,6 +193,121 @@ def configure_claude_code():
     return True
 
 
+def install_optional_modules():
+    """Prompt user for optional module installation."""
+    print_header("Optional Modules")
+
+    print(f"""
+Farnsworth supports optional capability modules.
+Each module adds specific functionality and can be installed later.
+    """)
+
+    # Check if user wants to configure modules
+    choice = input("Configure optional modules now? [Y/n]: ").strip().lower()
+    if choice == 'n':
+        print_info("Skipping optional modules. Run 'python -m farnsworth.modules.registry' later to install.")
+        return True
+
+    try:
+        # Import the registry
+        project_root = Path(__file__).parent.parent
+        sys.path.insert(0, str(project_root))
+
+        from farnsworth.modules.registry import OPTIONAL_MODULES, prompt_modules, install_modules
+
+        print("\n" + "=" * 60)
+        print("OPTIONAL CAPABILITY MODULES")
+        print("=" * 60)
+
+        for key, config in OPTIONAL_MODULES.items():
+            deps = ", ".join(config.requires) if config.requires else "None"
+            dep_info = f" (requires: {', '.join(config.depends_on)})" if config.depends_on else ""
+
+            print(f"\n{Colors.BOLD}{config.name}{Colors.END}{dep_info}")
+            print(f"  {config.description}")
+            print(f"  Size: ~{config.size_mb}MB | External requirements: {deps}")
+
+        print("\n" + "-" * 60)
+
+        # Selection options
+        print("\nOptions:")
+        print("  [1] Select individual modules (recommended)")
+        print("  [2] Install ALL modules")
+        print("  [3] Install NONE (skip)")
+
+        option = input("\nChoice [1/2/3]: ").strip()
+
+        if option == '3':
+            print_info("Skipping optional modules.")
+            return True
+
+        if option == '2':
+            selected = list(OPTIONAL_MODULES.keys())
+            print_info(f"Installing all {len(selected)} modules...")
+        else:
+            # Individual selection
+            selected = []
+            print("\nFor each module, press Enter for Yes or 'n' for No:\n")
+
+            for key, config in OPTIONAL_MODULES.items():
+                # Check Python version requirements
+                skip_reason = None
+                if config.python_min_version:
+                    version = tuple(map(int, config.python_min_version.split('.')))
+                    if sys.version_info[:2] < version:
+                        skip_reason = f"Requires Python {config.python_min_version}+"
+
+                if skip_reason:
+                    print(f"  {config.name}: {Colors.YELLOW}SKIP - {skip_reason}{Colors.END}")
+                    continue
+
+                choice = input(f"  {config.name}? [Y/n]: ").strip().lower()
+                if choice != 'n':
+                    # Auto-select dependencies
+                    for dep in config.depends_on:
+                        if dep not in selected:
+                            print(f"    -> Also selecting dependency: {OPTIONAL_MODULES[dep].name}")
+                            selected.append(dep)
+                    selected.append(key)
+
+        if not selected:
+            print_info("No modules selected.")
+            return True
+
+        # Install selected modules
+        print(f"\n{Colors.BOLD}Installing {len(selected)} module(s)...{Colors.END}\n")
+
+        success = install_modules(selected)
+
+        if success:
+            print_success("Optional modules installed!")
+        else:
+            print_warning("Some modules had installation issues.")
+
+        # Show env var requirements
+        env_warnings = []
+        for key in selected:
+            config = OPTIONAL_MODULES[key]
+            for var in config.env_vars:
+                if not os.environ.get(var):
+                    env_warnings.append((config.name, var))
+
+        if env_warnings:
+            print_warning("\nSome modules require environment variables:")
+            for module_name, var in env_warnings:
+                print(f"  - {module_name}: Set {var} in your environment")
+
+        return True
+
+    except ImportError as e:
+        print_warning(f"Could not load module registry: {e}")
+        print_info("Optional modules can be installed manually later.")
+        return True
+    except Exception as e:
+        print_error(f"Module installation error: {e}")
+        return True  # Don't fail setup for optional modules
+
+
 def verify_installation():
     """Verify Farnsworth installation."""
     print_header("Verifying Installation")
@@ -226,6 +343,24 @@ def verify_installation():
         print_warning(f"MCP server import warning: {e}")
         print_info("MCP library may need installation: pip install mcp")
 
+    # Check optional modules
+    try:
+        from farnsworth.modules.registry import get_module_status, OPTIONAL_MODULES
+        print_info("\nOptional Module Status:")
+
+        status = get_module_status()
+        for key, info in status.items():
+            if info["installed"]:
+                print_success(f"  {info['name']}: Installed")
+                # Check env vars
+                for var, is_set in info["env_vars"].items():
+                    if not is_set:
+                        print_warning(f"    └─ {var} not set")
+            else:
+                print_info(f"  {info['name']}: Not installed")
+    except ImportError:
+        pass
+
     return checks_passed
 
 
@@ -238,19 +373,30 @@ def print_next_steps():
    - Install Ollama: https://ollama.ai
    - Pull a model: ollama pull deepseek-r1:1.5b
 
-2. Start Farnsworth:
-   python main.py --setup    # First-time GRANULAR configuration (Privacy, Swarm, Engines)
+2. Configure Environment Variables (if using optional modules):
+   - BANKR_API_KEY=your_bankr_api_key     # For crypto trading
+   - X402_RECEIVER_WALLET=0x...           # For x402 payments
+
+   Windows: set BANKR_API_KEY=bk_your_key
+   Linux/Mac: export BANKR_API_KEY=bk_your_key
+
+3. Start Farnsworth:
+   python main.py --setup    # First-time GRANULAR configuration
    python main.py            # Start all services
 
-3. Configure Claude Code:
+4. Configure Claude Code:
    - Open Claude Code settings
    - Add the MCP configuration (see claude_code_config.json)
    - Restart Claude Code
 
-4. Test the integration:
+5. Test the integration:
    - Open Claude Code
    - Try: "Remember that I prefer Python"
-   - Later: "What programming language do I prefer?"
+   - Or with Bankr: "Hey Farn, what's the price of ETH?"
+
+6. Optional Module Management:
+   - Run module installer later: python -c "from farnsworth.modules.registry import prompt_modules, install_modules; install_modules(prompt_modules())"
+   - Check module status: python -c "from farnsworth.modules.registry import get_module_status; print(get_module_status())"
 
 For more information, see README.md
     """)
@@ -271,6 +417,7 @@ def main():
         ("System Check", check_system),
         ("Directories", create_directories),
         ("Dependencies", install_dependencies),
+        ("Optional Modules", install_optional_modules),
         ("Claude Code Config", configure_claude_code),
         ("Verification", verify_installation),
     ]
