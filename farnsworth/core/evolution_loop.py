@@ -302,19 +302,61 @@ class EvolutionLoop:
             except Exception as e:
                 logger.error(f"OpenCode worker error: {e}")
 
-        code_prompt = f"""You are a Python developer. OUTPUT ONLY PYTHON CODE.
-NO EXPLANATIONS. NO QUESTIONS. NO CONVERSATION.
+        code_prompt = f"""You are an expert Python developer for the Farnsworth AI swarm system.
 
 TASK: {task.description}
 
-Requirements:
-- Write a complete, working Python module
-- Include proper class/function definitions
-- Add docstrings and type hints
-- Make it production-ready
+OUTPUT REQUIREMENTS:
+1. Output ONLY valid Python code - no explanations, no conversation
+2. Start with: # {task.description}
 
-START YOUR RESPONSE WITH: # {task.description}
-Then write the Python code.
+CODE STANDARDS:
+- Use type hints on all function signatures
+- Add docstrings (Google style) for public functions and classes
+- Follow PEP 8 naming conventions (snake_case for functions, PascalCase for classes)
+- Maximum function length: 50 lines (split into smaller functions if needed)
+
+IMPORTS (use when relevant):
+- from loguru import logger
+- from typing import Optional, Dict, List, Any
+- from dataclasses import dataclass
+- from farnsworth.memory.memory_system import get_memory_system
+
+ERROR HANDLING:
+- Use specific exception types (ValueError, TypeError, KeyError)
+- Log errors with logger.error(f"Description: {{e}}")
+- Return None or empty collections on recoverable errors
+
+STRUCTURE:
+```python
+# {task.description}
+
+\"\"\"
+Module docstring explaining purpose.
+\"\"\"
+
+import ...
+
+# Constants at top
+CONSTANT_NAME = value
+
+class ClassName:
+    \"\"\"Class docstring.\"\"\"
+
+    def method_name(self, param: Type) -> ReturnType:
+        \"\"\"Method docstring.\"\"\"
+        pass
+
+def function_name(param: Type) -> ReturnType:
+    \"\"\"Function docstring.\"\"\"
+    pass
+
+# Entry point if needed
+if __name__ == "__main__":
+    pass
+```
+
+Generate the code now:
 
 ```python
 """

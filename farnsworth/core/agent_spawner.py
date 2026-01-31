@@ -19,7 +19,8 @@ class TaskType(Enum):
     DEVELOPMENT = "dev"     # Development/coding tasks
     RESEARCH = "research"   # Research/analysis tasks
     MEMORY = "memory"       # Memory expansion work
-    MCP = "mcp"            # MCP integration work
+    MCP = "mcp"             # MCP integration work
+    TESTING = "testing"     # Test creation and QA tasks
 
 @dataclass
 class AgentInstance:
