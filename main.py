@@ -56,7 +56,21 @@ def print_banner():
     ║                                                               ║
     ╚═══════════════════════════════════════════════════════════════╝
     """
-    print(banner)
+    # ASCII fallback for Windows console encoding issues
+    banner_ascii = """
+    +---------------------------------------------------------------+
+    |                                                               |
+    |   FARNSWORTH                                                  |
+    |                                                               |
+    |           Your Claude Companion AI                            |
+    |           Memory - Agents - Evolution                         |
+    |                                                               |
+    +---------------------------------------------------------------+
+    """
+    try:
+        print(banner)
+    except UnicodeEncodeError:
+        print(banner_ascii)
 
 
 def print_status(component: str, status: str, details: str = ""):
@@ -68,8 +82,19 @@ def print_status(component: str, status: str, details: str = ""):
         "info": "ℹ️",
         "warning": "⚠️",
     }
+    icons_ascii = {
+        "ok": "[OK]",
+        "loading": "[..]",
+        "error": "[X]",
+        "info": "[i]",
+        "warning": "[!]",
+    }
     icon = icons.get(status, "•")
-    print(f"  {icon} {component}: {details}")
+    try:
+        print(f"  {icon} {component}: {details}")
+    except UnicodeEncodeError:
+        icon = icons_ascii.get(status, "-")
+        print(f"  {icon} {component}: {details}")
 
 
 async def run_setup_wizard():
