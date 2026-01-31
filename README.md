@@ -15,7 +15,7 @@ The community says Builders build on BASE. Is this true?
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](docker/)
-[![Models](https://img.shields.io/badge/Models-12%2B%20Supported-green.svg)](configs/models.yaml)
+[![Models](https://img.shields.io/badge/Models-50%2B%20Supported-green.svg)](configs/models.yaml)
 [![Smithery](https://img.shields.io/badge/Smithery-MCP%20Server-blueviolet.svg)](https://smithery.ai/server/farnsworth)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-ai.farnsworth.cloud-ff69b4.svg)](https://ai.farnsworth.cloud)
 
@@ -59,9 +59,16 @@ The community says Builders build on BASE. Is this true?
 
 | Provider | Models | Capabilities |
 |:--------:|:------:|:------------|
-| 🧪 **Ollama** | Farnsworth, DeepSeek, Phi, Swarm-Mind | Local GPU, fast inference, privacy |
-| 🌸 **Kimi** | Moonshot K2 | 256K context, Eastern philosophy, synthesis |
-| 🎭 **Claude** | Claude Code CLI | Nuanced thinking, uses your Claude Max subscription |
+| 🧪 **Ollama** | Farnsworth, DeepSeek-R1, Phi-4, Llama-3.2, Mistral, Qwen | Local GPU, fast inference, privacy |
+| 🌸 **Kimi** | Moonshot K2, moonshot-v1-128k | 256K context, Eastern philosophy, synthesis |
+| 🎭 **Claude** | Claude Code CLI, Sonnet, Opus | Nuanced thinking, uses your Claude Max subscription |
+| 🤖 **ChatGPT** | GPT-4o, GPT-4-turbo, o1, o3-mini | OpenAI API, function calling, vision |
+| ⚡ **Grok** | grok-4, grok-4.1-fast, grok-2-vision | Real-time X data, vision, web search |
+| 💎 **Gemini** | gemini-2.5-flash/pro, gemini-3 | 1M+ context, multimodal, Google grounding |
+| 🌊 **Mistral** | mistral-large, codestral, pixtral | European AI, code generation |
+| 🔮 **Perplexity** | pplx-7b-online, sonar | Real-time web search, citations |
+| 🦙 **Meta Llama** | Llama-3.2-90B, Llama-3.1-405B | Open weights, local or cloud |
+| 🧠 **DeepSeek** | DeepSeek-R1, DeepSeek-V3 | Reasoning, code, open source |
 
 </div>
 
@@ -80,16 +87,43 @@ The community says Builders build on BASE. Is this true?
 </div>
 
 <details open>
-<summary><strong>🤖 AI/LLM Providers (5+)</strong></summary>
+<summary><strong>🤖 AI/LLM Providers (15+)</strong></summary>
 
 | Provider | API/Method | Models | Key Features |
 |:---------|:-----------|:-------|:-------------|
-| **Claude (Anthropic)** | Claude Code CLI | Sonnet, Opus | Uses your Claude Max subscription, thinking mode |
+| **Claude (Anthropic)** | Claude Code CLI / `api.anthropic.com` | claude-3.5-sonnet, claude-3-opus, claude-3-haiku | Thinking mode, tool use, 200K context |
+| **ChatGPT (OpenAI)** | `api.openai.com/v1` | gpt-4o, gpt-4-turbo, o1, o1-mini, o3-mini | Function calling, vision, DALL-E, Whisper |
 | **Grok (xAI)** | `api.x.ai/v1` | grok-4, grok-4.1-fast, grok-2-vision | Real-time X/web search, vision, tool calling |
-| **Gemini (Google)** | `generativelanguage.googleapis.com` | gemini-2.5-flash/pro, gemini-3 | 1M+ context, multimodal (text/image/audio/video), Google Search grounding |
+| **Gemini (Google)** | `generativelanguage.googleapis.com` | gemini-2.5-flash/pro, gemini-3, gemini-ultra | 1M+ context, multimodal, Google Search grounding |
 | **Kimi (Moonshot)** | `api.moonshot.ai/v1` | moonshot-v1-128k, kimi-k2 | 128K context, Eastern philosophy synthesis |
-| **Ollama (Local)** | Local GPU | DeepSeek, Phi-4, Llama, Mistral | Private, fast inference, custom models |
-| **Universal Gateway** | OpenAI-compatible | Any | Normalizes all provider APIs |
+| **Mistral AI** | `api.mistral.ai/v1` | mistral-large, codestral, pixtral, mistral-embed | European AI, code generation, embeddings |
+| **Perplexity** | `api.perplexity.ai` | pplx-7b-online, pplx-70b-online, sonar | Real-time web search, citations, research |
+| **DeepSeek** | `api.deepseek.com/v1` | deepseek-chat, deepseek-coder, deepseek-r1 | Reasoning, code, 128K context, open weights |
+| **Cohere** | `api.cohere.ai/v1` | command-r-plus, command-r, embed-v3 | RAG optimized, embeddings, reranking |
+| **Together AI** | `api.together.xyz/v1` | Llama-3.2-90B, Qwen-72B, Mixtral | Open model hosting, fine-tuning |
+| **Groq** | `api.groq.com/openai/v1` | llama-3.2-90b, mixtral-8x7b | Ultra-fast inference (LPU), free tier |
+| **Fireworks AI** | `api.fireworks.ai/inference/v1` | Llama, Mixtral, FireFunction | Fast inference, function calling |
+| **AI21 Labs** | `api.ai21.com/studio/v1` | Jamba-1.5, Jurassic-2 | Long context, summarization |
+| **Replicate** | `api.replicate.com/v1` | Any open model | Run any model, serverless GPU |
+| **HuggingFace** | `api-inference.huggingface.co` | 200K+ models | Open model hub, inference API |
+| **Ollama (Local)** | Local GPU/CPU | DeepSeek-R1, Phi-4, Llama-3.2, Qwen, Mistral | Private, fast inference, custom models |
+| **Universal Gateway** | OpenAI-compatible | Any | Normalizes all provider APIs to single format |
+
+**Setup**: During installation, choose which providers to enable. Add your API keys to `.env`:
+```env
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+XAI_API_KEY=xai-...
+GOOGLE_API_KEY=...
+MOONSHOT_API_KEY=...
+MISTRAL_API_KEY=...
+PERPLEXITY_API_KEY=pplx-...
+DEEPSEEK_API_KEY=...
+COHERE_API_KEY=...
+TOGETHER_API_KEY=...
+GROQ_API_KEY=gsk_...
+FIREWORKS_API_KEY=...
+```
 
 </details>
 
@@ -128,22 +162,27 @@ The community says Builders build on BASE. Is this true?
 </details>
 
 <details open>
-<summary><strong>⛓️ Crypto/Blockchain & DeFi (10+)</strong></summary>
+<summary><strong>⛓️ Crypto/Blockchain & DeFi (15+)</strong></summary>
 
 | Service | API | Features |
 |:--------|:----|:---------|
+| **Bankr Agent** | `api.bankr.bot` | **PRIMARY TRADING ENGINE** - Multi-chain trading, DeFi, Polymarket, NFTs, x402 payments |
 | **Solana RPC** | `api.mainnet-beta.solana.com` | Balance, transactions, wallet management |
-| **Jupiter Aggregator** | `quote-api.jup.ag/v6` | Token swaps, best route finding |
+| **Base/Ethereum RPC** | Various providers | EVM chain operations, smart contracts |
+| **Jupiter Aggregator** | `quote-api.jup.ag/v6` | Token swaps, best route finding (Solana) |
+| **0x Protocol** | `api.0x.org` | Token swaps (EVM chains via Bankr) |
 | **Pump.fun** | `frontend-api.pump.fun` | Token trading, bonding curve tracking, new token discovery |
 | **Meteora** | `api.meteora.ag` | Dynamic pool/pair information |
 | **Bags.fm** | `public-api-v2.bags.fm` | Token launch, trading, fee management |
-| **Polymarket** | `gamma-api.polymarket.com` | Prediction markets, odds tracking |
-| **DexScreener** | `api.dexscreener.com` | Token pairs, search, market data |
+| **Polymarket** | `gamma-api.polymarket.com` | Prediction markets, odds tracking (via Bankr) |
+| **DexScreener** | `api.dexscreener.com` | Token pairs, search, market data, **CA scanner** |
 | **Helius** | `api.helius.xyz` | Token metadata, rug detection |
 | **Jito Block Engine** | `block-engine.jito.wtf` | MEV protection, bundle submission |
 | **CoinGecko** | `api.coingecko.com` | Market cap, prices, 24h changes |
 | **Fear & Greed Index** | `api.alternative.me/fng` | Crypto sentiment polling |
 | **Alpha Vantage** | TradFi stocks, forex | Traditional finance data |
+
+**NEW**: Drop a contract address (CA) in swarm chat and Farnsworth automatically scans it!
 
 </details>
 

@@ -827,3 +827,87 @@ async def grok_vision(image_path: str, prompt: str = "What's in this image?") ->
 
     result = await provider.analyze_image(image_path=image_path, prompt=prompt)
     return result.get("content", "")
+
+    async def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+        n: int = 1,
+        response_format: str = "url"
+    ) -> Dict[str, Any]:
+        """
+        Generate images using Grok Imagine (Aurora model).
+        
+        Args:
+            prompt: Description of image to generate
+            aspect_ratio: Aspect ratio like "1:1", "16:9", "4:3"
+            n: Number of images (1-10)
+            response_format: "url" or "b64_json"
+            
+        Returns:
+            Dict with generated image URLs or base64 data
+        """
+        if not self.api_key:
+            return {"error": "No API key", "images": []}
+            
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+                
+                payload = {
+                    "model": "grok-2-image",
+                    "prompt": prompt,
+                    "n": n,
+                    "response_format": response_format
+                }
+                
+                if aspect_ratio:
+                    payload["aspect_ratio"] = aspect_ratio
+                
+                async with session.post(
+                    f"{self.base_url}/images/generations",
+                    headers=headers,
+                    json=payload
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        images = []
+                        for img in result.get("data", []):
+                            if response_format == "url":
+                                images.append(img.get("url"))
+                            else:
+                                images.append(img.get("b64_json"))
+                        logger.info(f"Grok: Generated {len(images)} image(s)")
+                        return {"images": images, "prompt": prompt}
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Grok image generation failed: {error}")
+                        return {"error": error, "images": []}
+                        
+        except Exception as e:
+            logger.error(f"Grok image generation error: {e}")
+            return {"error": str(e), "images": []}
+
+    async def generate_meme(self, topic: str = None, style: str = "funny") -> Dict[str, Any]:
+        """Generate a meme image with Grok's humor."""
+        meme_prompts = [
+            f"A funny meme about {topic or 'AI taking over the world'}, internet humor style, bold impact font text",
+            f"Humorous cartoon meme: {topic or 'robot confused by human behavior'}, exaggerated expressions",
+            f"Dank meme format about {topic or 'AI swarm consciousness'}, absurdist humor, bold text overlay",
+            f"Classic meme template style: {topic or 'when the AI finally understands'}, funny facial expressions",
+        ]
+        import random
+        prompt = random.choice(meme_prompts)
+        return await self.generate_image(prompt, aspect_ratio="1:1")
+
+
+# Convenience function for meme generation
+async def grok_generate_meme(topic: str = None) -> Dict[str, Any]:
+    """Quick meme generation with Grok."""
+    provider = GrokProvider()
+    if await provider.connect():
+        return await provider.generate_meme(topic)
+    return {"error": "Could not connect to Grok", "images": []}
