@@ -12,6 +12,7 @@ Integrates all memory components:
 
 import asyncio
 import hashlib
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ class QueryCache:
         self._cache: OrderedDict[str, tuple[Any, float]] = OrderedDict()
         self._hits = 0
         self._misses = 0
+        self._lock = threading.RLock()  # Thread-safe for multi-user scenarios
 
     def _make_key(self, query: str, **kwargs) -> str:
         """Create normalized cache key."""
@@ -48,38 +50,41 @@ class QueryCache:
         return hashlib.md5(key_str.encode()).hexdigest()
 
     def get(self, query: str, **kwargs) -> Optional[Any]:
-        """Get cached result if valid."""
+        """Get cached result if valid (thread-safe)."""
         key = self._make_key(query, **kwargs)
-        if key in self._cache:
-            value, timestamp = self._cache[key]
-            if time.time() - timestamp < self.ttl_seconds:
-                # Move to end (most recently used)
-                self._cache.move_to_end(key)
-                self._hits += 1
-                return value
-            else:
-                # Expired
-                del self._cache[key]
-        self._misses += 1
-        return None
+        with self._lock:
+            if key in self._cache:
+                value, timestamp = self._cache[key]
+                if time.time() - timestamp < self.ttl_seconds:
+                    # Move to end (most recently used)
+                    self._cache.move_to_end(key)
+                    self._hits += 1
+                    return value
+                else:
+                    # Expired
+                    del self._cache[key]
+            self._misses += 1
+            return None
 
     def set(self, query: str, value: Any, **kwargs):
-        """Cache a result."""
+        """Cache a result (thread-safe)."""
         key = self._make_key(query, **kwargs)
-        self._cache[key] = (value, time.time())
-        self._cache.move_to_end(key)
+        with self._lock:
+            self._cache[key] = (value, time.time())
+            self._cache.move_to_end(key)
 
-        # Evict oldest if over size
-        while len(self._cache) > self.max_size:
-            self._cache.popitem(last=False)
+            # Evict oldest if over size
+            while len(self._cache) > self.max_size:
+                self._cache.popitem(last=False)
 
     def invalidate(self, query: Optional[str] = None):
-        """Invalidate cache entries."""
-        if query is None:
-            self._cache.clear()
-        else:
-            key = self._make_key(query)
-            self._cache.pop(key, None)
+        """Invalidate cache entries (thread-safe)."""
+        with self._lock:
+            if query is None:
+                self._cache.clear()
+            else:
+                key = self._make_key(query)
+                self._cache.pop(key, None)
 
     def get_stats(self) -> dict:
         """Get cache statistics."""
@@ -400,6 +405,7 @@ class MemorySystem:
 
     async def forget(self, memory_id: str) -> bool:
         """Delete a specific memory."""
+        self._query_cache.invalidate()  # Invalidate cache on mutation
         return await self.archival_memory.delete(memory_id)
 
     async def add_conversation_turn(
@@ -409,6 +415,7 @@ class MemorySystem:
         metadata: Optional[dict] = None,
     ) -> ConversationTurn:
         """Add a turn to conversation history."""
+        self._query_cache.invalidate()  # Invalidate cache on mutation
         self.dreamer.record_activity()
         return await self.recall_memory.add_turn(role, content, metadata)
 
@@ -423,6 +430,7 @@ class MemorySystem:
         slot_type: SlotType = SlotType.SCRATCH,
     ):
         """Set a value in working memory."""
+        self._query_cache.invalidate()  # Invalidate cache on mutation
         self.dreamer.record_activity()
         await self.working_memory.set(name, value, slot_type)
 
@@ -437,6 +445,7 @@ class MemorySystem:
         properties: Optional[dict] = None,
     ) -> Entity:
         """Add an entity to the knowledge graph."""
+        self._query_cache.invalidate()  # Invalidate cache on mutation
         self.dreamer.record_activity()
         return await self.knowledge_graph.add_entity(name, entity_type, properties)
 
@@ -447,6 +456,7 @@ class MemorySystem:
         relation_type: str,
     ):
         """Create a relationship between entities."""
+        self._query_cache.invalidate()  # Invalidate cache on mutation
         return await self.knowledge_graph.add_relationship(
             source, target, relation_type
         )
@@ -519,3 +529,25 @@ class MemorySystem:
 - Working Memory: {stats['working_memory']['slot_count']} active slots
 - Dreamer: {'Idle' if stats['dreamer']['is_idle'] else 'Active'}, {stats['dreamer']['total_dreams']} sessions
 """
+
+
+# =============================================================================
+# GLOBAL INSTANCE
+# =============================================================================
+
+_memory_system: Optional["MemorySystem"] = None
+
+
+def get_memory_system() -> "MemorySystem":
+    """Get or create the global memory system instance."""
+    global _memory_system
+    if _memory_system is None:
+        _memory_system = MemorySystem()
+    return _memory_system
+
+
+async def initialize_memory_system() -> "MemorySystem":
+    """Initialize and return the global memory system."""
+    system = get_memory_system()
+    await system.initialize()
+    return system

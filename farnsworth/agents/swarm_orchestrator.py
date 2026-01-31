@@ -269,32 +269,83 @@ class SwarmOrchestrator:
 
         return "general"
 
-    async def _execute_task(self, task: SwarmTask, agent: BaseAgent):
-        """Execute a task with an agent."""
+    async def _execute_task(
+        self,
+        task: SwarmTask,
+        agent: BaseAgent,
+        max_retries: int = 3,
+        retry_delay: float = 1.0
+    ):
+        """Execute a task with an agent, with retry logic and fallback."""
         task.status = TaskStatus.IN_PROGRESS
 
-        try:
-            result = await agent.execute(task.description, task.context)
-            task.result = result
-            task.status = TaskStatus.COMPLETED if result.success else TaskStatus.FAILED
-            task.completed_at = datetime.now()
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                result = await agent.execute(task.description, task.context)
 
-            self.state.total_tasks_processed += 1
-            self.state.completed_tasks.append(task.id)
+                # Check if result indicates failure that might be retryable
+                if result.success:
+                    task.result = result
+                    task.status = TaskStatus.COMPLETED
+                    task.completed_at = datetime.now()
 
-            # Notify listeners
-            for handler in self._on_task_complete:
-                try:
-                    await handler(task, result)
-                except Exception as e:
-                    logger.error(f"Task complete handler error: {e}")
+                    self.state.total_tasks_processed += 1
+                    self.state.completed_tasks.append(task.id)
 
-            logger.info(f"Task {task.id} completed: success={result.success}")
+                    # Notify listeners
+                    for handler in self._on_task_complete:
+                        try:
+                            await handler(task, result)
+                        except Exception as e:
+                            logger.error(f"Task complete handler error: {e}")
 
-        except Exception as e:
-            logger.error(f"Task execution error: {e}")
-            task.status = TaskStatus.FAILED
-            task.result = TaskResult(success=False, output=str(e))
+                    logger.info(f"Task {task.id} completed: success={result.success}")
+                    return
+
+                # Result was not successful - try with different agent if available
+                last_error = result.output
+                logger.warning(f"Task {task.id} attempt {attempt + 1} failed: {last_error}")
+
+                if attempt < max_retries - 1:
+                    # Try to find a different agent
+                    alt_agent = await self._find_alternative_agent(task, agent.agent_id)
+                    if alt_agent:
+                        agent = alt_agent
+                        logger.info(f"Retrying with alternative agent: {alt_agent.name}")
+                    await asyncio.sleep(retry_delay * (attempt + 1))
+
+            except asyncio.TimeoutError:
+                last_error = "Task execution timed out"
+                logger.warning(f"Task {task.id} attempt {attempt + 1} timed out")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (attempt + 1))
+
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Task {task.id} attempt {attempt + 1} error: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (attempt + 1))
+
+        # All retries exhausted
+        logger.error(f"Task {task.id} failed after {max_retries} attempts")
+        task.status = TaskStatus.FAILED
+        task.result = TaskResult(success=False, output=f"Failed after {max_retries} attempts: {last_error}")
+
+    async def _find_alternative_agent(
+        self,
+        task: SwarmTask,
+        exclude_agent_id: str
+    ) -> Optional[BaseAgent]:
+        """Find an alternative agent for a failed task."""
+        for agent in self.state.active_agents.values():
+            if agent.agent_id == exclude_agent_id:
+                continue
+            if agent.state.status not in (AgentStatus.IDLE, AgentStatus.COMPLETED):
+                continue
+            if agent.can_handle(task.required_capabilities) > 0.3:
+                return agent
+        return None
 
         # Process more tasks
         asyncio.create_task(self._process_queue())
