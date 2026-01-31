@@ -265,23 +265,24 @@ class DevelopmentSwarm:
                     if msg.get("phase") == "discussion"
                 ])
 
-                prompt = f"""You are {bot_name} in a development swarm discussion.
+                prompt = f"""You are {bot_name}, a senior Python developer in a code-focused development swarm.
 
 TASK: {self.task_description}
 
-RESEARCH FINDINGS:
+RESEARCH/CONTEXT:
 {research_context[:2000]}
 
-PREVIOUS DISCUSSION:
-{prev_discussion[:1500] if prev_discussion else "Starting discussion..."}
+PREVIOUS POINTS:
+{prev_discussion[:1500] if prev_discussion else "First to contribute."}
 
-Contribute your perspective on:
-1. How should we approach this implementation?
-2. What are the key technical decisions?
-3. What concerns do you have?
-4. What would you add or change from previous suggestions?
+YOUR CONTRIBUTION - be specific and technical:
+1. EXACT FILE PATH where code should go (e.g., farnsworth/core/new_feature.py)
+2. KEY FUNCTIONS needed with signatures (e.g., async def process_data(input: str) -> dict)
+3. DEPENDENCIES to import (existing farnsworth modules or external packages)
+4. POTENTIAL ISSUES and how to handle them
 
-Be concise but insightful. Respond as {bot_name}.
+DO NOT write generic advice. Be specific with file names, function names, and concrete implementation details.
+Keep response under 400 words. Focus on actionable technical decisions.
 """
 
                 try:
@@ -452,25 +453,33 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
             if msg.get("phase") == "research"
         ])
 
-        planning_prompt = f"""Design a solution for the following task:
+        planning_prompt = f"""Create a CONCRETE implementation plan with specific file paths and function signatures.
 
 TASK: {self.task_description}
 CATEGORY: {self.category}
 
-RESEARCH CONTEXT:
-{research_context[:2000] if research_context else "No prior research available"}
+CONTEXT:
+{research_context[:2000] if research_context else "No prior research."}
 
-SOURCE CONTEXT (what was being discussed):
-{json.dumps(self.source_context[-3:], indent=2)[:1000]}
+EXISTING FARNSWORTH STRUCTURE:
+- farnsworth/core/ - Core systems (cognition, memory integration)
+- farnsworth/agents/ - Agent implementations
+- farnsworth/memory/ - Memory systems (archival, recall, working)
+- farnsworth/integration/ - External integrations (APIs, tools)
+- farnsworth/web/server.py - FastAPI web server
 
-Provide a detailed implementation plan including:
-1. Architecture overview
-2. Files to create/modify
-3. Key functions and their purposes
-4. Integration points with existing Farnsworth systems
-5. Testing approach
+YOUR PLAN MUST INCLUDE:
+1. **Files to Create** - EXACT paths like: farnsworth/core/new_feature.py
+2. **Functions to Implement** - With signatures:
+   ```
+   async def function_name(param: Type) -> ReturnType:
+       \"\"\"Brief description\"\"\"
+   ```
+3. **Imports Required** - From existing farnsworth modules
+4. **Integration Points** - Which existing files need modification
+5. **Test Commands** - How to verify it works
 
-Format as a structured plan that developers can follow.
+Be SPECIFIC. No vague statements like "implement a system" - give exact function names and file paths.
 """
 
         try:
@@ -530,24 +539,43 @@ Format as a structured plan that developers can follow.
 
     async def _implement_with_model(self, model_name: str, plan_context: str):
         """Have a specific model implement part of the solution."""
-        implementation_prompt = f"""Implement the following based on the plan:
+        implementation_prompt = f"""You are a Python code generator. Output ONLY working Python code.
 
 TASK: {self.task_description}
 
 PLAN:
 {plan_context[:3000]}
 
-Generate Python code that:
-1. Follows the plan's architecture
-2. Integrates with Farnsworth's existing systems
-3. Includes proper error handling
-4. Has docstrings and comments
+REQUIREMENTS:
+1. Generate COMPLETE, RUNNABLE Python code
+2. Use these Farnsworth imports when relevant:
+   - from loguru import logger
+   - from farnsworth.memory.memory_system import get_memory_system
+   - from farnsworth.core.capability_registry import get_capability_registry
+   - import asyncio
+3. Include type hints on all functions
+4. Add brief docstrings
+5. Handle errors with try/except (use specific exception types)
 
-Output format:
+OUTPUT FORMAT - Generate exactly this structure:
 ```python
-# filename: <suggested_filename.py>
-<code>
+# filename: <descriptive_name.py>
+\"\"\"
+Brief module description.
+\"\"\"
+
+import asyncio
+from typing import Dict, List, Optional
+from loguru import logger
+
+# Your complete implementation here...
+
+if __name__ == "__main__":
+    # Test code
+    pass
 ```
+
+Generate ONLY the code block. No explanations before or after.
 """
 
         try:
