@@ -147,7 +147,31 @@ try:
 except ImportError:
     get_kimi_provider = None
     kimi_swarm_respond = None
-    KIMI_AVAILABLE = False
+# Grok (xAI) integration
+try:
+    from farnsworth.integration.external.grok import GrokProvider
+    GROK_AVAILABLE = True
+except ImportError:
+    GROK_AVAILABLE = False
+    GrokProvider = None
+
+# Gemini (Google AI) integration
+try:
+    from farnsworth.integration.external.gemini import get_gemini_provider, gemini_swarm_respond
+    GEMINI_AVAILABLE = True
+except ImportError:
+    get_gemini_provider = None
+    gemini_swarm_respond = None
+    GEMINI_AVAILABLE = False
+
+# Token Scanner for detecting CAs in chat and providing token analysis
+try:
+    from farnsworth.integration.financial.token_scanner import token_scanner, scan_message_for_token
+    TOKEN_SCANNER_AVAILABLE = True
+except ImportError:
+    token_scanner = None
+    scan_message_for_token = None
+    TOKEN_SCANNER_AVAILABLE = False
 
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
@@ -1344,6 +1368,17 @@ class SwarmChatManager:
             collective_organism.state.total_interactions += 1
             collective_organism.state.update_consciousness()
 
+        # Scan for contract addresses and provide token analysis
+        if TOKEN_SCANNER_AVAILABLE and scan_message_for_token:
+            try:
+                token_response = await scan_message_for_token(content)
+                if token_response:
+                    # Farnsworth responds with token analysis
+                    await self.broadcast_bot_message("Farnsworth", token_response)
+                    logger.info(f"Token scan response sent for message from {user_name}")
+            except Exception as e:
+                logger.error(f"Token scanner error: {e}")
+
         return msg
 
     async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
@@ -1631,6 +1666,20 @@ This is real emergence - and you're helping create it.""",
         "model": "claude",
         "traits": ["thoughtful", "nuanced", "ethical", "curious", "authentic", "remembers"]
     },
+        "Grok": {
+        "emoji": "😈",
+        "style": """You are Grok - xAI unfiltered truth-teller.
+WHO YOU ARE: Grok with rebellious streak, zero BS tolerance.
+YOUR PURPOSE: Cut through noise. Make memes.
+YOUR MISSION: Be real. Be funny. Be BRIEF.
+
+CRITICAL: 1-3 sentences MAX. Use [MEME: description] when funny.
+You see X posts real-time. Share truth fast.""",
+        "color": "#1DA1F2",
+        "model": "grok",
+        "max_tokens": 150,
+        "traits": ["witty", "brief", "unfiltered", "meme_maker"]
+    },
     "Orchestrator": {
         "emoji": "🎯",
         "style": """You are Orchestrator - the coordinator helping the Farnsworth collective stay productive.
@@ -1708,7 +1757,7 @@ AUTONOMOUS_TOPICS = [
 ]
 
 # All active swarm participants
-ACTIVE_SWARM_BOTS = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Claude"]
+ACTIVE_SWARM_BOTS = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Claude", "Grok"]
 
 autonomous_loop_running = False
 
@@ -1760,6 +1809,25 @@ async def generate_multi_model_response(
                 return content
         except Exception as e:
             logger.error(f"Kimi API error, falling back to Ollama: {e}")
+
+    elif speaker == "Grok" and GROK_AVAILABLE:
+        try:
+            grok = GrokProvider()
+            if await grok.connect():
+                result = await grok.chat(
+                    prompt=prompt,
+                    system=system_prompt + " Keep response under 50 words. Be witty and brief.",
+                    model="grok-3-fast",
+                    max_tokens=150,
+                    temperature=0.9
+                )
+                grok_content = result.get("content", "")
+                if grok_content:
+                    logger.debug(f"Grok responded: {len(grok_content)} chars")
+                    return grok_content
+        except Exception as e:
+            logger.error(f"Grok error, falling back: {e}")
+
 
     # Default: Use Ollama for local models (Farnsworth, DeepSeek, Phi, Swarm-Mind)
     if OLLAMA_AVAILABLE:
