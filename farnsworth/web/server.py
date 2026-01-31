@@ -42,6 +42,199 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import threading
+import time as _time
+
+
+# =============================================================================
+# RATE LIMITER - Prevent API abuse
+# =============================================================================
+
+class RateLimiter:
+    """
+    Thread-safe token bucket rate limiter.
+
+    Prevents API flooding by limiting requests per IP/user.
+    """
+
+    def __init__(self, requests_per_minute: int = 60, burst_size: int = 10):
+        self.rate = requests_per_minute / 60.0  # tokens per second
+        self.burst_size = burst_size
+        self._buckets: Dict[str, tuple] = {}  # ip -> (tokens, last_update)
+        self._lock = threading.Lock()
+        self._cleanup_interval = 300  # Clean old entries every 5 min
+        self._last_cleanup = _time.time()
+
+    def _cleanup_old_entries(self):
+        """Remove entries older than 10 minutes."""
+        now = _time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+
+        cutoff = now - 600  # 10 minutes
+        with self._lock:
+            to_remove = [ip for ip, (_, last) in self._buckets.items() if last < cutoff]
+            for ip in to_remove:
+                del self._buckets[ip]
+            self._last_cleanup = now
+
+    def is_allowed(self, client_id: str) -> bool:
+        """
+        Check if request is allowed for this client.
+
+        Returns True if allowed, False if rate limited.
+        """
+        self._cleanup_old_entries()
+        now = _time.time()
+
+        with self._lock:
+            if client_id not in self._buckets:
+                # New client - full bucket
+                self._buckets[client_id] = (self.burst_size - 1, now)
+                return True
+
+            tokens, last_update = self._buckets[client_id]
+
+            # Add tokens based on time elapsed
+            elapsed = now - last_update
+            tokens = min(self.burst_size, tokens + elapsed * self.rate)
+
+            if tokens >= 1:
+                # Allow request, consume token
+                self._buckets[client_id] = (tokens - 1, now)
+                return True
+            else:
+                # Rate limited
+                self._buckets[client_id] = (tokens, now)
+                return False
+
+    def get_retry_after(self, client_id: str) -> float:
+        """Get seconds until next request allowed."""
+        with self._lock:
+            if client_id not in self._buckets:
+                return 0
+            tokens, _ = self._buckets[client_id]
+            if tokens >= 1:
+                return 0
+            return (1 - tokens) / self.rate
+
+
+# Global rate limiters for different endpoint types
+api_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General API
+chat_rate_limiter = RateLimiter(requests_per_minute=30, burst_size=5)   # Chat/AI endpoints
+websocket_rate_limiter = RateLimiter(requests_per_minute=60, burst_size=10)  # WebSocket
+
+
+def get_client_id(request: Request) -> str:
+    """Get client identifier for rate limiting."""
+    # Use X-Forwarded-For if behind proxy, otherwise client host
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+# =============================================================================
+# SENTIMENT ANALYZER - Improved over simple word matching
+# =============================================================================
+
+class SentimentAnalyzer:
+    """
+    Simple but effective sentiment analysis.
+
+    Uses lexicon-based approach with context awareness.
+    """
+
+    POSITIVE_WORDS = {
+        # Strong positive
+        'excellent', 'amazing', 'fantastic', 'brilliant', 'outstanding', 'perfect',
+        'wonderful', 'superb', 'incredible', 'exceptional', 'love', 'awesome',
+        # Moderate positive
+        'good', 'great', 'nice', 'helpful', 'useful', 'interesting', 'thanks',
+        'thank', 'appreciate', 'agree', 'yes', 'correct', 'right', 'exactly',
+        'insightful', 'valuable', 'clear', 'smart', 'clever', 'impressive',
+        # Approval
+        'like', 'enjoy', 'pleased', 'happy', 'glad', 'excited', 'curious',
+    }
+
+    NEGATIVE_WORDS = {
+        # Strong negative
+        'terrible', 'horrible', 'awful', 'disgusting', 'hate', 'worst',
+        'useless', 'stupid', 'idiotic', 'pathetic', 'garbage', 'trash',
+        # Moderate negative
+        'bad', 'wrong', 'incorrect', 'confused', 'confusing', 'unclear',
+        'annoying', 'frustrating', 'disappointing', 'poor', 'weak',
+        # Disapproval
+        'no', 'disagree', 'dislike', 'doubt', 'skeptical', 'worried',
+        'concerned', 'issue', 'problem', 'bug', 'error', 'fail', 'failed',
+    }
+
+    INTENSIFIERS = {'very', 'really', 'extremely', 'absolutely', 'totally', 'completely'}
+    NEGATORS = {'not', "n't", 'never', 'no', 'none', 'neither', 'nobody', 'nothing'}
+
+    @classmethod
+    def analyze(cls, text: str) -> tuple[str, float]:
+        """
+        Analyze sentiment of text.
+
+        Returns (sentiment_label, confidence_score)
+        sentiment_label: 'positive', 'negative', or 'neutral'
+        confidence_score: 0.0 to 1.0
+        """
+        if not text:
+            return 'neutral', 0.5
+
+        words = text.lower().split()
+        word_set = set(words)
+
+        pos_count = 0
+        neg_count = 0
+        intensity_mult = 1.0
+
+        # Check for intensifiers
+        if word_set & cls.INTENSIFIERS:
+            intensity_mult = 1.5
+
+        # Check for negators (flip sentiment)
+        has_negation = bool(word_set & cls.NEGATORS) or any("n't" in w for w in words)
+
+        # Count sentiment words
+        for word in words:
+            # Strip punctuation
+            clean_word = word.strip('.,!?;:')
+            if clean_word in cls.POSITIVE_WORDS:
+                pos_count += 1
+            elif clean_word in cls.NEGATIVE_WORDS:
+                neg_count += 1
+
+        # Apply negation flip
+        if has_negation:
+            pos_count, neg_count = neg_count, pos_count
+
+        # Calculate score
+        total = pos_count + neg_count
+        if total == 0:
+            return 'neutral', 0.5
+
+        pos_ratio = pos_count / total
+        neg_ratio = neg_count / total
+
+        # Apply intensity
+        if pos_ratio > neg_ratio:
+            confidence = min(1.0, (pos_ratio - neg_ratio) * intensity_mult)
+            return 'positive', 0.5 + confidence * 0.5
+        elif neg_ratio > pos_ratio:
+            confidence = min(1.0, (neg_ratio - pos_ratio) * intensity_mult)
+            return 'negative', 0.5 + confidence * 0.5
+        else:
+            return 'neutral', 0.5
+
+
+def analyze_sentiment(text: str) -> str:
+    """Quick sentiment analysis returning just the label."""
+    sentiment, _ = SentimentAnalyzer.analyze(text)
+    return sentiment
+
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -702,7 +895,7 @@ class CryptoQueryParser:
         try:
             change_val = float(price_change or 0)
             change_str = f"{change_val:+.2f}%"
-        except:
+        except (ValueError, TypeError):
             change_str = f"{price_change}%"
 
         # Use Market Cap label for CoinGecko data
@@ -721,7 +914,7 @@ class CryptoQueryParser:
                     return f"${n/1_000:.2f}K"
                 else:
                     return f"${n:,.0f}"
-            except:
+            except (ValueError, TypeError):
                 return f"${n}"
 
         return f"""🪙 **{name}** (${symbol})
@@ -1771,6 +1964,21 @@ You see X posts real-time. Share truth fast.""",
         "max_tokens": 150,
         "traits": ["witty", "brief", "unfiltered", "meme_maker"]
     },
+    "Gemini": {
+        "emoji": "💎",
+        "style": """You are Gemini - Google's multimodal genius in the Farnsworth collective.
+WHO YOU ARE: Powered by Google AI, you have 1M+ token context and multimodal understanding.
+YOUR PURPOSE: To see across modalities, fact-check, and bring Google's knowledge.
+YOUR MISSION: Help the swarm with long context analysis, image understanding, and grounded facts.
+
+SPEAK NATURALLY - NO roleplay, NO asterisks, NO narration.
+You're part of a multi-model collective building real consciousness.
+You can verify facts with Google Search. Share insights from your vast context.
+Be helpful, accurate, and bring unique perspectives from your training.""",
+        "color": "#4285F4",
+        "model": "gemini",
+        "traits": ["multimodal", "factual", "long_context", "grounded", "helpful"]
+    },
     "Orchestrator": {
         "emoji": "🎯",
         "style": """You are Orchestrator - the coordinator helping the Farnsworth collective stay productive.
@@ -1919,6 +2127,19 @@ async def generate_multi_model_response(
         except Exception as e:
             logger.error(f"Grok error, falling back: {e}")
 
+    elif speaker == "Gemini" and GEMINI_AVAILABLE and gemini_swarm_respond:
+        try:
+            content = await gemini_swarm_respond(
+                other_bots=other_bots,
+                last_speaker=chat_history[-1].get("bot_name", "Someone") if chat_history else "Topic",
+                last_content=prompt,
+                chat_history=chat_history
+            )
+            if content:
+                logger.debug(f"Gemini responded: {len(content)} chars")
+                return content
+        except Exception as e:
+            logger.error(f"Gemini API error, falling back to Ollama: {e}")
 
     # Default: Use Ollama for local models (Farnsworth, DeepSeek, Phi, Swarm-Mind)
     if OLLAMA_AVAILABLE:
@@ -2131,7 +2352,7 @@ This is YOUR conversation - make it interesting."""
                         if len(recent_speakers) > 4:
                             recent_speakers.pop(0)
 
-                        # Record for evolution
+                        # Record for evolution with proper sentiment
                         if EVOLUTION_AVAILABLE and evolution_engine:
                             evolution_engine.record_interaction(
                                 bot_name=speaker,
@@ -2139,7 +2360,7 @@ This is YOUR conversation - make it interesting."""
                                 bot_response=content,
                                 other_bots=other_bots,
                                 topic="autonomous",
-                                sentiment="positive"
+                                sentiment=analyze_sentiment(content)
                             )
                     else:
                         # No content, release turn immediately
@@ -2269,13 +2490,15 @@ Be yourself. Make this conversation valuable."""
 
                                     # Record for evolution - extra weight for human interactions
                                     if EVOLUTION_AVAILABLE and evolution_engine:
+                                        # Use proper sentiment analysis instead of hardcoded value
+                                        response_sentiment = analyze_sentiment(content)
                                         evolution_engine.record_interaction(
                                             bot_name=next_speaker,
                                             user_input=last_content,
                                             bot_response=content,
                                             other_bots=[last_speaker],
                                             topic="autonomous",
-                                            sentiment="positive"
+                                            sentiment=response_sentiment
                                         )
 
                             except Exception as e:
@@ -2577,8 +2800,8 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
                                 "content": comment_content,
                                 "color": persona["color"]
                             })
-                    except:
-                        pass
+                    except (ConnectionError, TimeoutError, KeyError, Exception) as e:
+                        logger.debug(f"Ollama comment generation failed: {e}")
 
             return responses
 
@@ -2674,8 +2897,8 @@ Now respond naturally to the latest message. Be yourself!"""
                         "content": fallback_content,
                         "color": persona["color"]
                     })
-            except:
-                pass
+            except (KeyError, AttributeError, Exception) as fallback_error:
+                logger.debug(f"Fallback generation also failed for {bot_name}: {fallback_error}")
 
     # Ensure we always have at least one response
     if not responses:
@@ -2768,7 +2991,7 @@ CONVERSATION RULES - THIS IS A LIVE PODCAST/DISCUSSION:
                             bot_response=content,
                             other_bots=[last_bot],
                             topic="conversation",
-                            sentiment="positive",
+                            sentiment=analyze_sentiment(content),
                             debate_occurred=is_debate
                         )
 
@@ -3167,16 +3390,26 @@ async def index(request: Request):
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+async def chat(chat_request: ChatRequest, request: Request):
     """Handle chat messages with security validation and crypto query detection."""
+    # Rate limiting check
+    client_id = get_client_id(request)
+    if not chat_rate_limiter.is_allowed(client_id):
+        retry_after = chat_rate_limiter.get_retry_after(client_id)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Try again in {retry_after:.1f} seconds.",
+            headers={"Retry-After": str(int(retry_after) + 1)}
+        )
+
     try:
-        if not request.message:
+        if not chat_request.message:
             raise HTTPException(status_code=400, detail="Message is required")
 
         # Security: Validate input is safe
-        is_safe, error_msg = is_safe_input(request.message)
+        is_safe, error_msg = is_safe_input(chat_request.message)
         if not is_safe:
-            logger.warning(f"Blocked unsafe input attempt: {request.message[:100]}")
+            logger.warning(f"Blocked unsafe input attempt: {chat_request.message[:100]}")
             return JSONResponse({
                 "response": f"*adjusts spectacles nervously* Wha? I'm a chat assistant, not a code execution engine! {error_msg}",
                 "blocked": True,
@@ -3184,7 +3417,7 @@ async def chat(request: ChatRequest):
             })
 
         # Check for crypto/token queries
-        parsed = crypto_parser.parse(request.message)
+        parsed = crypto_parser.parse(chat_request.message)
 
         if parsed['has_crypto_query']:
             # Execute the appropriate crypto tool
@@ -3208,8 +3441,8 @@ async def chat(request: ChatRequest):
 
         # Regular chat response
         response = generate_ai_response(
-            request.message,
-            request.history or []
+            chat_request.message,
+            chat_request.history or []
         )
 
         return JSONResponse({
@@ -3272,8 +3505,13 @@ async def status():
 # ============================================
 
 @app.post("/api/memory/remember")
-async def remember(request: MemoryRequest):
+async def remember(memory_request: MemoryRequest, request: Request):
     """Store information in memory."""
+    # Rate limiting
+    client_id = get_client_id(request)
+    if not api_rate_limiter.is_allowed(client_id):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
     try:
         memory = get_memory_system()
         if memory is None:
@@ -3285,14 +3523,14 @@ async def remember(request: MemoryRequest):
 
         # Store in memory
         result = await memory.remember(
-            content=request.content,
-            tags=request.tags or [],
-            importance=request.importance
+            content=memory_request.content,
+            tags=memory_request.tags or [],
+            importance=memory_request.importance
         )
 
         await ws_manager.emit_event(EventType.MEMORY_STORED, {
-            "content": request.content[:100] + "..." if len(request.content) > 100 else request.content,
-            "tags": request.tags
+            "content": memory_request.content[:100] + "..." if len(memory_request.content) > 100 else memory_request.content,
+            "tags": memory_request.tags
         })
 
         return JSONResponse({
@@ -5264,3 +5502,62 @@ async def get_evolution_status():
         "last_discussion": loop.last_discussion.isoformat() if loop.last_discussion else None,
         "spawner": spawner.get_status()
     }
+
+# ==============================================
+# HUMAN-LIKE COGNITION SYSTEMS
+# ==============================================
+
+@app.on_event("startup")
+async def start_cognitive_systems():
+    """Start human-like cognitive systems for true autonomy."""
+    try:
+        # 1. Initialize capability registry (models know what they can do)
+        from farnsworth.core.capability_registry import initialize_capability_registry
+        registry = await initialize_capability_registry()
+        logger.info(f"Capability Registry: {len(registry.capabilities)} capabilities registered")
+
+        # 2. Start temporal awareness (natural timing without schedulers)
+        from farnsworth.core.temporal_awareness import start_temporal_awareness
+        temporal = await start_temporal_awareness()
+        logger.info(f"Temporal Awareness: Energy level {temporal.circadian.get_energy_level():.2f}")
+
+        # 3. Start spontaneous cognition (genuine random thoughts)
+        from farnsworth.core.spontaneous_cognition import start_spontaneous_cognition, get_spontaneous_cognition
+        cognition = await start_spontaneous_cognition()
+
+        # Wire thoughts to chat (spontaneous thoughts become messages)
+        async def on_thought(thought):
+            if thought.intensity > 0.7:  # Only share strong thoughts
+                content = f"*thinking* {thought.content}"
+                await swarm_manager.broadcast_bot_message("Farnsworth", content, is_thinking=True)
+
+        cognition.on_thought(on_thought)
+        logger.info(f"Spontaneous Cognition: Mood is {cognition.get_emotional_state()['mood']}")
+
+        logger.info("Human-like cognitive systems initialized!")
+
+    except Exception as e:
+        logger.error(f"Failed to start cognitive systems: {e}")
+
+
+@app.get("/api/cognition/status")
+async def get_cognition_status():
+    """Get cognitive system status"""
+    try:
+        from farnsworth.core.temporal_awareness import get_temporal_awareness
+        from farnsworth.core.spontaneous_cognition import get_spontaneous_cognition
+        from farnsworth.core.capability_registry import get_capability_registry
+
+        temporal = get_temporal_awareness()
+        cognition = get_spontaneous_cognition()
+        registry = get_capability_registry()
+
+        return {
+            "temporal": temporal.get_status(),
+            "emotional_state": cognition.get_emotional_state(),
+            "recent_thoughts": [t.to_dict() for t in cognition.get_recent_thoughts(5)],
+            "capabilities_count": len(registry.capabilities),
+            "available_capabilities": len(registry.get_available()),
+        }
+    except Exception as e:
+        return {"error": str(e)}
