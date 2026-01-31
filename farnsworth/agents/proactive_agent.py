@@ -185,17 +185,36 @@ class ProactiveAgent:
         try:
             # If we have an LLM function, use it to determine the best action
             if self.llm_fn:
-                prompt = f"""Execute the following scheduled task and provide a result:
+                prompt = f"""Execute the following scheduled task for the Farnsworth proactive agent system.
 
-Task: {task.description}
-Task ID: {task.id}
-Schedule Type: {task.schedule_type}
+TASK DETAILS:
+- Description: {task.description}
+- Task ID: {task.id}
+- Schedule Type: {task.schedule_type}
+- Current Time: {datetime.now().isoformat()}
 
-Determine what action to take and execute it. Return a JSON response with:
-- success: true/false
-- action_taken: description of what was done
-- output: any relevant output or result
-"""
+EXECUTION GUIDELINES:
+1. Analyze what the task requires
+2. Determine if it's an information gathering, state change, or notification task
+3. Execute the appropriate action
+4. Report results accurately
+
+CONSTRAINTS:
+- Do NOT modify critical system files without explicit permission in task description
+- Do NOT make external API calls unless task specifically requires it
+- Do NOT access user personal data beyond what's in the task context
+- Maximum execution time assumption: 30 seconds
+
+OUTPUT FORMAT (JSON only):
+{{
+    "success": true | false,
+    "action_taken": "specific description of what was done",
+    "output": "relevant result data or message",
+    "side_effects": ["list of any state changes made"] | null,
+    "error": "error message if success is false" | null
+}}
+
+Execute the task and return ONLY the JSON response:"""
                 if asyncio.iscoroutinefunction(self.llm_fn):
                     response = await self.llm_fn(prompt)
                 else:
@@ -277,22 +296,46 @@ Determine what action to take and execute it. Return a JSON response with:
         if not self.llm_fn or context["activity_level"] < 0.3:
             return None
 
-        prompt = f"""Analyze the user's context and suggest ONE proactive action if relevant.
-        
-Current Time: {context['timestamp']} (Work Hours: {context['is_work_hours']})
-Active Plan: {json.dumps(context.get('active_plan', {}), default=str)}
-Recent Conversation:
-{context['recent_context']}
+        prompt = f"""Analyze the user's context and suggest ONE proactive action if genuinely helpful.
 
-Identify if there is a clear, helpful action you can propose (e.g., creating a file, searching for info, automating a next step).
-If NO clear action is needed, return {{}}.
+CURRENT STATE:
+- Time: {context['timestamp']}
+- Work Hours: {context['is_work_hours']}
+- Activity Level: {context['activity_level']:.2f}
+- Active Plan: {json.dumps(context.get('active_plan', {}), default=str)}
 
-If yes, return a JSON object with:
-- title: Short title of suggestion
-- description: Why this is helpful
-- action_type: "run_task" | "plan_task" | "search"
-- confidence: 0.0 to 1.0 (threshold 0.7)
-"""
+RECENT CONVERSATION:
+{context['recent_context'][:2000]}
+
+ANALYSIS CRITERIA:
+1. Is there a CLEAR, SPECIFIC need the user hasn't addressed?
+2. Would the suggestion save significant time (>5 min of user effort)?
+3. Is the suggestion actionable immediately?
+4. Does it align with the user's current focus/project?
+
+SUGGESTION TYPES:
+- "run_task": Execute a specific automated task (file creation, data processing)
+- "plan_task": Create a multi-step plan for a complex goal
+- "search": Find relevant information or code examples
+- "none": No action needed (return empty object)
+
+WHEN TO RETURN EMPTY {{}}:
+- User is in flow state (high activity, focused conversation)
+- No clear unmet need
+- Last suggestion was < 10 minutes ago
+- Context is ambiguous
+
+OUTPUT FORMAT (JSON only):
+{{
+    "title": "5-10 word action title",
+    "description": "1-2 sentences explaining the benefit",
+    "action_type": "run_task" | "plan_task" | "search",
+    "action_details": "specific parameters for the action",
+    "confidence": 0.0-1.0,
+    "reasoning": "brief explanation of why this helps now"
+}}
+
+Only suggest if confidence >= 0.7. Return {{}} otherwise."""
         try:
             if asyncio.iscoroutinefunction(self.llm_fn):
                 response = await self.llm_fn(prompt)
@@ -342,17 +385,41 @@ If yes, return a JSON object with:
         # Use LLM for sentiment analysis if available
         if self.llm_fn and len(context) > 50:
             try:
-                prompt = f"""Analyze the sentiment and focus level of this conversation context.
+                prompt = f"""Analyze the emotional state and focus level of this conversation.
 
-Context:
+CONVERSATION CONTEXT:
 {context[:1000]}
 
-Return a JSON object with:
-- mood: one of "frustrated", "focused", "exploratory", "confused", "satisfied", "neutral"
-- focus_score: 0.0 to 1.0 (how focused/intense the user seems)
-- reasoning: brief explanation
+MOOD DEFINITIONS:
+- "frustrated": User encountering repeated errors, expressing annoyance, using negative language
+- "focused": Deep in task execution, short precise messages, technical vocabulary
+- "exploratory": Asking questions, trying alternatives, open-ended queries
+- "confused": Asking for clarification, misunderstanding responses, uncertain language
+- "satisfied": Expressing gratitude, acknowledging completion, positive language
+- "neutral": Normal working state, no strong emotional indicators
 
-Return ONLY the JSON object."""
+FOCUS SCORE CRITERIA:
+- 0.0-0.3: Casual/distracted (small talk, tangential topics)
+- 0.4-0.6: Normal working (steady progress, some context switching)
+- 0.7-0.9: High focus (deep work, rapid iteration, detailed questions)
+- 1.0: Peak intensity (urgent deadline, critical bug, time pressure)
+
+SIGNALS TO LOOK FOR:
+- Message frequency and length
+- Technical depth of questions
+- Emotional language (exclamations, capitalization)
+- Request urgency indicators
+- Context switching patterns
+
+OUTPUT FORMAT (JSON only):
+{{
+    "mood": "frustrated" | "focused" | "exploratory" | "confused" | "satisfied" | "neutral",
+    "focus_score": 0.0-1.0,
+    "primary_signals": ["signal1", "signal2"],
+    "reasoning": "1 sentence explanation"
+}}
+
+Analyze and return ONLY the JSON:"""
 
                 if asyncio.iscoroutinefunction(self.llm_fn):
                     response = await self.llm_fn(prompt)
