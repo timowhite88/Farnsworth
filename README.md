@@ -65,7 +65,7 @@ THE ONLY TOKEN I SUPPORT IS ABOVE
 | **Groq** | llama-3.2-90b, mixtral-8x7b | 128K | Ultra-fast LPU inference |
 | **Fireworks AI** | Llama, Mixtral, FireFunction | Varies | Fast inference |
 | **AI21 Labs** | Jamba-1.5, Jurassic-2 | 256K | Long context, summarization |
-| **HuggingFace** | 200K+ models | Varies | Open model hub |
+| **HuggingFace** | 500K+ models (Phi-3, Mistral, Llama, Qwen, CodeLlama) | Varies | **LOCAL-FIRST**: GPU transformers + API fallback |
 | **Replicate** | Any open model | Varies | Serverless GPU |
 | **Ollama (Local)** | DeepSeek-R1, Phi-4, Llama-3.2, Qwen, Mistral | Varies | Private, fast, custom models |
 
@@ -151,6 +151,100 @@ THE ONLY TOKEN I SUPPORT IS ABOVE
 | **Neuromorphic Engine** | Spiking neural networks, synaptic plasticity |
 | **Affective Engine** | Emotional state modeling & empathy |
 | **Trading Cognition** | Market analysis, risk assessment, autonomous decisions |
+
+</details>
+
+---
+
+## 🤗 HUGGINGFACE DEEP INTEGRATION
+
+<details open>
+<summary><strong>LOCAL-FIRST OPEN-SOURCE AI</strong></summary>
+
+HuggingFace is **fully integrated** into Farnsworth as a first-class swarm member, providing local GPU inference without API keys.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    HUGGINGFACE INTEGRATION LAYERS                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │
+│   │   LOCAL GPU     │    │  INFERENCE API  │    │   EMBEDDINGS    │     │
+│   │   TRANSFORMERS  │    │   (FALLBACK)    │    │   (LOCAL)       │     │
+│   └────────┬────────┘    └────────┬────────┘    └────────┬────────┘     │
+│            │                      │                      │               │
+│            └──────────────────────┼──────────────────────┘               │
+│                                   │                                       │
+│   ┌───────────────────────────────┴───────────────────────────────┐     │
+│   │                    UNIFIED HF PROVIDER                         │     │
+│   │   • chat() - Local-first with API fallback                     │     │
+│   │   • embed() - sentence-transformers (384-1024 dim)             │     │
+│   │   • generate_code() - CodeLlama, StarCoder2                    │     │
+│   │   • generate_image() - FLUX, SDXL (API only)                   │     │
+│   └───────────────────────────────┬───────────────────────────────┘     │
+│                                   │                                       │
+│   ┌───────────────────────────────┴───────────────────────────────┐     │
+│   │                    SWARM INTEGRATION                           │     │
+│   ├───────────────────────────────────────────────────────────────┤     │
+│   │ • Model Swarm PSO Particles  • Evolution Personality          │     │
+│   │ • Agent Spawner Capabilities  • Fallback Chains               │     │
+│   │ • Archival Memory Embeddings  • Prompt Upgrader               │     │
+│   └───────────────────────────────────────────────────────────────┘     │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Available Models (Local GPU)
+
+| Model | ID | Strengths | VRAM |
+|:------|:---|:----------|:-----|
+| **Phi-3-Mini-4K** | `microsoft/Phi-3-mini-4k-instruct` | Fast reasoning, code | 4GB |
+| **Mistral-7B-Instruct** | `mistralai/Mistral-7B-Instruct-v0.3` | General, quality | 14GB |
+| **CodeLlama-7B** | `codellama/CodeLlama-7b-Instruct-hf` | Code generation | 14GB |
+| **StarCoder2-3B** | `bigcode/starcoder2-3b` | Fast code | 6GB |
+| **Qwen2.5-1.5B** | `Qwen/Qwen2.5-1.5B-Instruct` | Multilingual, fast | 3GB |
+| **Llama-3-8B** | `meta-llama/Meta-Llama-3-8B-Instruct` | Quality, reasoning | 16GB |
+
+### Embeddings (Local)
+
+| Model | Dimensions | Use Case |
+|:------|:-----------|:---------|
+| **all-MiniLM-L6-v2** | 384 | Fast semantic search |
+| **BGE-Large** | 1024 | High-quality embeddings |
+| **E5-Large** | 1024 | Retrieval-optimized |
+
+### Integration Points
+
+| System | HuggingFace Role |
+|:-------|:-----------------|
+| **Agent Spawner** | `HuggingFace` bot with CHAT, DEVELOPMENT, RESEARCH capabilities |
+| **Model Swarm** | 6 HF models registered as PSO particles |
+| **Evolution Engine** | Personality with open-source expertise |
+| **Archival Memory** | Local embeddings for semantic search |
+| **Fallback Chains** | Added to all agent fallback chains |
+| **Prompt Upgrader** | Can use HF models for prompt enhancement |
+
+### Usage
+
+```python
+# Get the provider
+from farnsworth.integration.external.huggingface import get_huggingface_provider
+hf = get_huggingface_provider()
+
+# Local chat (no API key needed)
+result = await hf.chat("Explain transformers", prefer_local=True)
+
+# Local embeddings
+embeddings = await hf.embed("Your text here", prefer_local=True)
+
+# Code generation
+code = await hf.generate_code("Sort a list in Python", language="python")
+
+# Enable local model explicitly
+hf.enable_local("microsoft/Phi-3-mini-4k-instruct")
+```
 
 </details>
 

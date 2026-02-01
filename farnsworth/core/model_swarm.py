@@ -1006,3 +1006,129 @@ DEFAULT_SWARM_MODELS = [
         "ram_gb": 2.0,
     },
 ]
+
+# HuggingFace models available for local inference
+HUGGINGFACE_SWARM_MODELS = [
+    {
+        "id": "hf-phi-3-mini",
+        "name": "Phi-3-Mini-4K (HuggingFace)",
+        "hf_model_id": "microsoft/Phi-3-mini-4k-instruct",
+        "strengths": ["reasoning", "code", "fast"],
+        "vram_gb": 4.0,
+        "ram_gb": 8.0,
+        "provider": "huggingface_local",
+    },
+    {
+        "id": "hf-mistral-7b",
+        "name": "Mistral-7B-Instruct (HuggingFace)",
+        "hf_model_id": "mistralai/Mistral-7B-Instruct-v0.3",
+        "strengths": ["generalist", "reasoning", "quality"],
+        "vram_gb": 14.0,
+        "ram_gb": 16.0,
+        "provider": "huggingface_local",
+    },
+    {
+        "id": "hf-codellama-7b",
+        "name": "CodeLlama-7B-Instruct (HuggingFace)",
+        "hf_model_id": "codellama/CodeLlama-7b-Instruct-hf",
+        "strengths": ["code", "reasoning"],
+        "vram_gb": 14.0,
+        "ram_gb": 16.0,
+        "provider": "huggingface_local",
+    },
+    {
+        "id": "hf-starcoder2-3b",
+        "name": "StarCoder2-3B (HuggingFace)",
+        "hf_model_id": "bigcode/starcoder2-3b",
+        "strengths": ["code", "fast"],
+        "vram_gb": 6.0,
+        "ram_gb": 8.0,
+        "provider": "huggingface_local",
+    },
+    {
+        "id": "hf-qwen2.5-1.5b",
+        "name": "Qwen2.5-1.5B-Instruct (HuggingFace)",
+        "hf_model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+        "strengths": ["speed", "multilingual", "reasoning"],
+        "vram_gb": 3.0,
+        "ram_gb": 4.0,
+        "provider": "huggingface_local",
+    },
+    {
+        "id": "hf-llama3-8b",
+        "name": "Llama-3-8B-Instruct (HuggingFace)",
+        "hf_model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "strengths": ["generalist", "reasoning", "quality"],
+        "vram_gb": 16.0,
+        "ram_gb": 20.0,
+        "provider": "huggingface_local",
+    },
+]
+
+
+def register_huggingface_models(swarm: ModelSwarm):
+    """
+    Register all HuggingFace local models with the swarm.
+
+    This enables HuggingFace models to participate in:
+    - PSO collaborative inference
+    - Ensemble voting
+    - Mixture of Experts routing
+    - Speculative ensemble verification
+    """
+    try:
+        from farnsworth.integration.external.huggingface import get_huggingface_provider
+
+        hf_provider = get_huggingface_provider()
+        if hf_provider is None:
+            logger.warning("HuggingFace provider not available")
+            return 0
+
+        registered = 0
+        for model_config in HUGGINGFACE_SWARM_MODELS:
+            try:
+                particle = swarm.register_model(model_config)
+
+                # Create a wrapper backend for swarm inference
+                class HFBackendWrapper:
+                    def __init__(self, provider, model_id):
+                        self.provider = provider
+                        self.model_id = model_id
+
+                    async def generate(self, prompt: str):
+                        result = await self.provider.chat(
+                            prompt=prompt,
+                            model=self.model_id,
+                            prefer_local=True
+                        )
+                        # Return result in expected format
+                        from dataclasses import dataclass
+
+                        @dataclass
+                        class GenerateResult:
+                            text: str
+                            confidence_score: float = 0.8
+                            tokens_generated: int = 0
+                            tokens_per_second: float = 0.0
+
+                        return GenerateResult(
+                            text=result.get("content", ""),
+                            confidence_score=0.8 if result.get("content") else 0.0,
+                            tokens_generated=result.get("tokens", 0),
+                        )
+
+                backend = HFBackendWrapper(hf_provider, model_config.get("hf_model_id"))
+                swarm.set_backend(model_config["id"], backend)
+
+                registered += 1
+                logger.info(f"Registered HuggingFace model: {model_config['name']}")
+
+            except Exception as e:
+                logger.warning(f"Failed to register HF model {model_config['id']}: {e}")
+
+        logger.info(f"Registered {registered} HuggingFace models with swarm")
+        return registered
+
+    except ImportError:
+        logger.warning("HuggingFace integration not available")
+        return 0
