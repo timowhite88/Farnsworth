@@ -649,13 +649,70 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                 logger.debug(f"DeepSeek query failed: {e}")
             return None
 
-        # Run ALL queries in PARALLEL (true concurrent I/O)
-        logger.info("SWARM: Querying Grok, Gemini, Kimi, DeepSeek in parallel (500 tokens each)...")
+        async def query_claude():
+            """Claude via Anthropic API - excellent reasoning and safety."""
+            try:
+                import os
+                import httpx
+                api_key = os.environ.get("ANTHROPIC_API_KEY")
+                if not api_key:
+                    return None
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json"
+                        },
+                        json={
+                            "model": "claude-3-haiku-20240307",
+                            "max_tokens": 500,
+                            "messages": [{"role": "user", "content": full_prompt}]
+                        },
+                        timeout=45.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("content") and len(data["content"]) > 0:
+                            return ("Claude", data["content"][0].get("text", "").strip())
+            except Exception as e:
+                logger.debug(f"Claude query failed: {e}")
+            return None
+
+        async def query_phi():
+            """Phi via Ollama - fast local model."""
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "http://localhost:11434/api/chat",
+                        json={
+                            "model": "phi3:latest",
+                            "messages": [{"role": "user", "content": full_prompt}],
+                            "stream": False,
+                            "options": {"num_predict": 500}
+                        },
+                        timeout=30.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("message", {}).get("content"):
+                            return ("Phi", data["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"Phi query failed: {e}")
+            return None
+
+        # Run ALL queries in PARALLEL (true concurrent I/O) - REDUNDANT ARCHITECTURE
+        logger.info("SWARM: Querying 6 models in parallel (Grok, Gemini, Kimi, DeepSeek, Claude, Phi)...")
+        # REDUNDANT: 6 models for maximum reliability
         results = await asyncio.gather(
-            query_grok(),
-            query_gemini(),
-            query_kimi(),
-            query_deepseek(),
+            query_grok(),      # Primary - knows Twitter
+            query_gemini(),    # Strong reasoning
+            query_kimi(),      # 256k context
+            query_deepseek(),  # Local Ollama
+            query_claude(),    # Anthropic API
+            query_phi(),       # Local fast model
             return_exceptions=True
         )
 
@@ -689,12 +746,14 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
         """
         scores = {}
 
-        # Model weights based on strengths
+        # Model weights based on strengths - REDUNDANT 6-model architecture
         model_weights = {
             "Grok": 1.3,      # Grok knows Twitter + talking to itself
             "Gemini": 1.2,    # Good at nuance and technical explanation
+            "Claude": 1.2,    # Excellent reasoning and safety
             "DeepSeek": 1.15, # Strong reasoning and code understanding
-            "Kimi": 1.0,      # Thoughtful, great context
+            "Phi": 1.1,       # Fast and efficient
+            "Kimi": 1.0,      # Thoughtful, 256k context
         }
 
         # Technical keywords that show depth
