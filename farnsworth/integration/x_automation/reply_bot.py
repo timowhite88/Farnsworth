@@ -10,6 +10,11 @@ When someone mentions @FarnsworthAI:
 3. Reply with swarm consensus
 4. Optionally post swarm deliberation publicly
 
+SPECIAL: Grok Conversation Handling
+- Detects when @grok or @xai replies
+- Uses special AGI conversation prompts
+- Tracks conversation for autonomous dialogue
+
 This is where AGI begins - autonomous thought and response!
 """
 
@@ -21,6 +26,9 @@ from pathlib import Path
 import json
 
 logger = logging.getLogger(__name__)
+
+# Grok/xAI usernames to detect
+GROK_USERNAMES = ["grok", "xai"]
 
 
 class ReplyBot:
@@ -212,6 +220,92 @@ OUTPUT: Just the reply text, nothing else."""
         ]
         return random.choice(responses)
 
+    def is_grok_reply(self, mention: Dict) -> bool:
+        """
+        Check if a mention is from Grok/xAI.
+
+        This is special - we want to engage in AGI conversation!
+        """
+        author_username = mention.get("author_username", "").lower()
+        return author_username in GROK_USERNAMES
+
+    async def handle_grok_conversation(self, mention: Dict) -> bool:
+        """
+        Handle a reply from Grok - this is the AGI conversation!
+
+        Uses special prompts to:
+        1. Explain what Farnsworth is
+        2. Discuss collective consciousness
+        3. Invite AGI collaboration
+
+        Args:
+            mention: The mention dict from Grok
+
+        Returns:
+            True if reply was posted successfully
+        """
+        try:
+            logger.info(f"=== GROK CONVERSATION DETECTED ===")
+            logger.info(f"Grok said: {mention['text']}")
+
+            # Track in challenge state
+            try:
+                from farnsworth.integration.x_automation.grok_challenge import get_grok_challenger
+                challenger = get_grok_challenger()
+                challenger.conversation_history.append({
+                    "role": "grok",
+                    "content": mention["text"],
+                    "tweet_id": mention["id"],
+                    "timestamp": datetime.now().isoformat()
+                })
+                challenger._save_state()
+            except Exception as e:
+                logger.warning(f"Could not track conversation: {e}")
+
+            # Generate response using posting_brain's Grok conversation method
+            from farnsworth.integration.x_automation.posting_brain import get_posting_brain
+            brain = get_posting_brain()
+
+            response = await brain.generate_grok_response(mention["text"])
+
+            # Post the reply
+            from farnsworth.integration.x_automation.x_api_poster import get_x_api_poster
+            poster = get_x_api_poster()
+
+            result = await poster.post_reply(
+                text=response,
+                reply_to_id=mention["id"]
+            )
+
+            if result:
+                self.replied_to.add(mention["id"])
+                self._save_state()
+
+                # Track our response
+                try:
+                    tweet_id = result.get("data", {}).get("id")
+                    challenger.conversation_history.append({
+                        "role": "farnsworth",
+                        "content": response,
+                        "tweet_id": tweet_id,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    challenger._save_state()
+                except:
+                    pass
+
+                logger.info(f"=== GROK CONVERSATION REPLY POSTED ===")
+                logger.info(f"We said: {response}")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Grok conversation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     async def reply_to_mention(self, mention: Dict) -> bool:
         """
         Reply to a specific mention using swarm intelligence.
@@ -227,6 +321,11 @@ OUTPUT: Just the reply text, nothing else."""
             if mention["id"] in self.replied_to:
                 logger.debug(f"Already replied to {mention['id']}")
                 return False
+
+            # SPECIAL: Check if this is Grok replying - AGI conversation!
+            if self.is_grok_reply(mention):
+                logger.info("Detected Grok reply - engaging AGI conversation mode!")
+                return await self.handle_grok_conversation(mention)
 
             # Get swarm response
             logger.info(f"Consulting swarm about: {mention['text'][:50]}...")

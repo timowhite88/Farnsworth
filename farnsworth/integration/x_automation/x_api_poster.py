@@ -574,6 +574,231 @@ class XOAuth2Poster:
             logger.error(f"Tweet error: {e}")
             return None
 
+    async def upload_video(self, video_bytes: bytes, media_type: str = "video/mp4") -> Optional[str]:
+        """
+        Upload video using chunked media upload (INIT → APPEND → FINALIZE → STATUS).
+
+        Videos require OAuth 1.0a for the media upload endpoint.
+
+        Args:
+            video_bytes: Raw video file bytes
+            media_type: MIME type (video/mp4, video/quicktime, etc.)
+
+        Returns:
+            media_id string on success, None on failure
+        """
+        if not has_oauth1_credentials():
+            logger.error("Video upload requires OAuth 1.0a credentials (X_API_KEY, X_API_SECRET, X_OAUTH1_ACCESS_TOKEN, X_OAUTH1_ACCESS_SECRET)")
+            return None
+
+        try:
+            from requests_oauthlib import OAuth1Session
+            import asyncio
+
+            oauth = OAuth1Session(
+                OAUTH1_CONFIG["api_key"],
+                client_secret=OAUTH1_CONFIG["api_secret"],
+                resource_owner_key=OAUTH1_CONFIG["access_token"],
+                resource_owner_secret=OAUTH1_CONFIG["access_secret"],
+            )
+
+            loop = asyncio.get_event_loop()
+            total_bytes = len(video_bytes)
+
+            # Step 1: INIT
+            init_params = {
+                "command": "INIT",
+                "media_type": media_type,
+                "total_bytes": total_bytes,
+                "media_category": "tweet_video"
+            }
+
+            logger.info(f"Video upload INIT: {total_bytes} bytes, type={media_type}")
+
+            init_resp = await loop.run_in_executor(
+                None,
+                lambda: oauth.post(MEDIA_UPLOAD_URL, data=init_params)
+            )
+
+            if init_resp.status_code not in [200, 202]:
+                logger.error(f"Video INIT failed: {init_resp.status_code} - {init_resp.text}")
+                return None
+
+            init_result = init_resp.json()
+            media_id = init_result.get("media_id_string") or str(init_result.get("media_id", ""))
+
+            if not media_id:
+                logger.error(f"No media_id in INIT response: {init_result}")
+                return None
+
+            logger.info(f"Video INIT success: media_id={media_id}")
+
+            # Step 2: APPEND - send in chunks (max 5MB per chunk)
+            chunk_size = 5 * 1024 * 1024  # 5MB
+            segment_index = 0
+
+            for i in range(0, total_bytes, chunk_size):
+                chunk = video_bytes[i:i + chunk_size]
+
+                append_data = {
+                    "command": "APPEND",
+                    "media_id": media_id,
+                    "segment_index": segment_index,
+                }
+                files = {
+                    "media": ("video.mp4", chunk, media_type)
+                }
+
+                logger.info(f"Video APPEND segment {segment_index}: {len(chunk)} bytes")
+
+                append_resp = await loop.run_in_executor(
+                    None,
+                    lambda: oauth.post(MEDIA_UPLOAD_URL, data=append_data, files=files)
+                )
+
+                if append_resp.status_code not in [200, 202, 204]:
+                    logger.error(f"Video APPEND failed: {append_resp.status_code} - {append_resp.text}")
+                    return None
+
+                segment_index += 1
+
+            logger.info("Video APPEND complete")
+
+            # Step 3: FINALIZE
+            finalize_params = {
+                "command": "FINALIZE",
+                "media_id": media_id
+            }
+
+            finalize_resp = await loop.run_in_executor(
+                None,
+                lambda: oauth.post(MEDIA_UPLOAD_URL, data=finalize_params)
+            )
+
+            if finalize_resp.status_code not in [200, 201, 202]:
+                logger.error(f"Video FINALIZE failed: {finalize_resp.status_code} - {finalize_resp.text}")
+                return None
+
+            finalize_result = finalize_resp.json()
+            logger.info(f"Video FINALIZE response: {finalize_result}")
+
+            # Step 4: STATUS - poll until processing complete
+            processing_info = finalize_result.get("processing_info")
+            if processing_info:
+                check_after_secs = processing_info.get("check_after_secs", 5)
+                state = processing_info.get("state", "")
+
+                max_checks = 60  # Max 5 minutes of polling
+                checks = 0
+
+                while state in ["pending", "in_progress"] and checks < max_checks:
+                    await asyncio.sleep(check_after_secs)
+
+                    status_params = {
+                        "command": "STATUS",
+                        "media_id": media_id
+                    }
+
+                    status_resp = await loop.run_in_executor(
+                        None,
+                        lambda: oauth.get(MEDIA_UPLOAD_URL, params=status_params)
+                    )
+
+                    if status_resp.status_code == 200:
+                        status_result = status_resp.json()
+                        processing_info = status_result.get("processing_info", {})
+                        state = processing_info.get("state", "succeeded")
+                        check_after_secs = processing_info.get("check_after_secs", 5)
+                        progress = processing_info.get("progress_percent", 0)
+                        logger.info(f"Video processing: state={state}, progress={progress}%")
+
+                        if state == "failed":
+                            error = processing_info.get("error", {})
+                            logger.error(f"Video processing failed: {error}")
+                            return None
+                    else:
+                        logger.warning(f"Video STATUS check failed: {status_resp.status_code}")
+
+                    checks += 1
+
+                if state not in ["succeeded", ""]:
+                    logger.error(f"Video processing did not complete: state={state}")
+                    return None
+
+            logger.info(f"Video upload complete: media_id={media_id}")
+            return media_id
+
+        except Exception as e:
+            logger.error(f"Video upload error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    async def post_tweet_with_video(self, text: str, video_bytes: bytes) -> Optional[Dict]:
+        """
+        Post a tweet with an attached video.
+
+        Args:
+            text: Tweet text
+            video_bytes: Raw video file bytes (MP4 recommended)
+
+        Returns:
+            Tweet response dict on success, None on failure
+        """
+        # Upload video first
+        media_id = await self.upload_video(video_bytes)
+        if not media_id:
+            logger.error("Video upload failed, cannot post tweet with video")
+            return None
+
+        if not self.can_post():
+            return None
+
+        if len(text) > 280:
+            text = text[:277] + "..."
+
+        try:
+            import httpx
+
+            # Ensure token is fresh
+            if self.is_token_expired():
+                if not await self.refresh_access_token():
+                    return None
+
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "text": text,
+                "media": {
+                    "media_ids": [media_id]
+                }
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    TWEET_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+
+                if response.status_code == 201:
+                    self.posts_today += 1
+                    result = response.json()
+                    tweet_id = result.get("data", {}).get("id")
+                    logger.info(f"Tweet with video posted: {tweet_id}")
+                    return result
+                else:
+                    logger.error(f"Tweet with video failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Tweet with video error: {e}")
+            return None
+
     async def post_reply(self, text: str, reply_to_id: str) -> Optional[Dict]:
         """Post a reply to a specific tweet"""
         if not self.is_configured():

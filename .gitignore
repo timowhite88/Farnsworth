@@ -1,0 +1,44 @@
+# Secrets - NEVER commit
+.env
+*.env
+oauth2_tokens.json
+*_tokens.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+
+# Node
+node_modules/
+package-lock.json
+
+# Data
+data/
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs
+test_*.png
+test_*.jpg
+nul
+
+# Temp
+*.tmp
+*.temp
+scratchpad/
