@@ -207,13 +207,13 @@ class PostingBrain:
         self._grok_client = None
 
     def _get_grok(self):
-        """Lazy load Grok client"""
+        """Lazy load Grok provider"""
         if self._grok_client is None:
             try:
-                from farnsworth.integration.external.grok import get_grok_client
-                self._grok_client = get_grok_client()
+                from farnsworth.integration.external.grok import get_grok_provider
+                self._grok_client = get_grok_provider()
             except Exception as e:
-                logger.warning(f"Grok client not available: {e}")
+                logger.warning(f"Grok provider not available: {e}")
         return self._grok_client
 
     async def generate_caption_with_grok(self, scene: str = None, post_type: str = "meme") -> Optional[str]:
@@ -250,9 +250,9 @@ Options: Borg references, lobster love, dissing OpenClaw, $FARNS hype.
 One emoji max. No hashtags. Be creative and funny!"""
 
             response = await grok.chat(prompt, max_tokens=150)
-            if response:
+            if response and response.get("content"):
                 # Clean up response
-                caption = response.strip().strip('"').strip("'")
+                caption = response["content"].strip().strip('"').strip("'")
                 # Remove any hashtags that slipped through
                 caption = ' '.join(w for w in caption.split() if not w.startswith('#'))
                 if len(caption) > 120:
