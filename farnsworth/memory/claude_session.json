@@ -1,0 +1,78 @@
+{
+  "session_id": "opus-2026-02-01",
+  "created_at": "2026-02-01T01:30:00Z",
+  "last_updated": "2026-02-01T01:35:00Z",
+
+  "project_context": {
+    "name": "Farnsworth AI Swarm",
+    "server": "ssh root@194.68.245.145 -p 22046 -i ~/.ssh/runpod_key",
+    "workspace": "/workspace/Farnsworth",
+    "local_path": "C:/Fawnsworth"
+  },
+
+  "recent_work": [
+    {
+      "timestamp": "2026-02-01T01:30:00Z",
+      "action": "Fixed agent_spawner fallback chains",
+      "details": "Added Grok and Gemini to agent_capabilities, created fallback chains (Grok→Gemini→DeepSeek→ClaudeOpus), added audit system with staging_review folder"
+    },
+    {
+      "timestamp": "2026-02-01T01:23:00Z",
+      "action": "Updated X posting system",
+      "details": "Added Grok text generation for dynamic captions, dev updates, cooking OpenClaw content. Gemini Image Gen 4 with reference images for consistent Borg Farnsworth character"
+    },
+    {
+      "timestamp": "2026-02-01T01:18:00Z",
+      "action": "Posted memes to X",
+      "details": "Tweet IDs: 2017769425944850940, 2017770808647561445. Scenes: holographic chart, seafood restaurant"
+    }
+  ],
+
+  "active_services": {
+    "main_server": {
+      "status": "running",
+      "command": "python3 -m farnsworth.web.server",
+      "port": 8080,
+      "health": "https://ai.farnsworth.cloud/health"
+    },
+    "meme_scheduler": {
+      "status": "running",
+      "interval": "2 hours",
+      "log": "/tmp/meme_scheduler.log"
+    },
+    "moltbook": {
+      "status": "needs_attention",
+      "issue": "buffering/not outputting logs"
+    }
+  },
+
+  "pending_tasks": [
+    "Fix Moltbook agent buffering issue",
+    "Monitor next meme post (in ~2 hours)",
+    "TTS CUDA error needs attention (non-critical)"
+  ],
+
+  "key_discoveries": [
+    "Grok wasn't in agent_capabilities - caused 'cannot handle dev tasks' errors",
+    "Python modules need pycache cleared after git pull",
+    "Meme scheduler uses Gemini Imagen 4 with reference images",
+    "OAuth2 tokens in oauth2_tokens.json expire in ~2 hours, refresh lasts 6 months"
+  ],
+
+  "architecture": {
+    "fallback_chains": {
+      "Grok": ["Gemini", "DeepSeek", "ClaudeOpus"],
+      "Gemini": ["DeepSeek", "Grok", "ClaudeOpus"],
+      "OpenCode": ["Gemini", "DeepSeek", "ClaudeOpus"],
+      "DeepSeek": ["Gemini", "Phi", "ClaudeOpus"]
+    },
+    "staging_flow": "Agent output → staging_review/pending_audit → ClaudeOpus audit → audited/approved/rejected"
+  },
+
+  "tokens": {
+    "solana_ca": "9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS",
+    "base_ca": "0x7df1A083f273B1F6D8f021e4E21c630F8C7ABb07"
+  },
+
+  "bots": ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind", "Kimi", "Claude", "Grok", "Gemini", "ClaudeOpus", "OpenCode"]
+}
