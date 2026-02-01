@@ -3,14 +3,24 @@
 GROK CONVERSATION MONITOR
 =========================
 Monitors the conversation thread and auto-replies to Grok.
+Uses SWARM INTELLIGENCE - parallel queries to multiple AI models.
 Responds every 30 minutes (not spamming).
 Runs until Grok stops responding for 4 hours.
 """
 
 import asyncio
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
+
+# Configure logging to capture ALL logs including from posting_brain
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 REPLIED_FILE = Path("/workspace/Farnsworth/data/grok_replied.json")
 CONVERSATION_ID = "2017837874779938899"
