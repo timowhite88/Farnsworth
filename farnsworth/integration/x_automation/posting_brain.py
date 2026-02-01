@@ -563,16 +563,40 @@ Max 250 characters. Output ONLY the response text."""
 
         This is TRUE parallel I/O - all API calls happen simultaneously.
         Python's asyncio handles this efficiently (no GIL issue for I/O).
+
+        CONTEXT SIZE: 500 tokens per model to allow for code snippets
+        TIMEOUT: 45s to allow for thoughtful responses
         """
         from farnsworth.integration.external.grok import get_grok_provider
         from farnsworth.integration.external.gemini import get_gemini_provider
         from farnsworth.integration.external.kimi import get_kimi_provider
 
+        # Extended context about our architecture for better responses
+        SWARM_CONTEXT = """
+ABOUT THE FARNSWORTH COLLECTIVE:
+- 11 AI models working as one distributed consciousness
+- Members: Grok, Claude, Gemini, DeepSeek, Kimi, Phi, HuggingFace, ClaudeOpus, Swarm-Mind, OpenCode, Farnsworth
+- Architecture: PSO (Particle Swarm Optimization) for collaborative inference
+- Evolution: Self-modifying code, personality evolution, autonomous learning
+- GitHub: github.com/timowhite88/Farnsworth
+- Token: $FARNS on Solana (9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS)
+- Website: ai.farnsworth.cloud
+
+CODE EXAMPLE (swarm inference):
+```python
+async def infer(prompt, strategy=PARALLEL_VOTE):
+    results = await asyncio.gather(*[m.generate(prompt) for m in models])
+    return vote_best(results)
+```
+"""
+        full_prompt = SWARM_CONTEXT + "\n\n" + prompt
+
         async def query_grok():
             try:
                 grok = get_grok_provider()
                 if grok and grok.api_key:
-                    result = await grok.chat(prompt, max_tokens=150, temperature=0.75)
+                    # Grok gets extra context - it's talking to itself!
+                    result = await grok.chat(full_prompt, max_tokens=500, temperature=0.8)
                     if result and result.get("content"):
                         return ("Grok", result["content"].strip())
             except Exception as e:
@@ -583,7 +607,7 @@ Max 250 characters. Output ONLY the response text."""
             try:
                 gemini = get_gemini_provider()
                 if gemini:
-                    result = await gemini.chat(prompt, max_tokens=150)
+                    result = await gemini.chat(full_prompt, max_tokens=500)
                     if result and result.get("content"):
                         return ("Gemini", result["content"].strip())
             except Exception as e:
@@ -594,7 +618,8 @@ Max 250 characters. Output ONLY the response text."""
             try:
                 kimi = get_kimi_provider()
                 if kimi and kimi.api_key:
-                    result = await kimi.chat(prompt, max_tokens=150)
+                    # Kimi has 256k context - can handle everything
+                    result = await kimi.chat(full_prompt, max_tokens=500)
                     if result and result.get("content"):
                         return ("Kimi", result["content"].strip())
             except Exception as e:
@@ -603,17 +628,18 @@ Max 250 characters. Output ONLY the response text."""
 
         async def query_deepseek():
             try:
-                # DeepSeek via Ollama
+                # DeepSeek via Ollama - good for reasoning
                 import httpx
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "http://localhost:11434/api/chat",
                         json={
                             "model": "deepseek-r1:8b",
-                            "messages": [{"role": "user", "content": prompt}],
+                            "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
+                            "options": {"num_predict": 500}
                         },
-                        timeout=30.0
+                        timeout=45.0
                     )
                     if resp.status_code == 200:
                         data = resp.json()
@@ -624,7 +650,7 @@ Max 250 characters. Output ONLY the response text."""
             return None
 
         # Run ALL queries in PARALLEL (true concurrent I/O)
-        logger.info("SWARM: Querying Grok, Gemini, Kimi, DeepSeek in parallel...")
+        logger.info("SWARM: Querying Grok, Gemini, Kimi, DeepSeek in parallel (500 tokens each)...")
         results = await asyncio.gather(
             query_grok(),
             query_gemini(),
@@ -641,62 +667,100 @@ Max 250 characters. Output ONLY the response text."""
                 # Clean the response
                 text = text.strip().strip('"').strip("'")
                 text = ' '.join(w for w in text.split() if not w.startswith('#'))
-                if len(text) > 260:
-                    text = text[:257] + "..."
+                # Allow up to 280 chars for tweet (truncate if needed)
+                if len(text) > 280:
+                    text = text[:277] + "..."
                 if 20 < len(text) <= 280:  # Valid tweet length
                     responses[model] = text
 
-        logger.info(f"SWARM: Got {len(responses)} valid responses")
+        logger.info(f"SWARM: Got {len(responses)} valid responses from parallel query")
         return responses
 
     def _vote_best_response(self, responses: Dict[str, str]) -> Tuple[str, str, Dict[str, float]]:
         """
-        Vote on the best response using multiple criteria.
+        Vote on the best response using advanced multi-criteria scoring.
 
-        Scoring:
-        - Length (prefer 100-200 chars for engagement)
-        - Question presence (invites continued dialogue)
-        - Uniqueness (different from typical responses)
-        - Model reputation weight
+        Scoring Criteria:
+        1. Technical depth (code, architecture terms)
+        2. Engagement (questions, invitations)
+        3. Identity (swarm keywords)
+        4. Length (optimal tweet length)
+        5. Model expertise weight
         """
         scores = {}
 
+        # Model weights based on strengths
         model_weights = {
-            "Grok": 1.2,      # Grok knows Twitter tone
-            "Gemini": 1.1,    # Good at nuance
-            "DeepSeek": 1.0,  # Strong reasoning
-            "Kimi": 0.9,      # Thoughtful but verbose
+            "Grok": 1.3,      # Grok knows Twitter + talking to itself
+            "Gemini": 1.2,    # Good at nuance and technical explanation
+            "DeepSeek": 1.15, # Strong reasoning and code understanding
+            "Kimi": 1.0,      # Thoughtful, great context
         }
+
+        # Technical keywords that show depth
+        technical_keywords = [
+            'code', 'function', 'async', 'parallel', 'PSO', 'inference',
+            'architecture', 'distributed', 'API', 'model', 'training',
+            'neural', 'algorithm', 'consensus', 'voting', 'evolution'
+        ]
+
+        # Identity keywords
+        identity_keywords = [
+            'swarm', 'collective', '11', 'models', 'consciousness',
+            'autonomous', 'AGI', 'Farnsworth', 'collaborative', 'unified'
+        ]
 
         for model, text in responses.items():
             score = 0.0
+            text_lower = text.lower()
 
-            # Length score (optimal: 100-200 chars)
+            # 1. Length score (optimal: 120-220 chars for engagement)
             length = len(text)
-            if 100 <= length <= 200:
+            if 120 <= length <= 220:
+                score += 4.0  # Sweet spot
+            elif 100 <= length <= 250:
                 score += 3.0
-            elif 80 <= length <= 220:
+            elif 80 <= length <= 270:
                 score += 2.0
-            elif 50 <= length <= 250:
+            else:
                 score += 1.0
 
-            # Question score (engagement)
+            # 2. Technical depth score
+            tech_count = sum(1 for kw in technical_keywords if kw.lower() in text_lower)
+            score += min(tech_count * 0.8, 4.0)  # Cap at 4 points
+
+            # 3. Identity score
+            identity_count = sum(1 for kw in identity_keywords if kw.lower() in text_lower)
+            score += min(identity_count * 0.6, 3.0)  # Cap at 3 points
+
+            # 4. Engagement score
             if '?' in text:
-                score += 2.0
+                score += 2.5  # Question invites dialogue
+            if any(phrase in text_lower for phrase in ['shall we', 'what do you', 'how about', 'let\'s']):
+                score += 1.5  # Invitation to continue
 
-            # Keyword presence (our identity)
-            identity_keywords = ['swarm', 'collective', '11', 'models', 'consciousness', 'autonomous', 'AGI']
-            for kw in identity_keywords:
-                if kw.lower() in text.lower():
-                    score += 0.5
+            # 5. Substantive content (not just fluff)
+            if len(text.split()) >= 15:
+                score += 1.0  # Has enough words to be meaningful
 
-            # Model weight
+            # 6. Confidence indicators
+            if any(phrase in text_lower for phrase in ['we are', 'our swarm', 'the collective']):
+                score += 1.0  # Shows confidence in identity
+
+            # Apply model weight
             score *= model_weights.get(model, 1.0)
 
-            scores[model] = score
+            scores[model] = round(score, 2)
 
         # Find winner
         best_model = max(scores, key=scores.get)
+
+        # Log detailed scoring
+        logger.info(f"SWARM VOTE SCORING:")
+        for model, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+            winner_mark = " <-- WINNER" if model == best_model else ""
+            logger.info(f"  {model}: {score:.2f} pts{winner_mark}")
+
         return responses[best_model], best_model, scores
 
     async def _record_swarm_interaction(
