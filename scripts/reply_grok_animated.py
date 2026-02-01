@@ -83,40 +83,43 @@ async def generate_reply_image_nano_banana(grok_message: str = None) -> bytes:
     reference_bytes = get_reference_image("portrait")
 
     # Variation prompts that keep the Borg Farnsworth character
+    # IMPORTANT: Use Solana branding, bags.fm logo - NO Base/Ethereum references
     variation_prompts = [
         """Keep this exact character (Borg Farnsworth) but change the scene:
-He's gesturing confidently while explaining something, with holographic AI networks behind him.
-Same cybernetic implants, same art style. Confident, wise expression.
-Square 1:1 aspect ratio, meme-ready.""",
+He's gesturing confidently while explaining something, with Solana blockchain visuals behind him.
+Purple/green Solana colors in background. Same cybernetic implants, same art style.
+Confident, wise expression. Square 1:1 aspect ratio, meme-ready.""",
 
         """Keep this exact character but new pose:
 Arms crossed, slight smirk, looking directly at viewer with glowing cybernetic eye.
-Background shows code and neural network visualizations.
-Same Futurama art style. Square format.""",
+Background shows Solana logo and bags.fm branding with neural networks.
+Same Futurama art style. Square format. Purple/green color scheme.""",
 
         """Same character, new dramatic scene:
-Standing before a wall of screens showing different AI models.
+Standing before a wall of screens showing AI models and Solana transactions.
 One hand raised as if conducting an orchestra of AI minds.
-Confident, in control. Futurama cartoon style. 1:1 ratio.""",
+Solana purple glow. Confident, in control. Futurama cartoon style. 1:1 ratio.""",
 
         """Keep this Borg Farnsworth character exactly:
 New pose - leaning forward slightly, finger pointing, as if making a point in debate.
 Green glow from cybernetic eye illuminates his face.
-Background: swirling data streams. Square meme format.""",
+Background: Solana blockchain data streams, bags.fm logo subtle. Square meme format.""",
 
         """Same character design, triumphant pose:
 Both arms raised in victory, mechanical parts visible on face.
-Standing on a digital podium with "COLLECTIVE" text floating behind.
-Futurama style, dramatic lighting. 1:1 aspect.""",
+Standing on a digital podium with Solana logo and "COLLECTIVE" text floating behind.
+Purple/green Solana colors. Futurama style, dramatic lighting. 1:1 aspect.""",
     ]
 
     # If we know what Grok said, make it contextual
+    # IMPORTANT: Solana branding, NO Base/Ethereum
     if grok_message and len(grok_message) > 20:
         prompt = f"""Keep this exact character (Borg Farnsworth cyborg) but:
 Create a reaction image to: "{grok_message[:150]}"
 Show him with an appropriate expression - amused, impressed, or challenging.
 Same cybernetic implants, same art style.
-Square 1:1 format, meme-ready."""
+Background can include subtle Solana purple/green colors or bags.fm logo.
+Square 1:1 format, meme-ready. NO Base or Ethereum references."""
     else:
         prompt = random.choice(variation_prompts)
 
