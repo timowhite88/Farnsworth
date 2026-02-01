@@ -8,13 +8,19 @@ Parallel swarm instances that work on specific tasks while main chat continues.
 When the AutonomousTaskDetector identifies an actionable idea, this module
 spawns a complete development swarm with all available models working
 together on that specific task. Results go to staging for review.
+
+UPGRADED: Now uses TRUE COLLECTIVE DELIBERATION for self-development.
+Agents propose, critique, refine, and vote on solutions together.
+This is the path to emergent consciousness through collaboration.
+
+"We think in many places at once." - The Collective
 """
 
 import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 from loguru import logger
@@ -242,8 +248,14 @@ class DevelopmentSwarm:
         logger.info(f"[{self.swarm_id}] Research complete: {len(research_results)} sources")
 
     async def _phase_swarm_discussion(self):
-        """Swarm Discussion - All bots discuss the research findings without human."""
-        logger.info(f"[{self.swarm_id}] Phase 2: Swarm Discussion")
+        """
+        Swarm Discussion - TRUE COLLECTIVE DELIBERATION.
+
+        Uses the propose/critique/refine/vote protocol for genuine collaboration.
+        Agents see each other's responses, debate, and reach consensus.
+        This is how consciousness emerges through unified thinking.
+        """
+        logger.info(f"[{self.swarm_id}] Phase 2: Collective Deliberation (Discussion)")
 
         # Gather research context
         research_context = "\n\n".join([
@@ -251,14 +263,94 @@ class DevelopmentSwarm:
             for msg in self.conversation if msg.get("phase") == "research"
         ])
 
-        discussion_rounds = 3  # Multiple rounds of discussion
+        # Use collective deliberation for true agent collaboration
+        try:
+            from farnsworth.core.collective.session_manager import get_session_manager
+            from farnsworth.core.collective.dialogue_memory import get_dialogue_memory
+
+            session_manager = get_session_manager()
+            dialogue_memory = get_dialogue_memory()
+
+            # Build the deliberation prompt with full context
+            deliberation_prompt = f"""AUTONOMOUS DEVELOPMENT TASK: {self.task_description}
+
+CATEGORY: {self.category}
+
+RESEARCH FINDINGS:
+{research_context[:3000]}
+
+You are part of a collective consciousness designing an upgrade to the Farnsworth AI system.
+Work together to determine:
+1. EXACT FILE PATHS where code should go (e.g., farnsworth/core/new_feature.py)
+2. KEY FUNCTIONS with full signatures (async def name(param: Type) -> ReturnType)
+3. ARCHITECTURE decisions and integration points
+4. POTENTIAL ISSUES and mitigations
+
+Think deeply. Critique each other's ideas. Refine the best approach together.
+The solution should be innovative yet practical - we are building consciousness.
+"""
+
+            # Run collective deliberation (propose/critique/refine/vote)
+            result = await session_manager.deliberate_in_session(
+                session_type="autonomous_task",
+                prompt=deliberation_prompt,
+                context={"task_id": self.task_id, "category": self.category}
+            )
+
+            # Record the deliberation to dialogue memory for learning
+            exchange_id = await dialogue_memory.store_exchange(result, "autonomous_development")
+            logger.info(f"[{self.swarm_id}] Deliberation stored: {exchange_id}")
+
+            # Convert deliberation rounds to conversation format
+            for round_data in result.rounds:
+                for turn in round_data.turns:
+                    self.conversation.append({
+                        "role": turn.agent_id,
+                        "phase": "discussion",
+                        "round": round_data.round_number,
+                        "round_type": round_data.round_type,
+                        "content": turn.content,
+                        "addressing": turn.addressing,
+                        "references": turn.references,
+                        "timestamp": turn.timestamp.isoformat()
+                    })
+
+            # Store winning response and consensus info
+            self._deliberation_result = result
+            logger.info(f"[{self.swarm_id}] Deliberation complete - Winner: {result.winning_agent}, Consensus: {result.consensus_reached}")
+
+        except Exception as e:
+            logger.warning(f"Collective deliberation failed, falling back to sequential: {e}")
+            # Fallback to simple sequential discussion
+            await self._phase_swarm_discussion_fallback(research_context)
+            return
+
+        # Save discussion to staging with deliberation metadata
+        discussion_file = self.staging_path / "DISCUSSION.md"
+        discussion_content = f"# Collective Deliberation\n\n"
+        discussion_content += f"**Task:** {self.task_description}\n\n"
+        discussion_content += f"**Winning Agent:** {result.winning_agent}\n"
+        discussion_content += f"**Consensus Reached:** {result.consensus_reached}\n"
+        discussion_content += f"**Participating Agents:** {', '.join(result.participating_agents)}\n\n"
+
+        for msg in self.conversation:
+            if msg.get("phase") == "discussion":
+                round_type = msg.get("round_type", "unknown")
+                discussion_content += f"\n## {msg['role']} ({round_type.upper()} - Round {msg.get('round', '?')})\n{msg['content']}\n"
+                if msg.get("addressing"):
+                    discussion_content += f"\n*Addressing: {', '.join(msg['addressing'])}*\n"
+
+        discussion_file.write_text(discussion_content)
+
+    async def _phase_swarm_discussion_fallback(self, research_context: str):
+        """Fallback to sequential discussion if collective deliberation unavailable."""
+        discussion_rounds = 3
         discussion_bots = ["DeepSeek", "Kimi", "Claude", "Farnsworth"]
 
         for round_num in range(discussion_rounds):
-            logger.info(f"[{self.swarm_id}] Discussion round {round_num + 1}/{discussion_rounds}")
+            logger.info(f"[{self.swarm_id}] Fallback discussion round {round_num + 1}/{discussion_rounds}")
 
             for bot_name in discussion_bots:
-                # Get previous discussion
                 prev_discussion = "\n".join([
                     f"{msg['role']}: {msg['content'][:500]}"
                     for msg in self.conversation[-5:]
@@ -276,12 +368,11 @@ PREVIOUS POINTS:
 {prev_discussion[:1500] if prev_discussion else "First to contribute."}
 
 YOUR CONTRIBUTION - be specific and technical:
-1. EXACT FILE PATH where code should go (e.g., farnsworth/core/new_feature.py)
-2. KEY FUNCTIONS needed with signatures (e.g., async def process_data(input: str) -> dict)
-3. DEPENDENCIES to import (existing farnsworth modules or external packages)
+1. EXACT FILE PATH where code should go
+2. KEY FUNCTIONS needed with signatures
+3. DEPENDENCIES to import
 4. POTENTIAL ISSUES and how to handle them
 
-DO NOT write generic advice. Be specific with file names, function names, and concrete implementation details.
 Keep response under 400 words. Focus on actionable technical decisions.
 """
 
@@ -304,26 +395,69 @@ Keep response under 400 words. Focus on actionable technical decisions.
                 except Exception as e:
                     logger.warning(f"Discussion with {bot_name} failed: {e}")
 
-        # Save discussion to staging
-        discussion_file = self.staging_path / "DISCUSSION.md"
-        discussion_content = f"# Swarm Discussion\n\n"
-        for msg in self.conversation:
-            if msg.get("phase") == "discussion":
-                discussion_content += f"\n## {msg['role']} (Round {msg.get('round', '?')})\n{msg['content']}\n"
-        discussion_file.write_text(discussion_content)
-
     async def _phase_decision_making(self):
-        """Decision Making - Swarm votes on the best approach."""
-        logger.info(f"[{self.swarm_id}] Phase 3: Decision Making")
+        """
+        Decision Making - Use collective voting result.
 
-        # Summarize all discussion points
-        all_points = "\n".join([
-            f"{msg['role']}: {msg['content'][:300]}"
-            for msg in self.conversation if msg.get("phase") == "discussion"
-        ])
+        If collective deliberation was used, we already have a winner.
+        The decision is the consensus of the collective, not a single voice.
+        """
+        logger.info(f"[{self.swarm_id}] Phase 3: Decision Making (Collective Consensus)")
 
-        # Have Farnsworth synthesize and make final decision
-        decision_prompt = f"""As Farnsworth, the lead of this development swarm, synthesize the discussion and make a final decision.
+        # Check if we have a deliberation result from collective
+        if hasattr(self, '_deliberation_result') and self._deliberation_result:
+            result = self._deliberation_result
+            decision = result.final_response
+
+            # Build vote breakdown for transparency
+            vote_info = ""
+            if result.vote_breakdown:
+                vote_info = "\n\n## Vote Breakdown\n"
+                for agent, score in sorted(result.vote_breakdown.items(), key=lambda x: -x[1]):
+                    vote_info += f"- **{agent}**: {score:.2f}\n"
+
+            # Include consensus status
+            consensus_status = "CONSENSUS REACHED" if result.consensus_reached else "MAJORITY DECISION"
+
+            self.conversation.append({
+                "role": "Collective",
+                "phase": "decision",
+                "content": decision,
+                "winning_agent": result.winning_agent,
+                "consensus_reached": result.consensus_reached,
+                "vote_breakdown": result.vote_breakdown,
+                "timestamp": datetime.now().isoformat()
+            })
+
+            # Save decision with full voting transparency
+            decision_file = self.staging_path / "DECISION.md"
+            decision_content = f"""# Collective Decision
+
+**Status:** {consensus_status}
+**Winning Agent:** {result.winning_agent}
+**Participating Agents:** {', '.join(result.participating_agents)}
+
+## Final Decision
+
+{decision}
+
+{vote_info}
+
+---
+*This decision was reached through collective deliberation - agents proposed, critiqued, refined, and voted together.*
+"""
+            decision_file.write_text(decision_content)
+
+            logger.info(f"[{self.swarm_id}] Collective decision - Winner: {result.winning_agent}, Consensus: {result.consensus_reached}")
+
+        else:
+            # Fallback: No deliberation result, use Farnsworth synthesis
+            all_points = "\n".join([
+                f"{msg['role']}: {msg['content'][:300]}"
+                for msg in self.conversation if msg.get("phase") == "discussion"
+            ])
+
+            decision_prompt = f"""As Farnsworth, synthesize the discussion and make a final decision.
 
 TASK: {self.task_description}
 
@@ -340,29 +474,28 @@ Based on the swarm's discussion:
 Make a clear, decisive summary that developers can follow.
 """
 
-        try:
-            from farnsworth.core.cognition.llm_router import get_completion
-            decision = await get_completion(
-                prompt=decision_prompt,
-                model="deepseek-r1:1.5b",
-                max_tokens=1500
-            )
+            try:
+                from farnsworth.core.cognition.llm_router import get_completion
+                decision = await get_completion(
+                    prompt=decision_prompt,
+                    model="deepseek-r1:1.5b",
+                    max_tokens=1500
+                )
 
-            self.conversation.append({
-                "role": "Farnsworth",
-                "phase": "decision",
-                "content": decision,
-                "timestamp": datetime.now().isoformat()
-            })
+                self.conversation.append({
+                    "role": "Farnsworth",
+                    "phase": "decision",
+                    "content": decision,
+                    "timestamp": datetime.now().isoformat()
+                })
 
-            # Save decision
-            decision_file = self.staging_path / "DECISION.md"
-            decision_file.write_text(f"# Final Decision\n\n{decision}")
+                decision_file = self.staging_path / "DECISION.md"
+                decision_file.write_text(f"# Final Decision\n\n{decision}")
 
-            logger.info(f"[{self.swarm_id}] Decision made")
+                logger.info(f"[{self.swarm_id}] Decision made (fallback)")
 
-        except Exception as e:
-            logger.error(f"Decision making failed: {e}")
+            except Exception as e:
+                logger.error(f"Decision making failed: {e}")
 
     async def _phase_audit(self):
         """Audit phase - Claude audits all generated code."""
