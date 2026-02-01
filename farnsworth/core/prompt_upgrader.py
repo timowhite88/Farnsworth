@@ -112,12 +112,16 @@ class PromptUpgrader:
         Upgrade a user prompt to professional quality.
         Returns original prompt if upgrade fails or not needed.
         """
+        logger.info(f"Prompt upgrader called with: '{prompt[:50]}...'")
+
         if not self.should_upgrade(prompt):
+            logger.info(f"Skipping upgrade (not needed or disabled)")
             return prompt
 
         try:
             # Try Grok first (fast)
             grok = self._get_grok()
+            logger.info(f"Grok provider: {grok is not None}")
             if grok:
                 upgraded = await self._upgrade_with_grok(prompt)
                 if upgraded:
@@ -126,15 +130,23 @@ class PromptUpgrader:
 
             # Fallback to Gemini
             gemini = self._get_gemini()
+            logger.info(f"Gemini provider: {gemini is not None}")
             if gemini:
                 upgraded = await self._upgrade_with_gemini(prompt)
                 if upgraded:
                     logger.info(f"Prompt upgraded by Gemini: '{prompt[:30]}...' -> '{upgraded[:50]}...'")
                     return upgraded
 
+            # No providers available
+            if not grok and not gemini:
+                logger.warning("No AI providers available for prompt upgrade")
+
         except Exception as e:
             logger.warning(f"Prompt upgrade failed: {e}")
+            import traceback
+            traceback.print_exc()
 
+        logger.info(f"Returning original prompt (no upgrade)")
         return prompt
 
     async def _upgrade_with_grok(self, prompt: str) -> Optional[str]:
