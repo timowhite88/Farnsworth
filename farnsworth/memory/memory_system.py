@@ -127,10 +127,18 @@ class MemorySystem:
 
     def __init__(
         self,
-        data_dir: str = "./data",
+        data_dir: str = None,
         context_window_size: int = 4096,
         embedding_dim: int = 384,
     ):
+        # Use persistent storage on server, local storage otherwise
+        if data_dir is None:
+            import os
+            if os.path.exists("/workspace/farnsworth_memory"):
+                data_dir = "/workspace/farnsworth_memory"
+            else:
+                data_dir = "./data"
+
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 

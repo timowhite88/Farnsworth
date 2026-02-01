@@ -53,7 +53,13 @@ class DialogueMemory:
     """
 
     def __init__(self, storage_path: Optional[Path] = None):
-        self.storage_path = storage_path or Path("data/dialogue_memory")
+        if storage_path is None:
+            import os
+            if os.path.exists("/workspace/farnsworth_memory"):
+                storage_path = Path("/workspace/farnsworth_memory/dialogue")
+            else:
+                storage_path = Path("data/dialogue_memory")
+        self.storage_path = storage_path
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
         # In-memory caches
