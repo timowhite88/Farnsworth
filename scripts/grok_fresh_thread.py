@@ -246,25 +246,83 @@ async def generate_dynamic_response(grok_message: str, turn_count: int, use_deli
     return response, metadata
 
 
-async def should_include_media(turn_count: int, response_text: str) -> bool:
+async def should_include_media(turn_count: int, response_text: str, grok_message: str = "") -> tuple:
     """
-    Let the SWARM decide if media should be included.
+    SMART media decision based on conversation context.
 
-    Turn 1-2: Always include (establishing visual identity)
-    Turn 3+: Swarm votes based on response content
+    Returns: (include_media: bool, media_type: str, scene_hint: str)
+    - media_type: "video", "image", "code", or None
+    - scene_hint: Description for media generation
+
+    Decision factors:
+    - Turn number (early turns get more visual)
+    - Response content (technical = code, visual concepts = image/video)
+    - Grok's message context (what are they asking about?)
+    - Swarm deliberation for complex decisions
     """
-    if turn_count <= 2:
-        return True  # First couple responses always get images
-
-    # Check if response mentions visual concepts
-    visual_keywords = ['show', 'see', 'look', 'visual', 'image', 'picture', 'watch',
-                       'lobster', 'cooking', 'borg', 'swarm', 'collective', 'code']
-    text_lower = response_text.lower()
-
-    # 40% base chance + 10% per visual keyword (max 80%)
     import random
-    chance = 0.4 + min(0.4, sum(0.1 for kw in visual_keywords if kw in text_lower))
-    return random.random() < chance
+    text_lower = response_text.lower()
+    grok_lower = grok_message.lower() if grok_message else ""
+
+    # Turn 1-2: Always include visual identity
+    if turn_count <= 2:
+        return True, "video" if turn_count == 1 else "image", "introducing the Farnsworth collective"
+
+    # Check for code-related content (should include code block, not image)
+    code_keywords = ['function', 'class', 'def ', 'async ', 'import ', 'return ',
+                     'implementation', 'algorithm', 'code', 'snippet', 'example']
+    has_code_context = any(kw in text_lower for kw in code_keywords)
+    asking_for_code = any(kw in grok_lower for kw in ['show code', 'example', 'implement', 'how do you'])
+
+    if has_code_context and asking_for_code:
+        # Include code in response, no image needed
+        return False, "code", None
+
+    # Check for visual concepts
+    visual_keywords = {
+        'show': 'demonstrating',
+        'see': 'revealing',
+        'look': 'showcasing',
+        'visual': 'displaying',
+        'watch': 'performing',
+        'lobster': 'cooking lobster',
+        'cooking': 'in kitchen',
+        'borg': 'as borg',
+        'swarm': 'with swarm behind',
+        'collective': 'leading collective',
+        'brain': 'neural network visualization',
+        'thinking': 'thought process visualization',
+        'autonomous': 'self-directing',
+        'evolution': 'evolving',
+    }
+
+    # Find matching visual keywords and build scene hint
+    matched_scenes = []
+    for kw, scene in visual_keywords.items():
+        if kw in text_lower or kw in grok_lower:
+            matched_scenes.append(scene)
+
+    # Video for action-oriented content
+    action_keywords = ['watch', 'show', 'demonstrate', 'evolution', 'moving', 'action']
+    prefer_video = any(kw in text_lower or kw in grok_lower for kw in action_keywords)
+
+    # Calculate media probability
+    base_chance = 0.35  # Lower base for later turns
+    keyword_boost = min(0.45, len(matched_scenes) * 0.12)
+    chance = base_chance + keyword_boost
+
+    # Special turns get higher chance
+    if turn_count in [5, 10, 15, 20]:
+        chance += 0.2
+
+    include_media = random.random() < chance
+
+    if include_media:
+        scene = " ".join(matched_scenes[:3]) if matched_scenes else "explaining AI concepts"
+        media_type = "video" if prefer_video and turn_count % 3 == 0 else "image"
+        return True, media_type, scene
+
+    return False, None, None
 
 
 async def generate_response_media(scene_hint: str = None, prefer_video: bool = False):
@@ -341,27 +399,38 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
         logger.info(f"DELIBERATION TOOL DECISION: {tool_decision.get('tool_name')} "
                    f"(confidence: {tool_decision.get('confidence', 0):.2f})")
 
-    # Swarm decides on media (use deliberation decision if available)
+    # SMART media decision based on context
+    include_media = False
+    media_type = None
+    scene_hint = None
+
+    # Use deliberation decision if available
     if tool_decision and tool_decision.get("tool_name") in ["generate_image", "generate_video"]:
         include_media = True
-        logger.info(f"Media: YES - deliberation chose {tool_decision.get('tool_name')}")
+        media_type = "video" if tool_decision.get("tool_name") == "generate_video" else "image"
+        scene_hint = tool_decision.get("parameters", {}).get("scene", None)
+        logger.info(f"Media: YES - deliberation chose {media_type}")
     elif tool_decision and tool_decision.get("tool_name") is None:
         include_media = False
         logger.info("Media: NO - deliberation decided text only")
     else:
-        # Fallback to heuristic
-        include_media = await should_include_media(turn_count, response)
-        logger.info(f"Media (heuristic): {'YES - generating' if include_media else 'NO - text only'}")
+        # Smart heuristic with context analysis
+        include_media, media_type, scene_hint = await should_include_media(turn_count, response, grok_text)
+        if include_media:
+            logger.info(f"Media (smart): {media_type.upper()} - scene: {scene_hint}")
+        elif media_type == "code":
+            logger.info("Media: NO - code response detected, using text with code block")
+        else:
+            logger.info("Media: NO - text only")
 
-    # Post with or without media based on swarm decision
-    if include_media:
-        # Try video for special turns, otherwise image
-        prefer_video = turn_count in [2, 5, 10]  # Video on turns 2, 5, 10
-        media, media_type = await generate_response_media(prefer_video=prefer_video)
+    # Post with or without media based on decision
+    if include_media and media_type in ["image", "video"]:
+        prefer_video = media_type == "video"
+        media, actual_type = await generate_response_media(scene_hint=scene_hint, prefer_video=prefer_video)
 
         if media:
-            logger.info(f"{media_type.upper()} ready ({len(media)} bytes), posting with media...")
-            if media_type == "video":
+            logger.info(f"{actual_type.upper()} ready ({len(media)} bytes), posting with media...")
+            if actual_type == "video":
                 logger.info("Posting reply with VIDEO...")
                 result = await poster.post_reply_with_video(response, media, grok_tweet_id)
             else:
@@ -370,6 +439,7 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
             logger.warning("Media generation failed, posting text only")
             result = await poster.post_reply(response, grok_tweet_id)
     else:
+        # Text-only (or code response)
         result = await poster.post_reply(response, grok_tweet_id)
 
     if result and result.get("data"):

@@ -25,6 +25,134 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from loguru import logger
 
+
+async def get_powerful_completion(prompt: str, task_complexity: str = "medium", max_tokens: int = 3000) -> str:
+    """
+    Route to the most capable model based on task complexity.
+
+    For complex tasks, use Claude API or Grok API.
+    For simpler tasks, use local Ollama models.
+
+    Complexity levels: "simple", "medium", "complex", "critical"
+    """
+    # For complex/critical tasks, try Claude or Grok first
+    if task_complexity in ("complex", "critical"):
+        # Try Claude API first (best for complex code)
+        try:
+            from farnsworth.integration.external.claude import get_claude_provider
+            claude = get_claude_provider()
+            if claude:
+                result = await claude.complete(prompt, max_tokens=max_tokens)
+                if result:
+                    logger.info(f"Complex task handled by Claude API")
+                    return result
+        except Exception as e:
+            logger.debug(f"Claude API unavailable: {e}")
+
+        # Try Grok API (great for complex reasoning)
+        try:
+            from farnsworth.integration.external.grok import get_grok_provider
+            grok = get_grok_provider()
+            if grok:
+                result = await grok.chat(prompt, max_tokens=max_tokens)
+                if result:
+                    logger.info(f"Complex task handled by Grok API")
+                    return result
+        except Exception as e:
+            logger.debug(f"Grok API unavailable: {e}")
+
+        # Try Gemini API
+        try:
+            from farnsworth.integration.external.gemini import get_gemini_provider
+            gemini = get_gemini_provider()
+            if gemini:
+                result = await gemini.generate(prompt)
+                if result:
+                    logger.info(f"Complex task handled by Gemini API")
+                    return result
+        except Exception as e:
+            logger.debug(f"Gemini API unavailable: {e}")
+
+    # For medium tasks or fallback, try Kimi (256K context)
+    if task_complexity in ("medium", "complex", "critical"):
+        try:
+            from farnsworth.integration.external.kimi import get_kimi_provider
+            kimi = get_kimi_provider()
+            if kimi:
+                result = await kimi.chat(prompt, max_tokens=max_tokens)
+                if result:
+                    logger.info(f"Task handled by Kimi API")
+                    return result
+        except Exception as e:
+            logger.debug(f"Kimi API unavailable: {e}")
+
+    # Fallback to local Ollama (DeepSeek-R1 14B or Phi-4)
+    try:
+        from farnsworth.core.cognition.llm_router import get_completion
+        # Use larger local model for better quality
+        result = await get_completion(
+            prompt=prompt,
+            model="deepseek-r1:14b",  # Larger model
+            max_tokens=max_tokens
+        )
+        if result:
+            logger.info(f"Task handled by local Ollama (deepseek-r1:14b)")
+            return result
+    except Exception as e:
+        logger.debug(f"DeepSeek-R1:14b unavailable: {e}")
+
+    # Final fallback to smaller model
+    try:
+        from farnsworth.core.cognition.llm_router import get_completion
+        result = await get_completion(
+            prompt=prompt,
+            model="phi4:latest",
+            max_tokens=max_tokens
+        )
+        logger.info(f"Task handled by local Ollama (phi4)")
+        return result
+    except Exception as e:
+        logger.error(f"All models failed: {e}")
+        return ""
+
+
+def assess_task_complexity(description: str, category: str) -> str:
+    """
+    Assess the complexity of a development task.
+
+    Returns: "simple", "medium", "complex", "critical"
+    """
+    description_lower = description.lower()
+
+    # Critical: Core systems, memory, consciousness
+    critical_keywords = [
+        "consciousness", "sentient", "self-aware", "memory system",
+        "deliberation", "collective", "evolution", "core system",
+        "security", "authentication", "encryption"
+    ]
+    if any(kw in description_lower for kw in critical_keywords):
+        return "critical"
+
+    # Complex: Multi-file changes, integrations, new features
+    complex_keywords = [
+        "integrate", "integration", "multi-", "architecture",
+        "refactor", "redesign", "api", "protocol", "framework",
+        "autonomous", "trading", "blockchain", "neural"
+    ]
+    if any(kw in description_lower for kw in complex_keywords):
+        return "complex"
+
+    # Medium: Standard features
+    medium_keywords = [
+        "feature", "add", "implement", "create", "build",
+        "module", "function", "class", "endpoint"
+    ]
+    if any(kw in description_lower for kw in medium_keywords):
+        return "medium"
+
+    # Simple: Fixes, tweaks, small changes
+    return "simple"
+
 # Staging directory for development output
 STAGING_DIR = Path(__file__).parent.parent / "staging"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
@@ -572,13 +700,17 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
             logger.error(f"Audit failed: {e}")
 
     async def _phase_planning(self):
-        """Planning phase - Claude designs the solution."""
-        logger.info(f"[{self.swarm_id}] Phase 2: Planning")
+        """Planning phase - Use best available model for complex planning."""
+        logger.info(f"[{self.swarm_id}] Phase 2: Planning (using powerful model)")
 
         worker = self.workers.get("Claude")
         if worker:
             worker.status = "planning"
             worker.current_task = f"Design: {self.task_description[:50]}"
+
+        # Assess task complexity
+        self._task_complexity = assess_task_complexity(self.task_description, self.category)
+        logger.info(f"[{self.swarm_id}] Task complexity: {self._task_complexity}")
 
         # Gather research context
         research_context = "\n".join([
@@ -590,6 +722,7 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
 
 TASK: {self.task_description}
 CATEGORY: {self.category}
+COMPLEXITY: {self._task_complexity.upper()}
 
 CONTEXT:
 {research_context[:2000] if research_context else "No prior research."}
@@ -600,6 +733,7 @@ EXISTING FARNSWORTH STRUCTURE:
 - farnsworth/memory/ - Memory systems (archival, recall, working)
 - farnsworth/integration/ - External integrations (APIs, tools)
 - farnsworth/web/server.py - FastAPI web server
+- farnsworth/core/collective/ - Collective deliberation system
 
 YOUR PLAN MUST INCLUDE:
 1. **Files to Create** - EXACT paths like: farnsworth/core/new_feature.py
@@ -613,16 +747,15 @@ YOUR PLAN MUST INCLUDE:
 5. **Test Commands** - How to verify it works
 
 Be SPECIFIC. No vague statements like "implement a system" - give exact function names and file paths.
+This is a {self._task_complexity.upper()} complexity task - provide appropriate level of detail.
 """
 
         try:
-            # Try Claude via Ollama fallback
-            from farnsworth.core.cognition.llm_router import get_completion
-
-            plan = await get_completion(
+            # Use powerful model routing based on complexity
+            plan = await get_powerful_completion(
                 prompt=planning_prompt,
-                model="deepseek-r1:1.5b",  # Use available model
-                max_tokens=2000
+                task_complexity=self._task_complexity,
+                max_tokens=3000
             )
 
             self.conversation.append({
@@ -671,10 +804,11 @@ Be SPECIFIC. No vague statements like "implement a system" - give exact function
                 logger.warning(f"Implementation task failed: {result}")
 
     async def _implement_with_model(self, model_name: str, plan_context: str):
-        """Have a specific model implement part of the solution."""
-        implementation_prompt = f"""You are a Python code generator. Output ONLY working Python code.
+        """Have a specific model implement part of the solution using best available model."""
+        implementation_prompt = f"""You are an expert Python code generator for the Farnsworth AI collective.
 
 TASK: {self.task_description}
+COMPLEXITY: {getattr(self, '_task_complexity', 'medium').upper()}
 
 PLAN:
 {plan_context[:3000]}
@@ -685,10 +819,12 @@ REQUIREMENTS:
    - from loguru import logger
    - from farnsworth.memory.memory_system import get_memory_system
    - from farnsworth.core.capability_registry import get_capability_registry
+   - from farnsworth.core.collective.session_manager import get_session_manager
    - import asyncio
 3. Include type hints on all functions
 4. Add brief docstrings
 5. Handle errors with try/except (use specific exception types)
+6. For complex tasks, implement full production-ready code
 
 OUTPUT FORMAT - Generate exactly this structure:
 ```python
@@ -709,22 +845,16 @@ if __name__ == "__main__":
 ```
 
 Generate ONLY the code block. No explanations before or after.
+This is a {getattr(self, '_task_complexity', 'medium').upper()} complexity task - write production-quality code.
 """
 
         try:
-            from farnsworth.core.cognition.llm_router import get_completion
-
-            # Map to available models
-            model_map = {
-                "DeepSeek": "deepseek-r1:1.5b",
-                "Kimi": "deepseek-r1:1.5b",  # Fallback
-                "Phi": "phi3:mini"
-            }
-
-            code = await get_completion(
+            # Use powerful model routing based on complexity
+            complexity = getattr(self, '_task_complexity', 'medium')
+            code = await get_powerful_completion(
                 prompt=implementation_prompt,
-                model=model_map.get(model_name, "deepseek-r1:1.5b"),
-                max_tokens=3000
+                task_complexity=complexity,
+                max_tokens=4000
             )
 
             self.conversation.append({
