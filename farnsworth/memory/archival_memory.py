@@ -532,3 +532,64 @@ class ArchivalMemory:
             "has_bm25": self._bm25 is not None,
             "storage_path": str(self.data_dir),
         }
+
+    def set_huggingface_embeddings(self, model: str = "all-MiniLM-L6-v2"):
+        """
+        Configure archival memory to use HuggingFace embeddings.
+
+        Uses local sentence-transformers for fast, private embedding generation.
+
+        Args:
+            model: HuggingFace embedding model ID (default: all-MiniLM-L6-v2)
+        """
+        try:
+            from farnsworth.integration.external.huggingface import get_huggingface_provider
+
+            hf = get_huggingface_provider()
+            if hf is None:
+                logger.warning("HuggingFace provider not available for embeddings")
+                return False
+
+            async def hf_embed(text: str) -> list[float]:
+                result = await hf.embed(text, model=model, prefer_local=True)
+                embeddings = result.get("embeddings")
+                if embeddings:
+                    # Update embedding dim if needed
+                    if isinstance(embeddings, list) and len(embeddings) > 0:
+                        self.embedding_dim = len(embeddings)
+                    return embeddings
+                return None
+
+            self.embed_fn = hf_embed
+            logger.info(f"Archival memory using HuggingFace embeddings: {model}")
+            return True
+
+        except ImportError:
+            logger.warning("HuggingFace integration not available")
+            return False
+
+
+def create_archival_with_huggingface(
+    data_dir: str = "./data/archival",
+    embedding_model: str = "all-MiniLM-L6-v2",
+    use_gpu: bool = True
+) -> ArchivalMemory:
+    """
+    Create an archival memory instance with HuggingFace embeddings.
+
+    This provides:
+    - Local sentence-transformer embeddings (no API needed)
+    - GPU acceleration when available
+    - Semantic search over long-term memory
+
+    Args:
+        data_dir: Directory for storing memory files
+        embedding_model: HuggingFace model for embeddings
+        use_gpu: Whether to use GPU for FAISS
+
+    Returns:
+        ArchivalMemory instance configured with HuggingFace
+    """
+    memory = ArchivalMemory(data_dir=data_dir, use_gpu=use_gpu)
+    memory.set_huggingface_embeddings(embedding_model)
+    return memory
