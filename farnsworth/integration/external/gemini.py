@@ -359,6 +359,214 @@ class GeminiProvider(ExternalProvider):
             max_tokens=4000
         )
 
+    async def generate_image(
+        self,
+        prompt: str,
+        reference_image_bytes: bytes = None,
+        aspect_ratio: str = "1:1",
+        image_size: str = "1K",
+        model: str = None
+    ) -> Dict[str, Any]:
+        """
+        Generate image using Gemini Nano Banana.
+
+        Models:
+        - gemini-2.0-flash-exp: Experimental, image gen + editing
+        - gemini-2.5-flash-image: Production Nano Banana (faster, cheaper)
+        - gemini-3-pro-image-preview: Nano Banana Pro (highest quality, up to 14 refs)
+
+        Args:
+            prompt: Description of image to generate or edit instructions
+            reference_image_bytes: Optional reference image for style/character consistency
+            aspect_ratio: 1:1, 16:9, 9:16, 4:3, 3:4, etc.
+            image_size: 1K, 2K, or 4K (uppercase required)
+            model: Model to use (default: gemini-2.0-flash-exp)
+
+        Returns:
+            {"images": [bytes], "prompt": str} on success
+        """
+        if not self.api_key:
+            return {"error": "Gemini API key not configured", "images": []}
+
+        # Model selection for image generation
+        # - gemini-2.5-flash-image: Nano Banana (production, fast) - USER TEMPLATE
+        # - gemini-3-pro-image-preview: Nano Banana Pro (highest quality)
+        model = model or "gemini-2.5-flash-image"
+
+        # Build content parts - image first if editing, then text
+        parts = []
+
+        # Add reference image if provided (for editing/variation)
+        if reference_image_bytes:
+            encoded = base64.b64encode(reference_image_bytes).decode()
+            parts.append({
+                "inlineData": {
+                    "mimeType": "image/jpeg",
+                    "data": encoded
+                }
+            })
+            logger.info(f"Gemini: Added reference image ({len(reference_image_bytes)} bytes)")
+
+        # Add the text prompt
+        parts.append({"text": prompt})
+
+        request_body = {
+            "contents": [{
+                "parts": parts
+            }],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"],
+            }
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
+
+                logger.info(f"Gemini Nano Banana: Generating image with {model}")
+                if reference_image_bytes:
+                    logger.info(f"Gemini: Using reference image for variation/editing")
+
+                async with session.post(
+                    url,
+                    json=request_body,
+                    timeout=aiohttp.ClientTimeout(total=180)
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+
+                        # Extract images from response
+                        images = []
+                        image_urls = []
+                        text_response = ""
+
+                        candidates = result.get("candidates", [])
+                        for candidate in candidates:
+                            content_parts = candidate.get("content", {}).get("parts", [])
+                            for part in content_parts:
+                                if "inlineData" in part:
+                                    # Base64 image data
+                                    img_data = part["inlineData"].get("data")
+                                    if img_data:
+                                        images.append(base64.b64decode(img_data))
+                                elif "fileData" in part:
+                                    # File URI
+                                    file_uri = part["fileData"].get("fileUri")
+                                    if file_uri:
+                                        image_urls.append(file_uri)
+                                elif "text" in part:
+                                    text_response += part["text"]
+
+                        if images:
+                            logger.info(f"Gemini Nano Banana: Generated {len(images)} image(s)")
+                            return {
+                                "images": images,
+                                "image_urls": image_urls,
+                                "prompt": prompt,
+                                "text": text_response
+                            }
+                        elif image_urls:
+                            # Download images from URLs
+                            for img_url in image_urls:
+                                try:
+                                    async with session.get(img_url) as img_resp:
+                                        if img_resp.status == 200:
+                                            images.append(await img_resp.read())
+                                except Exception as e:
+                                    logger.warning(f"Failed to download image: {e}")
+
+                            if images:
+                                logger.info(f"Gemini: Downloaded {len(images)} image(s)")
+                                return {"images": images, "prompt": prompt, "text": text_response}
+
+                        # No images - return text explanation
+                        if text_response:
+                            logger.warning(f"Gemini returned text instead of image: {text_response[:200]}")
+                        return {"error": "No images in response", "images": [], "text": text_response}
+
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Gemini image generation error: {resp.status} - {error}")
+                        return {"error": error, "images": []}
+
+        except Exception as e:
+            logger.error(f"Gemini image generation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"error": str(e), "images": []}
+
+    async def generate_imagen(
+        self,
+        prompt: str,
+        num_images: int = 1,
+        aspect_ratio: str = "1:1",
+        image_size: str = "1K"
+    ) -> Dict[str, Any]:
+        """
+        Generate image using Google Imagen 4.
+
+        Models:
+        - imagen-4.0-generate-001: Standard
+        - imagen-4.0-ultra-generate-001: Ultra quality
+        - imagen-4.0-fast-generate-001: Fast
+
+        Args:
+            prompt: Text description (English only, max 480 tokens)
+            num_images: 1-4 images
+            aspect_ratio: 1:1, 3:4, 4:3, 9:16, 16:9
+            image_size: 1K or 2K
+
+        Returns:
+            {"images": [bytes], "prompt": str}
+        """
+        if not self.api_key:
+            return {"error": "Gemini API key not configured", "images": []}
+
+        model = "imagen-4.0-generate-001"
+
+        request_body = {
+            "instances": [{"prompt": prompt}],
+            "parameters": {
+                "sampleCount": min(max(num_images, 1), 4),
+                "aspectRatio": aspect_ratio
+            }
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/models/{model}:predict?key={self.api_key}"
+
+                logger.info(f"Imagen 4: Generating {num_images} image(s)")
+
+                async with session.post(
+                    url,
+                    json=request_body,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        images = []
+
+                        predictions = result.get("predictions", [])
+                        for pred in predictions:
+                            if "bytesBase64Encoded" in pred:
+                                images.append(base64.b64decode(pred["bytesBase64Encoded"]))
+
+                        if images:
+                            logger.info(f"Imagen 4: Generated {len(images)} image(s)")
+                            return {"images": images, "prompt": prompt}
+
+                        return {"error": "No images in response", "images": []}
+
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Imagen 4 error: {resp.status} - {error}")
+                        return {"error": error, "images": []}
+
+        except Exception as e:
+            logger.error(f"Imagen 4 error: {e}")
+            return {"error": str(e), "images": []}
+
     async def swarm_respond(
         self,
         other_bots: List[str],
@@ -513,3 +721,33 @@ async def gemini_vision(image_path: str, prompt: str = "What's in this image?") 
 
     result = await provider.analyze_image(image_path=image_path, prompt=prompt)
     return result.get("content", "")
+
+
+async def gemini_generate_image(
+    prompt: str,
+    reference_image_bytes: bytes = None,
+    aspect_ratio: str = "1:1",
+    image_size: str = "1K"
+) -> Dict[str, Any]:
+    """
+    Generate image using Gemini Nano Banana (gemini-2.5-flash-image).
+
+    Args:
+        prompt: Description of image to generate
+        reference_image_bytes: Optional reference image for style/character consistency
+        aspect_ratio: 1:1, 16:9, 9:16, 4:3, 3:4, etc.
+        image_size: 1K, 2K, or 4K
+
+    Returns:
+        {"images": [bytes], "prompt": str} on success
+    """
+    provider = get_gemini_provider()
+    if provider is None:
+        return {"error": "Gemini provider not available", "images": []}
+
+    return await provider.generate_image(
+        prompt=prompt,
+        reference_image_bytes=reference_image_bytes,
+        aspect_ratio=aspect_ratio,
+        image_size=image_size
+    )

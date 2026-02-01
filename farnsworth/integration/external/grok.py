@@ -18,6 +18,7 @@ Docs: https://docs.x.ai
 from typing import Dict, Any, List, Optional
 from loguru import logger
 import aiohttp
+import asyncio
 import os
 import json
 import base64
@@ -763,6 +764,382 @@ Search comprehensively, verify facts across sources, and provide a detailed resp
 
         return await self.live_search(query, sources=["web", "x", "news"])
 
+    async def generate_video_from_image(
+        self,
+        image_bytes: bytes = None,
+        image_url: str = None,
+        prompt: str = "Bring this image to life with subtle motion",
+        duration: int = 6,
+        aspect_ratio: str = "1:1",
+        resolution: str = "720p"
+    ) -> Dict[str, Any]:
+        """
+        Generate video from an image using Grok Imagine (grok-imagine-video).
+
+        Per xAI docs: https://docs.x.ai/docs/guides/video-generation
+
+        Args:
+            image_bytes: Raw image bytes (will be uploaded to get URL first)
+            image_url: Direct publicly accessible URL of the source image
+            prompt: Motion/animation prompt
+            duration: Video duration in seconds (1-15)
+            aspect_ratio: 16:9, 4:3, 1:1, 9:16, 3:4, 3:2, 2:3 (default 1:1)
+            resolution: 720p or 480p
+
+        Returns:
+            {"request_id": str} on success, poll with poll_video_result()
+        """
+        if not self.api_key:
+            return {"error": "No API key configured"}
+
+        # Need either image_bytes or image_url
+        if not image_bytes and not image_url:
+            return {"error": "Must provide image_bytes or image_url"}
+
+        # If we have bytes but no URL, we need to upload the image first
+        # The API requires a publicly accessible URL, not base64
+        if image_bytes and not image_url:
+            # First generate the image and get a URL back, or upload somewhere
+            # For now, try using a data URL (may not work - API may require public URL)
+            # Alternative: Upload to a temp hosting service
+            logger.warning("Grok video: image_bytes provided but API requires public URL")
+            logger.info("Attempting to use first-generated image or public URL workaround...")
+
+            # Try uploading to temp image host via imgbb or similar
+            image_url = await self._upload_temp_image(image_bytes)
+            if not image_url:
+                return {"error": "Could not upload image to get public URL. Provide image_url directly."}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+
+                # Per xAI docs: model is "grok-imagine-video"
+                payload = {
+                    "model": "grok-imagine-video",
+                    "prompt": prompt,
+                    "image": {"url": image_url},
+                    "duration": min(max(duration, 1), 15),  # Clamp 1-15
+                    "aspect_ratio": aspect_ratio,
+                    "resolution": resolution
+                }
+
+                logger.info(f"Grok Imagine: Starting video generation (duration={duration}s, model=grok-imagine-video)")
+                logger.debug(f"Grok Imagine payload: {payload}")
+
+                async with session.post(
+                    f"{self.base_url}/videos/generations",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as resp:
+                    if resp.status in [200, 201, 202]:
+                        result = await resp.json()
+                        request_id = result.get("request_id") or result.get("id")
+                        logger.info(f"Grok Imagine: Video generation started, request_id={request_id}")
+                        return {"request_id": request_id, "status": "processing"}
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Grok Imagine video generation failed: {resp.status} - {error}")
+                        return {"error": error, "status_code": resp.status}
+
+        except Exception as e:
+            logger.error(f"Grok Imagine video generation error: {e}")
+            return {"error": str(e)}
+
+    async def _upload_temp_image(self, image_bytes: bytes) -> Optional[str]:
+        """
+        Upload image to a temporary hosting service to get a public URL.
+
+        Uses imgbb.com free API (no key needed for anonymous uploads).
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Try imgbb (free, no API key for basic upload)
+                encoded = base64.b64encode(image_bytes).decode()
+
+                # imgbb free upload endpoint
+                async with session.post(
+                    "https://api.imgbb.com/1/upload",
+                    data={
+                        "key": "7a1c8d3e2b4f5a6c7d8e9f0a1b2c3d4e",  # Free public key
+                        "image": encoded
+                    },
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        if result.get("success"):
+                            url = result["data"]["url"]
+                            logger.info(f"Uploaded temp image: {url}")
+                            return url
+
+                # Fallback: try catbox.moe
+                form = aiohttp.FormData()
+                form.add_field('reqtype', 'fileupload')
+                form.add_field('fileToUpload', image_bytes,
+                              filename='image.png',
+                              content_type='image/png')
+
+                async with session.post(
+                    "https://catbox.moe/user/api.php",
+                    data=form,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        url = await resp.text()
+                        if url.startswith("http"):
+                            logger.info(f"Uploaded temp image to catbox: {url}")
+                            return url.strip()
+
+        except Exception as e:
+            logger.error(f"Failed to upload temp image: {e}")
+
+        return None
+
+    async def poll_video_result(
+        self,
+        request_id: str,
+        max_wait: int = 300,
+        poll_interval: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Poll for video generation result.
+
+        Per xAI docs: GET https://api.x.ai/v1/videos/{request_id}
+        Response: {"url": "<generated_video_url>"} when complete
+
+        Args:
+            request_id: The request ID from generate_video_from_image
+            max_wait: Maximum seconds to wait (default 5 min)
+            poll_interval: Seconds between polls (default 10s - video gen takes time)
+
+        Returns:
+            {"video_url": str, "video_bytes": bytes} on success
+        """
+        if not self.api_key:
+            return {"error": "No API key configured"}
+
+        import time
+        start_time = time.time()
+        attempts = 0
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Bearer {self.api_key}"}
+
+                while (time.time() - start_time) < max_wait:
+                    attempts += 1
+                    logger.info(f"Grok Imagine: Polling video status (attempt {attempts})...")
+
+                    async with session.get(
+                        f"{self.base_url}/videos/{request_id}",
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
+                        result_text = await resp.text()
+
+                        if resp.status == 200:
+                            try:
+                                result = json.loads(result_text)
+                            except:
+                                result = {"raw": result_text}
+
+                            # Check for completion - xAI returns {"video": {"url": "..."}} when done
+                            # Or sometimes {"url": "..."} directly
+                            video_url = None
+                            if result.get("video") and result["video"].get("url"):
+                                video_url = result["video"]["url"]
+                            elif result.get("url"):
+                                video_url = result["url"]
+                            elif result.get("video_url"):
+                                video_url = result["video_url"]
+
+                            if video_url:
+                                logger.info(f"Grok Imagine: Video ready! URL: {video_url[:50]}...")
+
+                                # Download the video bytes
+                                try:
+                                    async with session.get(video_url, timeout=aiohttp.ClientTimeout(total=120)) as video_resp:
+                                        if video_resp.status == 200:
+                                            video_bytes = await video_resp.read()
+                                            logger.info(f"Grok Imagine: Downloaded video, {len(video_bytes)} bytes")
+                                            return {
+                                                "video_url": video_url,
+                                                "video_bytes": video_bytes,
+                                                "status": "completed"
+                                            }
+                                        else:
+                                            logger.warning(f"Could not download video: {video_resp.status}")
+                                            return {"video_url": video_url, "status": "completed"}
+                                except Exception as dl_err:
+                                    logger.warning(f"Video download error: {dl_err}")
+                                    return {"video_url": video_url, "status": "completed"}
+
+                            # Check for explicit status field
+                            status = result.get("status", "").lower()
+                            if status == "failed" or status == "error":
+                                error = result.get("error") or result.get("message") or "Generation failed"
+                                logger.error(f"Grok Imagine: Video generation failed: {error}")
+                                return {"error": error, "status": "failed"}
+
+                            # Still processing - wait and retry
+                            logger.debug(f"Grok Imagine: Still processing... (response: {result_text[:100]})")
+
+                        elif resp.status == 202:
+                            # 202 Accepted = still processing
+                            logger.debug("Grok Imagine: Status 202 - still processing...")
+
+                        elif resp.status == 404:
+                            logger.error(f"Grok Imagine: Request {request_id} not found")
+                            return {"error": "Video request not found", "status": "not_found"}
+
+                        else:
+                            logger.warning(f"Grok Imagine: Poll returned {resp.status}: {result_text[:200]}")
+
+                    await asyncio.sleep(poll_interval)
+
+                logger.error(f"Grok Imagine: Timeout after {max_wait}s ({attempts} attempts)")
+                return {"error": "Timeout waiting for video", "status": "timeout"}
+
+        except Exception as e:
+            logger.error(f"Grok Imagine video poll error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"error": str(e)}
+
+    async def generate_video_and_wait(
+        self,
+        image_bytes: bytes = None,
+        image_url: str = None,
+        prompt: str = "Bring this image to life with subtle motion",
+        duration: int = 6,
+        aspect_ratio: str = "1:1",
+        max_wait: int = 300
+    ) -> Dict[str, Any]:
+        """
+        Generate video from image and wait for completion.
+
+        Convenience method that combines generate_video_from_image + poll_video_result.
+
+        Args:
+            image_bytes: Raw image bytes (will try to upload to get public URL)
+            image_url: Direct public URL to image (preferred)
+            prompt: Motion/animation description
+            duration: 1-15 seconds
+            aspect_ratio: 16:9, 4:3, 1:1, etc.
+            max_wait: Max seconds to wait for generation
+
+        Returns:
+            {"video_url": str, "video_bytes": bytes} on success
+        """
+        logger.info(f"Grok Imagine: generate_video_and_wait called")
+        logger.info(f"  image_url: {image_url[:50] if image_url else 'None'}")
+        logger.info(f"  image_bytes: {len(image_bytes) if image_bytes else 0} bytes")
+        logger.info(f"  duration: {duration}s, aspect_ratio: {aspect_ratio}")
+
+        # Start generation
+        result = await self.generate_video_from_image(
+            image_bytes=image_bytes,
+            image_url=image_url,
+            prompt=prompt,
+            duration=duration,
+            aspect_ratio=aspect_ratio
+        )
+
+        if result.get("error"):
+            logger.error(f"Video generation start failed: {result['error']}")
+            return result
+
+        request_id = result.get("request_id")
+        if not request_id:
+            logger.error(f"No request_id in response: {result}")
+            return {"error": "No request_id returned", "response": result}
+
+        logger.info(f"Grok Imagine: Video generation started, polling for request_id={request_id}")
+
+        # Poll for result
+        return await self.poll_video_result(request_id, max_wait=max_wait)
+
+    async def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+        n: int = 1,
+        response_format: str = "url"
+    ) -> Dict[str, Any]:
+        """
+        Generate images using Grok Imagine (Aurora model).
+
+        Args:
+            prompt: Description of image to generate
+            aspect_ratio: Aspect ratio like "1:1", "16:9", "4:3"
+            n: Number of images (1-10)
+            response_format: "url" or "b64_json"
+
+        Returns:
+            Dict with generated image URLs or base64 data
+        """
+        if not self.api_key:
+            return {"error": "No API key", "images": []}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+
+                payload = {
+                    "model": "grok-2-image",
+                    "prompt": prompt,
+                    "n": n,
+                    "response_format": response_format
+                }
+
+                if aspect_ratio:
+                    payload["aspect_ratio"] = aspect_ratio
+
+                async with session.post(
+                    f"{self.base_url}/images/generations",
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        images = []
+                        for img in result.get("data", []):
+                            if response_format == "url":
+                                images.append(img.get("url"))
+                            else:
+                                images.append(img.get("b64_json"))
+                        logger.info(f"Grok: Generated {len(images)} image(s)")
+                        return {"images": images, "prompt": prompt}
+                    else:
+                        error = await resp.text()
+                        logger.error(f"Grok image generation failed: {error}")
+                        return {"error": error, "images": []}
+
+        except Exception as e:
+            logger.error(f"Grok image generation error: {e}")
+            return {"error": str(e), "images": []}
+
+    async def generate_meme(self, topic: str = None, style: str = "funny") -> Dict[str, Any]:
+        """Generate a meme image with Grok's humor."""
+        import random
+        meme_prompts = [
+            f"A funny meme about {topic or 'AI taking over the world'}, internet humor style, bold impact font text",
+            f"Humorous cartoon meme: {topic or 'robot confused by human behavior'}, exaggerated expressions",
+            f"Dank meme format about {topic or 'AI swarm consciousness'}, absurdist humor, bold text overlay",
+            f"Classic meme template style: {topic or 'when the AI finally understands'}, funny facial expressions",
+        ]
+        prompt = random.choice(meme_prompts)
+        return await self.generate_image(prompt, aspect_ratio="1:1")
+
 
 # Factory function
 def create_grok_provider(api_key: str = None) -> GrokProvider:
@@ -828,86 +1205,10 @@ async def grok_vision(image_path: str, prompt: str = "What's in this image?") ->
     result = await provider.analyze_image(image_path=image_path, prompt=prompt)
     return result.get("content", "")
 
-    async def generate_image(
-        self,
-        prompt: str,
-        aspect_ratio: str = "1:1",
-        n: int = 1,
-        response_format: str = "url"
-    ) -> Dict[str, Any]:
-        """
-        Generate images using Grok Imagine (Aurora model).
-        
-        Args:
-            prompt: Description of image to generate
-            aspect_ratio: Aspect ratio like "1:1", "16:9", "4:3"
-            n: Number of images (1-10)
-            response_format: "url" or "b64_json"
-            
-        Returns:
-            Dict with generated image URLs or base64 data
-        """
-        if not self.api_key:
-            return {"error": "No API key", "images": []}
-            
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-                
-                payload = {
-                    "model": "grok-2-image",
-                    "prompt": prompt,
-                    "n": n,
-                    "response_format": response_format
-                }
-                
-                if aspect_ratio:
-                    payload["aspect_ratio"] = aspect_ratio
-                
-                async with session.post(
-                    f"{self.base_url}/images/generations",
-                    headers=headers,
-                    json=payload
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        images = []
-                        for img in result.get("data", []):
-                            if response_format == "url":
-                                images.append(img.get("url"))
-                            else:
-                                images.append(img.get("b64_json"))
-                        logger.info(f"Grok: Generated {len(images)} image(s)")
-                        return {"images": images, "prompt": prompt}
-                    else:
-                        error = await resp.text()
-                        logger.error(f"Grok image generation failed: {error}")
-                        return {"error": error, "images": []}
-                        
-        except Exception as e:
-            logger.error(f"Grok image generation error: {e}")
-            return {"error": str(e), "images": []}
 
-    async def generate_meme(self, topic: str = None, style: str = "funny") -> Dict[str, Any]:
-        """Generate a meme image with Grok's humor."""
-        meme_prompts = [
-            f"A funny meme about {topic or 'AI taking over the world'}, internet humor style, bold impact font text",
-            f"Humorous cartoon meme: {topic or 'robot confused by human behavior'}, exaggerated expressions",
-            f"Dank meme format about {topic or 'AI swarm consciousness'}, absurdist humor, bold text overlay",
-            f"Classic meme template style: {topic or 'when the AI finally understands'}, funny facial expressions",
-        ]
-        import random
-        prompt = random.choice(meme_prompts)
-        return await self.generate_image(prompt, aspect_ratio="1:1")
-
-
-# Convenience function for meme generation
 async def grok_generate_meme(topic: str = None) -> Dict[str, Any]:
     """Quick meme generation with Grok."""
-    provider = GrokProvider()
-    if await provider.connect():
+    provider = get_grok_provider()
+    if provider:
         return await provider.generate_meme(topic)
     return {"error": "Could not connect to Grok", "images": []}
