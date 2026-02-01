@@ -103,6 +103,7 @@ class AgentSpawner:
             # External API agents
             "Grok": [TaskType.CHAT, TaskType.RESEARCH, TaskType.DEVELOPMENT],  # X/Twitter AI - good for research + some dev
             "Gemini": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH, TaskType.MCP],  # Google AI - full dev capability
+            "HuggingFace": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH],  # Open-source local models (Mistral, Llama, etc)
 
             # Claude variants - the auditors
             "Claude": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.MCP, TaskType.RESEARCH, TaskType.AUDIT, TaskType.TESTING],
@@ -115,13 +116,14 @@ class AgentSpawner:
         # Fallback chains - who to try when original agent fails
         # Format: agent -> [fallback1, fallback2, ...final_auditor]
         self.fallback_chains = {
-            "Grok": ["Gemini", "DeepSeek", "ClaudeOpus"],
-            "Gemini": ["DeepSeek", "Grok", "ClaudeOpus"],
-            "DeepSeek": ["Gemini", "Phi", "ClaudeOpus"],
-            "Phi": ["DeepSeek", "Gemini", "ClaudeOpus"],
-            "OpenCode": ["Gemini", "DeepSeek", "ClaudeOpus"],
-            "Kimi": ["Farnsworth", "Claude", "ClaudeOpus"],
-            "Farnsworth": ["Kimi", "Claude", "ClaudeOpus"],
+            "Grok": ["Gemini", "HuggingFace", "DeepSeek", "ClaudeOpus"],
+            "Gemini": ["HuggingFace", "DeepSeek", "Grok", "ClaudeOpus"],
+            "DeepSeek": ["HuggingFace", "Gemini", "Phi", "ClaudeOpus"],
+            "Phi": ["HuggingFace", "DeepSeek", "Gemini", "ClaudeOpus"],
+            "OpenCode": ["HuggingFace", "Gemini", "DeepSeek", "ClaudeOpus"],
+            "Kimi": ["HuggingFace", "Farnsworth", "Claude", "ClaudeOpus"],
+            "Farnsworth": ["HuggingFace", "Kimi", "Claude", "ClaudeOpus"],
+            "HuggingFace": ["DeepSeek", "Gemini", "ClaudeOpus"],  # HuggingFace fallbacks
             "Claude": ["Gemini", "DeepSeek", "ClaudeOpus"],
             "ClaudeOpus": [],  # Opus is the final stop - it must handle or fail
         }
