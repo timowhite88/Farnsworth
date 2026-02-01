@@ -432,6 +432,11 @@ class EvolutionEngine:
 evolution_engine = EvolutionEngine()
 
 
+def get_evolution_engine() -> EvolutionEngine:
+    """Get the global evolution engine instance."""
+    return evolution_engine
+
+
 # =============================================================================
 # SWARM SELF-AWARENESS - EACH BOT KNOWS WHO THEY ARE
 # =============================================================================

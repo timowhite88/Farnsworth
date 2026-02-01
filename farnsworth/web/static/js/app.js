@@ -614,6 +614,15 @@ async function processServerAudioQueue() {
     }
 }
 
+// =============================================================================
+// MULTI-VOICE SEQUENTIAL PLAYBACK
+// Each swarm bot has their own unique cloned voice via Fish Speech / XTTS
+// Bots speak one at a time - next waits for previous to finish
+// =============================================================================
+
+// Track which bot is currently speaking
+let currentSpeakingBot = null;
+
 // Sequential audio playback - bots wait for each other
 async function speakText(text, botName = 'Farnsworth') {
     if (!state.voiceEnabled) return Promise.resolve();
@@ -623,14 +632,18 @@ async function speakText(text, botName = 'Farnsworth') {
         .replace(/\*\*/g, '')
         .replace(/\*/g, '')
         .replace(/`/g, '')
+        .replace(/#{1,6}\s*/g, '')  // Remove markdown headers
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // Remove links
+        .replace(/[═─│┌┐└┘├┤┬┴┼]/g, '')  // Remove box chars
         .replace(/\n/g, ' ')
-        .slice(0, 500);
+        .slice(0, 800);
 
     if (!cleanText.trim()) return Promise.resolve();
 
     // Add to queue and process
     return new Promise((resolve) => {
         audioQueue.push({ text: cleanText, botName, resolve });
+        console.log(`[Voice] Queued ${botName}: "${cleanText.slice(0, 40)}..."`);
         processAudioQueue();
     });
 }
@@ -640,6 +653,12 @@ async function processAudioQueue() {
 
     isPlayingAudio = true;
     const { text, botName, resolve } = audioQueue.shift();
+
+    currentSpeakingBot = botName;
+    console.log(`[Voice] ${botName} speaking (${audioQueue.length} in queue)`);
+
+    // Update UI to show who's speaking
+    updateSpeakingIndicator(botName, true);
 
     // Stop any current audio
     if (currentAudio) {
@@ -653,7 +672,69 @@ async function processAudioQueue() {
     }
 
     try {
-        // Try XTTS v2 voice cloning first
+        // Try multi-voice API first (Fish Speech / XTTS with bot-specific voices)
+        const response = await fetch('/api/speak/bot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: text,
+                bot_name: botName
+            })
+        });
+
+        if (response.ok) {
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            currentAudio = new Audio(audioUrl);
+
+            currentAudio.onended = () => {
+                URL.revokeObjectURL(audioUrl);
+                currentAudio = null;
+                isPlayingAudio = false;
+                currentSpeakingBot = null;
+
+                // Update UI
+                updateSpeakingIndicator(botName, false);
+
+                // Signal server that audio finished
+                if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
+                    state.swarmWs.send(JSON.stringify({
+                        type: 'audio_complete',
+                        bot_name: botName
+                    }));
+                }
+
+                // Also notify via REST for queue management
+                fetch('/api/voices/queue/complete?bot_name=' + encodeURIComponent(botName), {
+                    method: 'POST'
+                }).catch(() => {});
+
+                console.log(`[Voice] ${botName} finished speaking`);
+                resolve();
+                // Process next in queue
+                processAudioQueue();
+            };
+
+            currentAudio.onerror = (e) => {
+                console.warn(`[Voice] Audio error for ${botName}:`, e);
+                isPlayingAudio = false;
+                currentSpeakingBot = null;
+                updateSpeakingIndicator(botName, false);
+                resolve();
+                processAudioQueue();
+            };
+
+            await currentAudio.play();
+            return;
+        } else {
+            console.warn(`[Voice] Multi-voice API failed (${response.status}), trying fallback`);
+        }
+    } catch (error) {
+        console.warn('[Voice] Multi-voice error, falling back:', error);
+    }
+
+    // Fallback to old single-voice API
+    try {
         const response = await fetch('/api/speak', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -669,22 +750,16 @@ async function processAudioQueue() {
                 URL.revokeObjectURL(audioUrl);
                 currentAudio = null;
                 isPlayingAudio = false;
-
-                // Signal server that audio finished
-                if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
-                    state.swarmWs.send(JSON.stringify({
-                        type: 'audio_complete',
-                        bot_name: botName
-                    }));
-                }
-
+                currentSpeakingBot = null;
+                updateSpeakingIndicator(botName, false);
                 resolve();
-                // Process next in queue
                 processAudioQueue();
             };
 
             currentAudio.onerror = () => {
                 isPlayingAudio = false;
+                currentSpeakingBot = null;
+                updateSpeakingIndicator(botName, false);
                 resolve();
                 processAudioQueue();
             };
@@ -693,16 +768,18 @@ async function processAudioQueue() {
             return;
         }
     } catch (error) {
-        console.warn('XTTS TTS error, falling back to browser:', error);
+        console.warn('[Voice] Fallback TTS error:', error);
     }
 
-    // Fallback to browser TTS
+    // Last resort: browser TTS
     if ('speechSynthesis' in window) {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 0.9;
         utterance.pitch = 0.8;
         utterance.onend = () => {
             isPlayingAudio = false;
+            currentSpeakingBot = null;
+            updateSpeakingIndicator(botName, false);
             if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
                 state.swarmWs.send(JSON.stringify({
                     type: 'audio_complete',
@@ -715,9 +792,45 @@ async function processAudioQueue() {
         speechSynthesis.speak(utterance);
     } else {
         isPlayingAudio = false;
+        currentSpeakingBot = null;
+        updateSpeakingIndicator(botName, false);
         resolve();
         processAudioQueue();
     }
+}
+
+// Update UI to show which bot is speaking
+function updateSpeakingIndicator(botName, isSpeaking) {
+    // Find bot messages and add/remove speaking indicator
+    const messages = document.querySelectorAll('.message.swarm-bot');
+    messages.forEach(msg => {
+        const nameEl = msg.querySelector('.bot-name');
+        if (nameEl && nameEl.textContent.includes(botName)) {
+            if (isSpeaking) {
+                msg.classList.add('speaking');
+                // Add speaking animation
+                if (!nameEl.querySelector('.speaking-indicator')) {
+                    const indicator = document.createElement('span');
+                    indicator.className = 'speaking-indicator';
+                    indicator.innerHTML = ' 🔊';
+                    nameEl.appendChild(indicator);
+                }
+            } else {
+                msg.classList.remove('speaking');
+                const indicator = nameEl.querySelector('.speaking-indicator');
+                if (indicator) indicator.remove();
+            }
+        }
+    });
+}
+
+// Get info about currently speaking bot
+function getCurrentSpeaker() {
+    return {
+        botName: currentSpeakingBot,
+        isSpeaking: isPlayingAudio,
+        queueLength: audioQueue.length
+    };
 }
 
 // ============================================

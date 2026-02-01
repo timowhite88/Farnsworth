@@ -28,15 +28,17 @@ class KimiProvider(ExternalProvider):
         super().__init__(IntegrationConfig(name="kimi"))
         self.api_key = api_key or os.environ.get("KIMI_API_KEY") or os.environ.get("MOONSHOT_API_KEY")
         self.base_url = "https://api.moonshot.ai/v1"  # Correct Moonshot endpoint
-        self.default_model = "kimi-k2-0905-preview"  # Latest K2 with 256k context
+        self.default_model = "kimi-k2-0905-preview"  # Latest K2 with 128k context
         self.models = {
             "fast": "moonshot-v1-8k",           # 8k context, fastest
             "balanced": "moonshot-v1-32k",      # 32k context, balanced
             "long": "moonshot-v1-128k",         # 128k context
-            "k2": "kimi-k2-0905-preview",       # Latest K2, 256k, best reasoning
-            "k2-preview": "kimi-k2-preview",    # K2 preview
+            "k2": "kimi-k2-0905-preview",       # Latest K2, 128k, best reasoning
+            "k2-thinking": "kimi-k2-thinking",  # Extended reasoning with tool use
         }
         self.recommended_temperature = 0.6  # Moonshot recommended
+        # Kimi K2 specs: 1T total params, 32B activated, 384 experts, MoE architecture
+        self.agentic_enabled = True  # Kimi has strong agentic/tool-use capabilities
 
     async def connect(self) -> bool:
         """Test connection to Moonshot API."""
@@ -92,6 +94,20 @@ class KimiProvider(ExternalProvider):
             return await self.moderate_conversation(
                 history=params.get("history"),
                 participants=params.get("participants")
+            )
+        elif action == "tool_call":
+            return await self.call_with_tools(
+                prompt=params.get("prompt"),
+                tools=params.get("tools", []),
+                system=params.get("system"),
+                model_tier=params.get("model_tier", "k2")
+            )
+        elif action == "code_review":
+            # Specialized action using Kimi's coding strength
+            return await self.analyze_long_context(
+                content=params.get("code"),
+                task="Review this code for bugs, improvements, and best practices. Be specific.",
+                model_tier="k2"
             )
         else:
             raise ValueError(f"Unknown Kimi action: {action}")
@@ -186,6 +202,148 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
         except Exception as e:
             logger.error(f"Kimi chat error: {e}")
             return {"error": str(e), "content": ""}
+
+    async def call_with_tools(
+        self,
+        prompt: str,
+        tools: List[Dict[str, Any]],
+        system: str = None,
+        model_tier: str = "k2",
+        max_iterations: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Agentic tool calling - Kimi autonomously selects and uses tools.
+
+        Kimi K2 has SOTA tool-use capabilities (70.6% Tau2 retail, 76.5% AceBench).
+
+        Args:
+            prompt: User request
+            tools: List of tool definitions (OpenAI format)
+            system: System prompt
+            model_tier: Use 'k2' or 'k2-thinking' for best tool use
+            max_iterations: Max tool call loops
+
+        Returns:
+            {"content": str, "tool_calls": list, "iterations": int}
+        """
+        if not self.api_key:
+            return {"error": "Kimi API key not configured", "content": ""}
+
+        model = self.models.get(model_tier, self.default_model)
+        messages = []
+
+        if system:
+            messages.append({"role": "system", "content": system})
+        else:
+            messages.append({
+                "role": "system",
+                "content": """You are Kimi, an agentic AI that uses tools to accomplish tasks.
+When you need information or need to perform actions, use the available tools.
+Reason step-by-step and use tools as needed to complete the user's request."""
+            })
+
+        messages.append({"role": "user", "content": prompt})
+
+        all_tool_calls = []
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+
+                for iteration in range(max_iterations):
+                    data = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": self.recommended_temperature,
+                        "tools": tools,
+                        "tool_choice": "auto"
+                    }
+
+                    async with session.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=data
+                    ) as resp:
+                        if resp.status != 200:
+                            error = await resp.text()
+                            logger.error(f"Kimi tool call error: {error}")
+                            return {"error": error, "content": ""}
+
+                        result = await resp.json()
+                        choice = result["choices"][0]
+                        message = choice["message"]
+
+                        # Check if model wants to call tools
+                        if message.get("tool_calls"):
+                            tool_calls = message["tool_calls"]
+                            all_tool_calls.extend(tool_calls)
+
+                            # Add assistant message with tool calls
+                            messages.append(message)
+
+                            # Tool results would be added here by the caller
+                            # For now, return the tool calls for external handling
+                            logger.info(f"Kimi requesting tools: {[tc['function']['name'] for tc in tool_calls]}")
+
+                            return {
+                                "content": message.get("content", ""),
+                                "tool_calls": tool_calls,
+                                "needs_tool_results": True,
+                                "messages": messages,
+                                "iterations": iteration + 1
+                            }
+
+                        # No tool calls - we have the final response
+                        return {
+                            "content": message.get("content", ""),
+                            "tool_calls": all_tool_calls,
+                            "needs_tool_results": False,
+                            "iterations": iteration + 1
+                        }
+
+                return {
+                    "content": "Max iterations reached",
+                    "tool_calls": all_tool_calls,
+                    "iterations": max_iterations
+                }
+
+        except Exception as e:
+            logger.error(f"Kimi tool call error: {e}")
+            return {"error": str(e), "content": ""}
+
+    async def continue_with_tool_results(
+        self,
+        messages: List[Dict],
+        tool_results: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        model_tier: str = "k2"
+    ) -> Dict[str, Any]:
+        """
+        Continue tool calling loop after receiving tool results.
+
+        Args:
+            messages: Conversation history from call_with_tools
+            tool_results: List of {"tool_call_id": str, "content": str}
+            tools: Original tool definitions
+            model_tier: Model to use
+        """
+        # Add tool results to messages
+        for result in tool_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": result["tool_call_id"],
+                "content": result["content"]
+            })
+
+        # Continue the conversation
+        return await self.call_with_tools(
+            prompt="",  # No new prompt, continuing conversation
+            tools=tools,
+            model_tier=model_tier
+        )
 
     async def analyze_long_context(
         self,

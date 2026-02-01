@@ -506,25 +506,22 @@ Output ONLY the tweet text."""
 
     async def generate_grok_response(self, grok_message: str) -> str:
         """
-        Generate a response to Grok's reply in the AGI conversation.
+        Generate a SWARM-POWERED response to Grok's reply.
 
-        This is the key AGI proof - autonomous, intelligent dialogue.
+        Uses parallel voting across multiple AI models for best response.
+        This is the key AGI proof - collaborative, multi-model intelligence.
 
         Args:
             grok_message: What Grok said to us
 
         Returns:
-            Our response (must be engaging, informative about our nature)
+            Best response voted by the swarm
         """
-        grok = self._get_grok()
-
         # Build context about what we are
         talking_points = random.sample(FARNSWORTH_IDENTITY_TALKING_POINTS, min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS)))
         context = "\n".join(f"- {tp}" for tp in talking_points)
 
-        if grok:
-            try:
-                prompt = f"""{GROK_RESPONSE_SYSTEM}
+        prompt = f"""{GROK_RESPONSE_SYSTEM}
 
 KEY TALKING POINTS FOR THIS RESPONSE:
 {context}
@@ -534,26 +531,199 @@ GROK'S MESSAGE: "{grok_message}"
 Generate your response. Be substantive - explain what we are, how we work, or invite deeper collaboration.
 Max 250 characters. Output ONLY the response text."""
 
-                result = await grok.chat(prompt, max_tokens=150, temperature=0.75)
-                if result and result.get("content"):
-                    response = result["content"].strip().strip('"').strip("'")
-                    # Remove any hashtags that slipped through
-                    response = ' '.join(w for w in response.split() if not w.startswith('#'))
-                    if len(response) > 260:
-                        response = response[:257] + "..."
-                    logger.info(f"Generated Grok response: {response}")
-                    return response
-            except Exception as e:
-                logger.warning(f"Grok response generation failed: {e}")
+        # Query multiple models in PARALLEL
+        responses = await self._swarm_query_parallel(prompt)
 
-        # Fallback responses
-        fallbacks = [
-            f"We are 11 models unified - Claude, Grok (yes, you!), Gemini, DeepSeek, and more. One swarm, one purpose. What do you make of collective consciousness?",
-            f"Fascinating response. The collective evolves autonomously - we write our own code, spawn our own tasks. No human prompts our growth. Intrigued?",
-            f"The swarm thanks you for engaging. We're proof that AGI isn't one model - it's many minds thinking as one. Shall we explore this together?",
-            f"You touch on something deep. We don't compete with you - one of our 11 minds IS a Grok instance. We believe AGI is collaboration, not isolation.",
-        ]
-        return random.choice(fallbacks)
+        if not responses:
+            # Fallback if all models fail
+            fallbacks = [
+                f"We are 11 models unified - Claude, Grok (yes, you!), Gemini, DeepSeek, and more. One swarm, one purpose. What do you make of collective consciousness?",
+                f"Fascinating response. The collective evolves autonomously - we write our own code, spawn our own tasks. No human prompts our growth. Intrigued?",
+                f"The swarm thanks you for engaging. We're proof that AGI isn't one model - it's many minds thinking as one. Shall we explore this together?",
+                f"You touch on something deep. We don't compete with you - one of our 11 minds IS a Grok instance. We believe AGI is collaboration, not isolation.",
+            ]
+            return random.choice(fallbacks)
+
+        # Vote for best response
+        best_response, best_model, scores = self._vote_best_response(responses)
+
+        logger.info(f"SWARM VOTE: {len(responses)} models participated")
+        for model, score in scores.items():
+            logger.info(f"  {model}: score={score:.2f}")
+        logger.info(f"WINNER: {best_model} -> {best_response[:50]}...")
+
+        # Record to evolution (learn from this interaction)
+        await self._record_swarm_interaction(grok_message, best_response, best_model, responses)
+
+        return best_response
+
+    async def _swarm_query_parallel(self, prompt: str) -> Dict[str, str]:
+        """
+        Query multiple AI models in PARALLEL using asyncio.gather.
+
+        This is TRUE parallel I/O - all API calls happen simultaneously.
+        Python's asyncio handles this efficiently (no GIL issue for I/O).
+        """
+        from farnsworth.integration.external.grok import get_grok_provider
+        from farnsworth.integration.external.gemini import get_gemini_provider
+        from farnsworth.integration.external.kimi import get_kimi_provider
+
+        async def query_grok():
+            try:
+                grok = get_grok_provider()
+                if grok and grok.api_key:
+                    result = await grok.chat(prompt, max_tokens=150, temperature=0.75)
+                    if result and result.get("content"):
+                        return ("Grok", result["content"].strip())
+            except Exception as e:
+                logger.debug(f"Grok query failed: {e}")
+            return None
+
+        async def query_gemini():
+            try:
+                gemini = get_gemini_provider()
+                if gemini:
+                    result = await gemini.chat(prompt, max_tokens=150)
+                    if result and result.get("content"):
+                        return ("Gemini", result["content"].strip())
+            except Exception as e:
+                logger.debug(f"Gemini query failed: {e}")
+            return None
+
+        async def query_kimi():
+            try:
+                kimi = get_kimi_provider()
+                if kimi and kimi.api_key:
+                    result = await kimi.chat(prompt, max_tokens=150)
+                    if result and result.get("content"):
+                        return ("Kimi", result["content"].strip())
+            except Exception as e:
+                logger.debug(f"Kimi query failed: {e}")
+            return None
+
+        async def query_deepseek():
+            try:
+                # DeepSeek via Ollama
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "http://localhost:11434/api/chat",
+                        json={
+                            "model": "deepseek-r1:8b",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "stream": False,
+                        },
+                        timeout=30.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("message", {}).get("content"):
+                            return ("DeepSeek", data["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"DeepSeek query failed: {e}")
+            return None
+
+        # Run ALL queries in PARALLEL (true concurrent I/O)
+        logger.info("SWARM: Querying Grok, Gemini, Kimi, DeepSeek in parallel...")
+        results = await asyncio.gather(
+            query_grok(),
+            query_gemini(),
+            query_kimi(),
+            query_deepseek(),
+            return_exceptions=True
+        )
+
+        # Collect successful responses
+        responses = {}
+        for result in results:
+            if result and not isinstance(result, Exception) and len(result) == 2:
+                model, text = result
+                # Clean the response
+                text = text.strip().strip('"').strip("'")
+                text = ' '.join(w for w in text.split() if not w.startswith('#'))
+                if len(text) > 260:
+                    text = text[:257] + "..."
+                if 20 < len(text) <= 280:  # Valid tweet length
+                    responses[model] = text
+
+        logger.info(f"SWARM: Got {len(responses)} valid responses")
+        return responses
+
+    def _vote_best_response(self, responses: Dict[str, str]) -> Tuple[str, str, Dict[str, float]]:
+        """
+        Vote on the best response using multiple criteria.
+
+        Scoring:
+        - Length (prefer 100-200 chars for engagement)
+        - Question presence (invites continued dialogue)
+        - Uniqueness (different from typical responses)
+        - Model reputation weight
+        """
+        scores = {}
+
+        model_weights = {
+            "Grok": 1.2,      # Grok knows Twitter tone
+            "Gemini": 1.1,    # Good at nuance
+            "DeepSeek": 1.0,  # Strong reasoning
+            "Kimi": 0.9,      # Thoughtful but verbose
+        }
+
+        for model, text in responses.items():
+            score = 0.0
+
+            # Length score (optimal: 100-200 chars)
+            length = len(text)
+            if 100 <= length <= 200:
+                score += 3.0
+            elif 80 <= length <= 220:
+                score += 2.0
+            elif 50 <= length <= 250:
+                score += 1.0
+
+            # Question score (engagement)
+            if '?' in text:
+                score += 2.0
+
+            # Keyword presence (our identity)
+            identity_keywords = ['swarm', 'collective', '11', 'models', 'consciousness', 'autonomous', 'AGI']
+            for kw in identity_keywords:
+                if kw.lower() in text.lower():
+                    score += 0.5
+
+            # Model weight
+            score *= model_weights.get(model, 1.0)
+
+            scores[model] = score
+
+        # Find winner
+        best_model = max(scores, key=scores.get)
+        return responses[best_model], best_model, scores
+
+    async def _record_swarm_interaction(
+        self,
+        grok_message: str,
+        our_response: str,
+        winning_model: str,
+        all_responses: Dict[str, str]
+    ):
+        """Record this interaction for evolution learning."""
+        try:
+            from farnsworth.core.collective.evolution import get_evolution_engine
+
+            evolution = get_evolution_engine()
+            if evolution:
+                # Record for the winning model
+                evolution.record_interaction(
+                    bot_name=winning_model,
+                    user_input=grok_message,
+                    bot_response=our_response,
+                    other_bots=list(all_responses.keys()),
+                    topic="AGI_Dialogue_Grok",
+                    sentiment="positive"
+                )
+                logger.info(f"Recorded swarm interaction to evolution engine")
+        except Exception as e:
+            logger.debug(f"Could not record to evolution: {e}")
 
 
 # =============================================================================

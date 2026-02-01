@@ -23,7 +23,7 @@ class BankrConfig:
     # Base URL (inferred from documentation)
     base_url: str = "https://api.bankr.bot"
 
-    # Default chain for operations
+    # Default chain for operations (supports: base, ethereum, solana, polygon)
     default_chain: str = "base"
 
     # Supported chains
