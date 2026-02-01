@@ -363,6 +363,15 @@ except ImportError:
     gemini_swarm_respond = None
     GEMINI_AVAILABLE = False
 
+# HuggingFace integration (local + API)
+try:
+    from farnsworth.integration.external.huggingface import get_huggingface_provider, HuggingFaceProvider
+    HUGGINGFACE_AVAILABLE = True
+except ImportError:
+    get_huggingface_provider = None
+    HuggingFaceProvider = None
+    HUGGINGFACE_AVAILABLE = False
+
 # Token Scanner for detecting CAs in chat and providing token analysis
 try:
     from farnsworth.integration.financial.token_scanner import token_scanner, scan_message_for_token
