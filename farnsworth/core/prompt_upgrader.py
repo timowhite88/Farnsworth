@@ -156,20 +156,26 @@ class PromptUpgrader:
             return None
 
         try:
+            logger.info(f"Calling Grok to upgrade prompt...")
             response = await grok.chat(
-                message=f"Upgrade this prompt:\n\n{prompt}",
-                system_prompt=UPGRADER_SYSTEM_PROMPT,
+                prompt=f"Upgrade this prompt:\n\n{prompt}",
+                system=UPGRADER_SYSTEM_PROMPT,
                 max_tokens=300
             )
+            logger.info(f"Grok response: {response}")
 
             if response and response.get("content"):
                 upgraded = response["content"].strip()
                 # Sanity check - don't return if it's way longer or seems wrong
                 if len(upgraded) < len(prompt) * 5 and len(upgraded) > 0:
                     return upgraded
+                else:
+                    logger.warning(f"Grok response too long or empty, skipping")
 
         except Exception as e:
-            logger.debug(f"Grok upgrade failed: {e}")
+            logger.warning(f"Grok upgrade failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         return None
 
@@ -180,16 +186,20 @@ class PromptUpgrader:
             return None
 
         try:
+            logger.info(f"Calling Gemini to upgrade prompt...")
             response = await gemini.chat(
-                message=f"Upgrade this prompt:\n\n{prompt}",
-                system_prompt=UPGRADER_SYSTEM_PROMPT,
+                prompt=f"Upgrade this prompt:\n\n{prompt}",
+                system=UPGRADER_SYSTEM_PROMPT,
                 max_tokens=300
             )
+            logger.info(f"Gemini response: {response}")
 
             if response and response.get("content"):
                 upgraded = response["content"].strip()
                 if len(upgraded) < len(prompt) * 5 and len(upgraded) > 0:
                     return upgraded
+                else:
+                    logger.warning(f"Gemini response too long or empty, skipping")
 
         except Exception as e:
             logger.debug(f"Gemini upgrade failed: {e}")
