@@ -275,13 +275,18 @@ class HuggingFaceProvider(ExternalProvider):
             logger.error(f"Local inference error: {e}")
             return {"error": str(e), "content": None}
 
-    async def connect(self) -> ConnectionStatus:
-        """Test connection to Hugging Face API."""
+    async def connect(self) -> bool:
+        """Test connection to Hugging Face API or local transformers."""
+        # If we have local transformers, we're "connected" even without API
+        if self._transformers_available:
+            self.status = ConnectionStatus.CONNECTED
+            logger.info("HuggingFace: Local transformers available")
+            return True
+
         if not self.api_key:
-            return ConnectionStatus(
-                connected=False,
-                error="No HF_API_KEY set"
-            )
+            logger.warning("HuggingFace: No API key and no local transformers")
+            self.status = ConnectionStatus.ERROR
+            return False
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -292,18 +297,26 @@ class HuggingFaceProvider(ExternalProvider):
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return ConnectionStatus(
-                            connected=True,
-                            latency_ms=0,
-                            message=f"Connected as {data.get('name', 'unknown')}"
-                        )
+                        self.status = ConnectionStatus.CONNECTED
+                        logger.info(f"HuggingFace: Connected as {data.get('name', 'unknown')}")
+                        return True
                     else:
-                        return ConnectionStatus(
-                            connected=False,
-                            error=f"API error: {response.status}"
-                        )
+                        self.status = ConnectionStatus.ERROR
+                        logger.error(f"HuggingFace: API error {response.status}")
+                        return False
         except Exception as e:
-            return ConnectionStatus(connected=False, error=str(e))
+            self.status = ConnectionStatus.ERROR
+            logger.error(f"HuggingFace: Connection error - {e}")
+            return False
+
+    async def sync(self):
+        """Sync with HuggingFace - no-op for this provider."""
+        # HuggingFace doesn't need polling - it's request/response
+        pass
+
+    async def execute_action(self, action: str, params: Dict[str, Any] = None) -> Any:
+        """Execute a HuggingFace action (implements abstract method)."""
+        return await self.execute(action, params)
 
     async def execute(self, action: str, params: Dict[str, Any] = None) -> Any:
         """Execute a Hugging Face action."""
