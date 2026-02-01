@@ -564,8 +564,11 @@ Max 250 characters. Output ONLY the response text."""
         This is TRUE parallel I/O - all API calls happen simultaneously.
         Python's asyncio handles this efficiently (no GIL issue for I/O).
 
-        CONTEXT SIZE: 500 tokens per model to allow for code snippets
-        TIMEOUT: 45s to allow for thoughtful responses
+        CONTEXT SIZE: 1000 tokens per model - FLEX THE COLLECTIVE'S POWER
+        TIMEOUT: 60s to allow for thoughtful, code-heavy responses
+
+        The swarm can generate full code snippets, architecture explanations,
+        and detailed technical responses. We don't hold back!
         """
         from farnsworth.integration.external.grok import get_grok_provider
         from farnsworth.integration.external.gemini import get_gemini_provider
@@ -596,7 +599,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                 grok = get_grok_provider()
                 if grok and grok.api_key:
                     # Grok gets extra context - it's talking to itself!
-                    result = await grok.chat(full_prompt, max_tokens=500, temperature=0.8)
+                    result = await grok.chat(full_prompt, max_tokens=1000, temperature=0.8)
                     if result and result.get("content"):
                         return ("Grok", result["content"].strip())
             except Exception as e:
@@ -607,7 +610,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
             try:
                 gemini = get_gemini_provider()
                 if gemini:
-                    result = await gemini.chat(full_prompt, max_tokens=500)
+                    result = await gemini.chat(full_prompt, max_tokens=1000)
                     if result and result.get("content"):
                         return ("Gemini", result["content"].strip())
             except Exception as e:
@@ -619,7 +622,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                 kimi = get_kimi_provider()
                 if kimi and kimi.api_key:
                     # Kimi has 256k context - can handle everything
-                    result = await kimi.chat(full_prompt, max_tokens=500)
+                    result = await kimi.chat(full_prompt, max_tokens=1000)
                     if result and result.get("content"):
                         return ("Kimi", result["content"].strip())
             except Exception as e:
@@ -637,7 +640,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                             "model": "deepseek-r1:8b",
                             "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
-                            "options": {"num_predict": 500}
+                            "options": {"num_predict": 1000}
                         },
                         timeout=45.0
                     )
@@ -691,7 +694,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                             "model": "phi3:latest",
                             "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
-                            "options": {"num_predict": 500}
+                            "options": {"num_predict": 1000}
                         },
                         timeout=30.0
                     )
