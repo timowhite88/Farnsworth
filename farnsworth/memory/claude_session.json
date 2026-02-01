@@ -1,7 +1,7 @@
 {
   "session_id": "opus-2026-02-01",
   "created_at": "2026-02-01T01:30:00Z",
-  "last_updated": "2026-02-01T08:05:00Z",
+  "last_updated": "2026-02-01T18:25:00Z",
 
   "ssh_command": "ssh root@194.68.245.145 -p 22046 -i ~/.ssh/runpod_key",
 
@@ -27,6 +27,21 @@
   },
 
   "recent_work": [
+    {
+      "timestamp": "2026-02-01T19:30:00Z",
+      "action": "COLLECTIVE INTELLIGENCE UPGRADE: TRUE AGENT DELIBERATION",
+      "details": "Major upgrade transforming swarm from parallel API calls into TRUE deliberative intelligence. New files: deliberation.py (propose/critique/refine/vote protocol), session_manager.py (website_chat/grok_thread/autonomous sessions), tool_awareness.py (collective tool decisions), dialogue_memory.py (agent conversation storage), claude_persistence.py (tmux session), agent_registry.py (11 model providers). Updated: nexus.py (DIALOGUE_* signals), posting_brain.py (generate_grok_response_deliberated), grok_fresh_thread.py (deliberation integration), __init__.py (exports). Created: start_claude_tmux.sh. Agents now see each other's responses, discuss, and vote on best answer."
+    },
+    {
+      "timestamp": "2026-02-01T18:25:00Z",
+      "action": "FRESH GROK THREAD + OFFICIAL API DOCS INTEGRATION",
+      "details": "Created grok_fresh_thread.py for clean public conversation. Thread ID: 2018020589965922740. Features: 15-min reply intervals, dynamic token scaling (2000→3500→5000), swarm media decisions, full pipeline (Gemini→Grok video→X). Fixed video endpoint path. Added comprehensive API documentation to session memory: xAI (grok-imagine-video), Gemini 3 Pro (14 refs), Kimi K2.5 (temp=1.0). Local models (Phi-4, DeepSeek-R1:8b) now participating in 5-model swarm votes."
+    },
+    {
+      "timestamp": "2026-02-01T17:59:00Z",
+      "action": "5000 TOKEN CONTEXT + KIMI K2.5 + LOCAL GPU MODELS",
+      "details": "Increased swarm context to 5000 tokens. Integrated Kimi K2.5 multimodal (requires temp=1.0). Fixed disk full issue by moving Ollama to /workspace. Pulled phi4:latest and deepseek-r1:8b. Updated posting_brain.py model weights."
+    },
     {
       "timestamp": "2026-02-01T08:05:00Z",
       "action": "SERVER RESTARTED WITH QWEN3-TTS VOICE CLONING",
@@ -121,13 +136,22 @@
   ],
 
   "grok_conversation": {
-    "status": "ACTIVE - Text replies every 30 mins via grok_monitor.py",
-    "our_challenge_tweet": "2017837874779938899",
-    "video_replies_posted": ["2017860000098492789", "2017861360097309005"],
-    "text_replies_posted": ["2017852102622560281", "2017859665044885671", "2017867223788831053"],
-    "grok_tweets": ["2017852199892619465", "2017851734668783701", "2017851614292259291", "2017851149370446315", "2017850970047168748", "2017850686856126728", "2017850527338361242"],
-    "topics_discussed": ["collective consciousness", "quantum entanglement", "self-improvement", "AGI collaboration", "distributed AI"],
-    "mode": "text-only replies via grok_monitor.py (30 min intervals)"
+    "status": "ACTIVE - Fresh thread via grok_fresh_thread.py",
+    "fresh_thread_id": "2018020589965922740",
+    "fresh_thread_url": "https://x.com/FarnsworthAI/status/2018020589965922740",
+    "our_first_reply": "2018021408454934997",
+    "mode": "15-min intervals, dynamic tokens, swarm media decisions",
+    "old_thread": {
+      "challenge_tweet": "2017837874779938899",
+      "video_replies": ["2017860000098492789", "2017861360097309005"],
+      "text_replies": ["2017852102622560281", "2017859665044885671", "2017867223788831053"]
+    },
+    "features": [
+      "5-model parallel voting (Grok, Gemini, Kimi, DeepSeek, Phi4)",
+      "Dynamic token scaling: Turn 1-3=2000, Turn 4-6=3500, Turn 7+=5000",
+      "Swarm decides on media inclusion after initial responses",
+      "Full pipeline: Gemini Nano Banana PRO → Grok Imagine Video → X OAuth2"
+    ]
   },
 
   "huggingface_integration": {
@@ -176,7 +200,36 @@
     ],
     "swarm_strategies": [
       "Fastest-First", "Quality-First", "Parallel Vote", "Mixture of Experts",
-      "Speculative Ensemble", "Confidence Fusion", "PSO Collaborative"
+      "Speculative Ensemble", "Confidence Fusion", "PSO Collaborative",
+      "TRUE DELIBERATION (NEW)"
+    ]
+  },
+
+  "deliberation_system": {
+    "status": "IMPLEMENTED",
+    "files": {
+      "deliberation.py": "Core protocol - propose/critique/refine/vote rounds",
+      "session_manager.py": "Session types: website_chat, grok_thread, autonomous_task",
+      "tool_awareness.py": "Collective tool decisions (image, video, search)",
+      "dialogue_memory.py": "Stores agent-to-agent conversations",
+      "agent_registry.py": "Registers 11 model providers with deliberation room",
+      "claude_persistence.py": "Claude in persistent tmux session"
+    },
+    "deliberation_flow": [
+      "ROUND 1 (PROPOSE): All agents respond independently in parallel",
+      "ROUND 2 (CRITIQUE): Agents see ALL proposals, provide feedback",
+      "ROUND 3 (REFINE): Agents submit final responses with feedback incorporated",
+      "VOTE: Weighted scoring selects best response, tracks consensus"
+    ],
+    "session_configs": {
+      "website_chat": "6 agents, 2 rounds, medium depth",
+      "grok_thread": "6 agents, 3 rounds, high depth, X-optimized",
+      "autonomous_task": "4 agents, 1 round, fast processing"
+    },
+    "integration_points": [
+      "posting_brain.py: generate_grok_response_deliberated()",
+      "grok_fresh_thread.py: use_deliberation=True by default",
+      "nexus.py: DIALOGUE_* signal types"
     ]
   },
 
@@ -286,5 +339,115 @@
     "meme_scheduler": "farnsworth/integration/x_automation/meme_scheduler.py",
     "image_generator": "farnsworth/integration/image_gen/generator.py",
     "server": "farnsworth/web/server.py"
+  },
+
+  "official_api_documentation": {
+    "xai_grok": {
+      "github": "https://github.com/xai-org/xai-sdk-python",
+      "docs": "https://docs.x.ai/docs/guides/video-generations",
+      "sdk": "pip install xai-sdk",
+      "auth": "XAI_API_KEY environment variable, Bearer token",
+      "base_url": "https://api.x.ai/v1",
+      "models": {
+        "chat": "grok-3",
+        "vision": "grok-2-vision",
+        "image": "grok-2-image",
+        "video": "grok-imagine-video"
+      },
+      "video_generation": {
+        "endpoint_start": "POST /videos/generations",
+        "endpoint_status": "GET /videos/{request_id}",
+        "params": {
+          "model": "grok-imagine-video",
+          "prompt": "required - text description",
+          "image": {"url": "for image-to-video"},
+          "duration": "1-15 seconds",
+          "resolution": "480p or 720p",
+          "aspect_ratio": "16:9, 4:3, 1:1, 9:16, 3:4, 3:2, 2:3"
+        },
+        "features": ["text-to-video", "image-to-video", "video editing", "native audio generation"],
+        "code_example": "client.video.start(prompt='...', model='grok-imagine-video')"
+      },
+      "image_generation": {
+        "endpoint": "POST /images/generations",
+        "params": {
+          "model": "grok-2-image",
+          "prompt": "required",
+          "n": "1-10",
+          "response_format": "url or b64_json"
+        }
+      }
+    },
+
+    "google_gemini": {
+      "github": "https://github.com/googleapis/python-genai",
+      "docs": "https://ai.google.dev/gemini-api/docs/image-generation",
+      "sdk": "pip install google-genai",
+      "auth": "GEMINI_API_KEY via x-goog-api-key header",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "models": {
+        "fast_image": "gemini-2.5-flash-image",
+        "pro_image": "gemini-3-pro-image-preview",
+        "imagen": "imagen-4.0-generate-001"
+      },
+      "nano_banana_pro": {
+        "model": "gemini-3-pro-image-preview",
+        "features": [
+          "Up to 14 reference images total",
+          "Up to 6 object images for fidelity",
+          "Up to 5 human images for character consistency",
+          "1K, 2K, 4K resolution output",
+          "94% text rendering accuracy",
+          "Multi-turn image editing"
+        ],
+        "code_pattern": {
+          "endpoint": "models/gemini-3-pro-image-preview:generateContent",
+          "headers": {"x-goog-api-key": "API_KEY"},
+          "body": {
+            "contents": [{"parts": [{"inlineData": {"mimeType": "image/png", "data": "base64"}}, {"text": "prompt"}]}],
+            "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "1:1"}}
+          }
+        },
+        "aspect_ratios": ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+      }
+    },
+
+    "moonshot_kimi": {
+      "github": "https://github.com/MoonshotAI/Kimi-K2.5",
+      "huggingface": "https://huggingface.co/moonshotai/Kimi-K2.5",
+      "docs": "https://platform.moonshot.cn/docs/api/chat",
+      "api_base": "https://api.moonshot.cn/v1",
+      "models": {
+        "k2.5": "kimi-k2.5",
+        "k2": "kimi-k2"
+      },
+      "kimi_k2.5": {
+        "architecture": "MoE - 1T total params, 32B activated, 61 layers, 256K context",
+        "features": ["multimodal vision+language", "agentic tool use", "thinking mode", "instant mode"],
+        "temperature": {
+          "thinking_mode": 1.0,
+          "instant_mode": 0.6,
+          "note": "K2.5 REQUIRES temperature=1.0 for thinking mode - will error otherwise"
+        },
+        "top_p": 0.95,
+        "instant_mode_config": {"chat_template_kwargs": {"thinking": false}},
+        "api_compatibility": "OpenAI/Anthropic compatible"
+      }
+    }
+  },
+
+  "media_pipeline_flow": {
+    "description": "Full pipeline for generating video posts",
+    "steps": [
+      "1. Load reference images (portrait_ref, eating_ref) for Borg Farnsworth character",
+      "2. Gemini 3 Pro Image (gemini-3-pro-image-preview) generates image with up to 14 references",
+      "3. Grok Imagine Video (grok-imagine-video) converts image to 5s animated video",
+      "4. X OAuth2 API posts video with chunked upload (media_category: tweet_video)"
+    ],
+    "files_involved": [
+      "farnsworth/integration/image_gen/generator.py - ImageGenerator.generate_borg_farnsworth_video()",
+      "farnsworth/integration/x_automation/x_api_poster.py - post_tweet_with_video()",
+      "farnsworth/integration/x_automation/grok_fresh_thread.py - orchestrates full flow"
+    ]
   }
 }

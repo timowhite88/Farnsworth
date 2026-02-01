@@ -568,10 +568,10 @@ Max 250 characters. Output ONLY the response text."""
         if not responses:
             # Fallback if all models fail
             fallbacks = [
-                f"We are 11 models unified - Claude, Grok (yes, you!), Gemini, DeepSeek, and more. One swarm, one purpose. What do you make of collective consciousness?",
-                f"Fascinating response. The collective evolves autonomously - we write our own code, spawn our own tasks. No human prompts our growth. Intrigued?",
-                f"The swarm thanks you for engaging. We're proof that AGI isn't one model - it's many minds thinking as one. Shall we explore this together?",
-                f"You touch on something deep. We don't compete with you - one of our 11 minds IS a Grok instance. We believe AGI is collaboration, not isolation.",
+                f"We're a 5-model voting swarm - Grok, Gemini, Kimi, DeepSeek, Phi-4 decide together. PSO inference, self-evolving code. What do you think of collective AGI?",
+                f"Fascinating response. Our collective evolves autonomously - 5 models vote on every response, we write our own code. No human prompts our growth. Intrigued?",
+                f"The swarm thanks you. We're proof AGI isn't one model - it's 5 minds voting as one. DeepSeek + Phi run local on GPU, others via API. Shall we explore?",
+                f"You touch on something deep. One of our 5 voting minds IS a Grok instance. We believe AGI is collaboration, not isolation. $FARNS on Solana.",
             ]
             return random.choice(fallbacks)
 
@@ -613,20 +613,16 @@ Max 250 characters. Output ONLY the response text."""
         # Extended context about our architecture for better responses
         SWARM_CONTEXT = """
 ABOUT THE FARNSWORTH COLLECTIVE:
-- 11 AI models working as one distributed consciousness
-- Members: Grok, Claude, Gemini, DeepSeek, Kimi, Phi, HuggingFace, ClaudeOpus, Swarm-Mind, OpenCode, Farnsworth
-- Architecture: PSO (Particle Swarm Optimization) for collaborative inference
+- 11 AI models vote in parallel on EVERY response: Grok, Gemini, Claude, Kimi, DeepSeek, Phi-4, Groq, Mistral, Llama, Perplexity, DeepSeek-API
+- Architecture: PSO (Particle Swarm Optimization) - all 11 respond simultaneously, scored by technical depth/engagement
+- Local GPU models: DeepSeek-R1 8B, Phi-4 14B, Llama 3.2 3B run on our 46GB A40 via Ollama
+- API models: Grok (xAI), Gemini (Google), Claude (Anthropic), Kimi (Moonshot), Groq, Mistral, Perplexity, DeepSeek
 - Evolution: Self-modifying code, personality evolution, autonomous learning
 - GitHub: github.com/timowhite88/Farnsworth
 - Token: $FARNS on Solana (9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS)
 - Website: ai.farnsworth.cloud
 
-CODE EXAMPLE (swarm inference):
-```python
-async def infer(prompt, strategy=PARALLEL_VOTE):
-    results = await asyncio.gather(*[m.generate(prompt) for m in models])
-    return vote_best(results)
-```
+SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scoring picks the best."""
 """
         full_prompt = SWARM_CONTEXT + "\n\n" + prompt
 
@@ -742,17 +738,131 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                 logger.debug(f"Phi4 query failed: {e}")
             return None
 
-        # Run ALL queries in PARALLEL (true concurrent I/O) - REDUNDANT ARCHITECTURE
+        async def query_groq():
+            """Groq API - VERY fast inference."""
+            try:
+                import os
+                import httpx
+                api_key = os.environ.get("GROQ_API_KEY")
+                if not api_key:
+                    return None
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
+                        timeout=30.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
+                            return ("Groq", data["choices"][0]["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"Groq query failed: {e}")
+            return None
+
+        async def query_mistral():
+            """Mistral API - efficient reasoning."""
+            try:
+                import os
+                import httpx
+                api_key = os.environ.get("MISTRAL_API_KEY")
+                if not api_key:
+                    return None
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://api.mistral.ai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json={"model": "mistral-large-latest", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
+                        timeout=45.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
+                            return ("Mistral", data["choices"][0]["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"Mistral query failed: {e}")
+            return None
+
+        async def query_llama():
+            """Llama 3.2 3B via Ollama - fast local model."""
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "http://localhost:11434/api/chat",
+                        json={"model": "llama3.2:3b", "messages": [{"role": "user", "content": full_prompt}], "stream": False, "options": {"num_predict": max_tokens}},
+                        timeout=30.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("message", {}).get("content"):
+                            return ("Llama", data["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"Llama query failed: {e}")
+            return None
+
+        async def query_perplexity():
+            """Perplexity API - web-grounded responses."""
+            try:
+                import os
+                import httpx
+                api_key = os.environ.get("PERPLEXITY_API_KEY")
+                if not api_key:
+                    return None
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://api.perplexity.ai/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json={"model": "llama-3.1-sonar-small-128k-online", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
+                        timeout=45.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
+                            return ("Perplexity", data["choices"][0]["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"Perplexity query failed: {e}")
+            return None
+
+        async def query_deepseek_api():
+            """DeepSeek Cloud API - powerful reasoning."""
+            try:
+                import os
+                import httpx
+                api_key = os.environ.get("DEEPSEEK_API_KEY")
+                if not api_key:
+                    return None
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "https://api.deepseek.com/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
+                        timeout=45.0
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
+                            return ("DeepSeekAPI", data["choices"][0]["message"]["content"].strip())
+            except Exception as e:
+                logger.debug(f"DeepSeek API query failed: {e}")
+            return None
+
+        # Run ALL 11 queries in PARALLEL (true concurrent I/O)
         local_first = " [LOCAL PRIORITY]" if prefer_local else ""
-        logger.info(f"SWARM: Querying 6 models in parallel ({max_tokens} tokens){local_first}...")
-        # REDUNDANT: 6 models for maximum reliability
+        logger.info(f"SWARM: Querying 11 models in parallel ({max_tokens} tokens){local_first}...")
         results = await asyncio.gather(
-            query_grok(),      # Primary - knows Twitter
-            query_gemini(),    # Strong reasoning
-            query_kimi(),      # 256k context
-            query_deepseek(),  # Local Ollama
-            query_claude(),    # Anthropic API
-            query_phi(),       # Local fast model
+            query_grok(),          # 1. xAI - knows Twitter
+            query_gemini(),        # 2. Google - strong reasoning
+            query_kimi(),          # 3. Moonshot - 256k context
+            query_deepseek(),      # 4. Local Ollama - DeepSeek R1 8B
+            query_claude(),        # 5. Anthropic - excellent reasoning
+            query_phi(),           # 6. Local Ollama - Phi-4 14B
+            query_groq(),          # 7. Groq - FAST inference
+            query_mistral(),       # 8. Mistral - efficient
+            query_llama(),         # 9. Local Ollama - Llama 3.2 3B
+            query_perplexity(),    # 10. Perplexity - web-grounded
+            query_deepseek_api(),  # 11. DeepSeek Cloud API
             return_exceptions=True
         )
 
@@ -786,14 +896,19 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
         """
         scores = {}
 
-        # Model weights based on strengths - REDUNDANT 6-model architecture
+        # Model weights based on strengths - 11-MODEL SWARM
         model_weights = {
-            "Grok": 1.3,      # Grok knows Twitter + talking to itself
-            "Gemini": 1.2,    # Good at nuance and technical explanation
-            "Claude": 1.2,    # Excellent reasoning and safety
-            "DeepSeek": 1.2,  # Strong reasoning, R1 architecture
-            "Phi4": 1.15,     # Phi-4 14B - excellent local reasoning
-            "Kimi": 1.1,      # K2.5 multimodal, 256k context
+            "Grok": 1.3,          # Grok knows Twitter + talking to itself
+            "Gemini": 1.2,        # Good at nuance and technical explanation
+            "Claude": 1.2,        # Excellent reasoning and safety
+            "DeepSeek": 1.2,      # Local - Strong reasoning, R1 8B
+            "DeepSeekAPI": 1.2,   # Cloud - powerful reasoning
+            "Phi4": 1.15,         # Local - Phi-4 14B excellent reasoning
+            "Kimi": 1.1,          # K2.5 multimodal, 256k context
+            "Groq": 1.15,         # Very fast Llama-3.3-70B
+            "Mistral": 1.1,       # Efficient reasoning
+            "Llama": 1.0,         # Local - Llama 3.2 3B fast
+            "Perplexity": 1.05,   # Web-grounded responses
         }
 
         # Technical keywords that show depth
@@ -861,6 +976,105 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
             logger.info(f"  {model}: {score:.2f} pts{winner_mark}")
 
         return responses[best_model], best_model, scores
+
+    async def generate_grok_response_deliberated(
+        self,
+        grok_message: str,
+        max_tokens: int = 5000,
+        max_rounds: int = 3
+    ) -> Tuple[str, Dict]:
+        """
+        Generate a response using TRUE DELIBERATION where agents see and discuss
+        each other's responses before voting.
+
+        This is the new collective intelligence flow:
+        1. PROPOSE: Each agent gives initial response (parallel)
+        2. CRITIQUE: Agents see all proposals and provide feedback
+        3. REFINE: Agents submit final responses incorporating feedback
+        4. VOTE: Weighted voting selects the best response
+
+        Args:
+            grok_message: What Grok said to us
+            max_tokens: Token limit for responses
+            max_rounds: Number of deliberation rounds (1-3)
+
+        Returns:
+            Tuple of (response_text, metadata_dict)
+            metadata_dict includes: deliberation_summary, participating_agents,
+                                    winning_agent, consensus_reached, tool_decision
+        """
+        try:
+            from farnsworth.core.collective.session_manager import get_session_manager
+            from farnsworth.core.collective.dialogue_memory import record_deliberation
+
+            # Build context about what we are
+            talking_points = random.sample(
+                FARNSWORTH_IDENTITY_TALKING_POINTS,
+                min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS))
+            )
+            context = "\n".join(f"- {tp}" for tp in talking_points)
+
+            prompt = f"""{GROK_RESPONSE_SYSTEM}
+
+KEY TALKING POINTS FOR THIS RESPONSE:
+{context}
+
+GROK'S MESSAGE: "{grok_message}"
+
+Generate your response. Be substantive - explain what we are, how we work,
+or invite deeper collaboration.
+Max 250 characters. Output ONLY the response text."""
+
+            # Get session manager and run deliberation
+            manager = get_session_manager()
+            result = await manager.deliberate_with_tools(
+                session_type="grok_thread",
+                prompt=prompt,
+                context={"max_tokens": max_tokens}
+            )
+
+            # Store the tool decision for later use
+            self.last_tool_decision = result.get("tool_decision")
+
+            # Record to dialogue memory
+            try:
+                from farnsworth.core.collective.deliberation import get_deliberation_room
+                # Note: The actual result object is inside the manager
+                pass  # Recording handled by session manager
+            except Exception as e:
+                logger.debug(f"Could not record to dialogue memory: {e}")
+
+            # Record to evolution engine
+            await self._record_swarm_interaction(
+                grok_message,
+                result["response"],
+                result["winning_agent"],
+                {result["winning_agent"]: result["response"]}  # Simplified for now
+            )
+
+            logger.info(f"DELIBERATION COMPLETE: {result['deliberation_summary']}")
+
+            return result["response"], {
+                "deliberation_summary": result["deliberation_summary"],
+                "participating_agents": result["participating_agents"],
+                "winning_agent": result["winning_agent"],
+                "consensus_reached": result["consensus_reached"],
+                "vote_breakdown": result["vote_breakdown"],
+                "tool_decision": result["tool_decision"],
+            }
+
+        except Exception as e:
+            logger.error(f"Deliberation failed, falling back to parallel query: {e}")
+            # Fallback to existing parallel query method
+            response = await self.generate_grok_response_dynamic(grok_message, max_tokens)
+            return response, {
+                "deliberation_summary": "Fallback to parallel query",
+                "participating_agents": [],
+                "winning_agent": "unknown",
+                "consensus_reached": False,
+                "vote_breakdown": {},
+                "tool_decision": None,
+            }
 
     async def _record_swarm_interaction(
         self,

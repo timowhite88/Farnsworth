@@ -50,6 +50,16 @@ class SignalType(Enum):
     PEER_DISCONNECTED = "p2p.peer_disconnected"
     SKILL_RECEIVED = "p2p.skill_received"
 
+    # Dialogue / Deliberation Signals
+    DIALOGUE_STARTED = "dialogue.started"
+    DIALOGUE_PROPOSE = "dialogue.propose"
+    DIALOGUE_CRITIQUE = "dialogue.critique"
+    DIALOGUE_REFINE = "dialogue.refine"
+    DIALOGUE_VOTE = "dialogue.vote"
+    DIALOGUE_CONSENSUS = "dialogue.consensus"
+    DIALOGUE_COMPLETED = "dialogue.completed"
+    DIALOGUE_TOOL_DECISION = "dialogue.tool_decision"
+
 @dataclass
 class Signal:
     """A quantified event propagating through the Nexus."""

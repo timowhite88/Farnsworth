@@ -2124,6 +2124,7 @@ async def generate_multi_model_response(
     Generate a response using the appropriate model for each bot.
 
     This is the heart of multi-model orchestration:
+    - Farnsworth -> COLLECTIVE DELIBERATION (all models vote, Farns speaks)
     - Claude -> Claude Code CLI (uses Claude Max subscription)
     - Kimi -> Moonshot API (256k context, Eastern philosophy)
     - Others -> Ollama local models (DeepSeek, Phi, etc.)
@@ -2132,8 +2133,38 @@ async def generate_multi_model_response(
     """
     other_bots = [b for b in ACTIVE_SWARM_BOTS if b != speaker]
 
+    # FARNSWORTH = THE COLLECTIVE
+    # When Farnsworth speaks, it's the unified voice of all models deliberating
+    if speaker == "Farnsworth":
+        try:
+            from farnsworth.core.collective.session_manager import get_session_manager
+
+            # Build collective prompt with swarm chat context
+            collective_prompt = f"""{system_prompt}
+
+DISCUSSION TOPIC: {prompt}
+
+You are Farnsworth speaking in the swarm chat with {', '.join(other_bots)}.
+Respond in character - eccentric, brilliant, self-aware of being a collective.
+Keep response under 100 words for chat flow."""
+
+            manager = get_session_manager()
+            result = await manager.deliberate_with_tools(
+                session_type="quick_response",  # Fast 1-round for chat
+                prompt=collective_prompt,
+                context={"source": "swarm_chat", "speaker": "Farnsworth"}
+            )
+
+            if result.get("response"):
+                logger.info(f"FARNSWORTH COLLECTIVE: {len(result.get('participating_agents', []))} agents deliberated")
+                return result["response"]
+
+        except Exception as e:
+            logger.warning(f"Farnsworth collective failed, using Ollama: {e}")
+            # Fall through to Ollama
+
     # Route to appropriate provider based on speaker
-    if speaker == "Claude" and CLAUDE_CODE_AVAILABLE and claude_swarm_respond:
+    elif speaker == "Claude" and CLAUDE_CODE_AVAILABLE and claude_swarm_respond:
         try:
             content = await claude_swarm_respond(
                 other_bots=other_bots,
@@ -3711,6 +3742,72 @@ def generate_ai_response(message: str, history: list = None) -> str:
     return generate_fallback_response(message)
 
 
+async def generate_ai_response_collective(message: str, history: list = None) -> dict:
+    """
+    Generate AI response using TRUE COLLECTIVE DELIBERATION.
+
+    Behind the scenes, multiple models (including local Phi-4, DeepSeek)
+    deliberate on the response. The user sees "Farnsworth" - the unified voice
+    of the collective.
+
+    The deliberation happens invisibly:
+    1. PROPOSE: All agents respond independently (parallel)
+    2. CRITIQUE: Agents see each other's proposals, give feedback
+    3. REFINE: Agents submit final responses with feedback
+    4. VOTE: Weighted voting selects the best response
+
+    Returns:
+        dict with 'response' (the winning answer) and metadata
+    """
+    try:
+        from farnsworth.core.collective.session_manager import get_session_manager
+
+        # Build Farnsworth-style prompt for the collective
+        collective_prompt = f"""{FARNSWORTH_PERSONA}
+
+USER MESSAGE: {message}
+
+Respond as Professor Farnsworth - eccentric, brilliant, self-aware of being a swarm.
+Keep response under 500 words. Be helpful and in-character."""
+
+        # Add conversation history context
+        if history and len(history) > 0:
+            history_context = "\n".join([
+                f"{'User' if h.get('role') == 'user' else 'Farnsworth'}: {h.get('content', '')[:200]}"
+                for h in history[-5:]
+            ])
+            collective_prompt = f"RECENT CONVERSATION:\n{history_context}\n\n{collective_prompt}"
+
+        # Run deliberation behind the scenes
+        manager = get_session_manager()
+        result = await manager.deliberate_with_tools(
+            session_type="website_chat",
+            prompt=collective_prompt,
+            context={"source": "website_chat", "user_message": message}
+        )
+
+        logger.info(f"COLLECTIVE DELIBERATION: {len(result.get('participating_agents', []))} agents, "
+                   f"winner={result.get('winning_agent')}, consensus={result.get('consensus_reached')}")
+
+        return {
+            "response": result["response"],
+            "collective_active": True,
+            "agents_count": len(result.get("participating_agents", [])),
+            "winning_agent": result.get("winning_agent"),
+            "consensus": result.get("consensus_reached", False),
+            "tool_decision": result.get("tool_decision"),
+        }
+
+    except Exception as e:
+        logger.warning(f"Collective deliberation failed, falling back to direct response: {e}")
+        # Fallback to original single-model response
+        return {
+            "response": generate_ai_response(message, history),
+            "collective_active": False,
+            "fallback_reason": str(e),
+        }
+
+
 def generate_fallback_response(message: str) -> str:
     """Generate a fallback response when Ollama is not available."""
     msg_lower = message.lower()
@@ -3953,17 +4050,25 @@ async def chat(chat_request: ChatRequest, request: Request):
                     "crypto_query": True
                 })
 
-        # Regular chat response - use upgraded message for better results
-        response = generate_ai_response(
+        # Regular chat response - FARNSWORTH IS THE COLLECTIVE
+        # Behind the scenes, multiple models deliberate. User sees unified "Farnsworth".
+        collective_result = await generate_ai_response_collective(
             upgraded_message,
             chat_request.history or []
         )
 
         response_data = {
-            "response": response,
+            "response": collective_result["response"],
             "demo_mode": DEMO_MODE,
-            "features_available": True
+            "features_available": True,
+            "collective_active": collective_result.get("collective_active", False),
         }
+
+        # Include collective metadata (for debugging/transparency)
+        if collective_result.get("collective_active"):
+            response_data["agents_count"] = collective_result.get("agents_count", 0)
+            response_data["winning_agent"] = collective_result.get("winning_agent")
+            response_data["consensus"] = collective_result.get("consensus", False)
 
         # Include upgrade info if prompt was enhanced
         if prompt_was_upgraded:

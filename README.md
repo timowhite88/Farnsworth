@@ -9,7 +9,7 @@ THE ONLY TOKEN I SUPPORT IS ABOVE
 
 **Give Claude superpowers: persistent memory, model swarms, multimodal understanding, and self-evolution.**
 
-[![Version](https://img.shields.io/badge/version-2.9.4-blue.svg)](https://github.com/timowhite88/Farnsworth)
+[![Version](https://img.shields.io/badge/version-2.9.5-blue.svg)](https://github.com/timowhite88/Farnsworth)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Dual%20(Free%20%2B%20Commercial)-purple.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-MCP%20Integration-orange.svg)](https://claude.ai)
@@ -276,7 +276,7 @@ hf.enable_local("microsoft/Phi-3-mini-4k-instruct")
 | **WSL Bridge** | Windows/Linux interop |
 | **Collective Organism** | Emergent swarm intelligence |
 
-**Swarm Strategies**: Fastest-First, Quality-First, Parallel Vote, Mixture of Experts, Speculative Ensemble, Confidence Fusion, PSO Collaborative
+**Swarm Strategies**: Fastest-First, Quality-First, Parallel Vote, Mixture of Experts, Speculative Ensemble, Confidence Fusion, PSO Collaborative, **TRUE DELIBERATION (NEW!)**
 
 </details>
 
@@ -1304,9 +1304,58 @@ Farnsworth is a **companion AI system** that integrates with [Claude Code](https
 
 ---
 
-## ✨ What's New in v2.9.4 (The "Cognitive Architecture" Release)
+## ✨ What's New in v2.9.5 (The "Collective Intelligence" Release)
 
 <details open>
+<summary><strong>🧠 TRUE COLLECTIVE DELIBERATION (v2.9.5) - REVOLUTIONARY!</strong></summary>
+
+**The swarm now THINKS TOGETHER.** Agents see each other's responses, critique them, and vote on the best answer. This is real collective intelligence - not just parallel API calls.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    COLLECTIVE INTELLIGENCE LOOP                  │
+├─────────────────────────────────────────────────────────────────┤
+│  ROUND 1: PROPOSE                                                │
+│  • All agents respond independently (parallel for speed)        │
+│  • Grok, Gemini, DeepSeek, Phi-4, Kimi, Claude participate      │
+├─────────────────────────────────────────────────────────────────┤
+│  ROUND 2: CRITIQUE                                               │
+│  • Each agent SEES all proposals                                │
+│  • Agents critique and identify strongest elements              │
+├─────────────────────────────────────────────────────────────────┤
+│  ROUND 3: REFINE                                                 │
+│  • Agents submit final responses incorporating feedback         │
+│  • Best elements from all proposals synthesized                 │
+├─────────────────────────────────────────────────────────────────┤
+│  VOTE                                                            │
+│  • Weighted scoring selects the best response                   │
+│  • Consensus tracking: who agreed, who dissented                │
+│  • Tool decision: did collective vote for media?                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Core Components:**
+- 🗣️ **DeliberationRoom** - The arena where agents discuss and debate
+- 🎭 **SessionManager** - Manages website_chat, grok_thread, autonomous sessions
+- 🛠️ **ToolAwareness** - Collective decides when to use image/video generation
+- 📝 **DialogueMemory** - Stores agent conversations for continuous learning
+- 🔗 **AgentRegistry** - 11 models registered (3 local GPU + 8 API)
+
+**Session Configurations:**
+| Session | Agents | Rounds | Purpose |
+|:--------|:------:|:------:|:--------|
+| `website_chat` | 6 | 2 | Interactive user conversations |
+| `grok_thread` | 7 | 3 | Public X/Twitter deliberations |
+| `autonomous_task` | 4 | 1 | Background task processing |
+| `quick_response` | 3 | 1 | Ultra-fast responses |
+
+**Local GPU Models:** DeepSeek-R1 (8B), Phi-4 (14B), Llama-3.2 (3B) via Ollama
+
+**The Result:** When you chat with Farnsworth, you're talking to a **unified collective** - not a single model. Every response is the product of multi-agent deliberation.
+
+</details>
+
+<details>
 <summary><strong>🧬 Advanced Memory Features (v2.9.4)</strong></summary>
 
 - 🌙 **Dream Consolidation** - Bio-inspired memory optimization during idle periods

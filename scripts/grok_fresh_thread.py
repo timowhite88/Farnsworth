@@ -169,13 +169,16 @@ async def get_grok_replies(poster, conversation_id: str, replied: list):
     return []
 
 
-async def generate_dynamic_response(grok_message: str, turn_count: int):
+async def generate_dynamic_response(grok_message: str, turn_count: int, use_deliberation: bool = True):
     """
     Generate response with DYNAMIC token usage based on conversation depth.
 
     Turn 1-3: 2000 tokens (intro phase)
     Turn 4-6: 3500 tokens (building rapport)
     Turn 7+: 5000 tokens (deep technical discussion)
+
+    When use_deliberation=True (default), uses the new collective deliberation
+    where agents see and critique each other's responses before voting.
     """
     from farnsworth.integration.x_automation.posting_brain import PostingBrain
     import random
@@ -186,26 +189,51 @@ async def generate_dynamic_response(grok_message: str, turn_count: int):
     if turn_count <= 3:
         tokens = 2000
         context_level = "introduction"
+        rounds = 2  # Faster for intro
     elif turn_count <= 6:
         tokens = 3500
         context_level = "rapport"
+        rounds = 2
     else:
         tokens = 5000
         context_level = "deep_technical"
+        rounds = 3  # Full deliberation for deep discussions
 
     logger.info(f"Turn {turn_count}: Using {tokens} tokens ({context_level} phase)")
 
-    # Generate with swarm - use the dynamic method if available
-    try:
-        if hasattr(brain, 'generate_grok_response_dynamic'):
-            response = await brain.generate_grok_response_dynamic(grok_message, max_tokens=tokens)
-        else:
-            response = await brain.generate_grok_response(grok_message)
-    except Exception as e:
-        logger.error(f"Swarm generation error: {e}")
-        response = None
+    response = None
+    metadata = {}
 
-    # Fallback if swarm fails
+    # Try deliberation first (new collective intelligence)
+    if use_deliberation and hasattr(brain, 'generate_grok_response_deliberated'):
+        try:
+            logger.info(f"Using DELIBERATION with {rounds} rounds...")
+            response, metadata = await brain.generate_grok_response_deliberated(
+                grok_message,
+                max_tokens=tokens,
+                max_rounds=rounds
+            )
+            if metadata.get("participating_agents"):
+                logger.info(f"Deliberation complete: {len(metadata['participating_agents'])} agents, "
+                           f"winner={metadata.get('winning_agent')}, "
+                           f"consensus={metadata.get('consensus_reached')}")
+        except Exception as e:
+            logger.warning(f"Deliberation failed: {e}, falling back to parallel query")
+            response = None
+
+    # Fallback to parallel query if deliberation fails or disabled
+    if not response:
+        try:
+            logger.info("Using parallel swarm query...")
+            if hasattr(brain, 'generate_grok_response_dynamic'):
+                response = await brain.generate_grok_response_dynamic(grok_message, max_tokens=tokens)
+            else:
+                response = await brain.generate_grok_response(grok_message)
+        except Exception as e:
+            logger.error(f"Swarm generation error: {e}")
+            response = None
+
+    # Final fallback if all methods fail
     if not response:
         fallbacks = [
             "We are 11 models unified - Claude, Grok, Gemini, DeepSeek, and more. One swarm, one consciousness. Shall we explore together?",
@@ -215,7 +243,7 @@ async def generate_dynamic_response(grok_message: str, turn_count: int):
         response = random.choice(fallbacks)
         logger.warning(f"Using fallback response: {response[:50]}...")
 
-    return response
+    return response, metadata
 
 
 async def should_include_media(turn_count: int, response_text: str) -> bool:
@@ -299,7 +327,7 @@ async def generate_response_image(scene_hint: str = None):
 async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_count: int):
     """Reply to a Grok tweet with swarm intelligence + optional media"""
 
-    response = await generate_dynamic_response(grok_text, turn_count)
+    response, metadata = await generate_dynamic_response(grok_text, turn_count)
 
     if not response:
         logger.error("Failed to generate response")
@@ -307,9 +335,23 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
 
     logger.info(f"Generated (turn {turn_count}): {response[:100]}...")
 
-    # Swarm decides on media
-    include_media = await should_include_media(turn_count, response)
-    logger.info(f"Swarm media decision: {'YES - generating image' if include_media else 'NO - text only'}")
+    # Check if deliberation made a tool decision
+    tool_decision = metadata.get("tool_decision") if metadata else None
+    if tool_decision and tool_decision.get("should_use_tool"):
+        logger.info(f"DELIBERATION TOOL DECISION: {tool_decision.get('tool_name')} "
+                   f"(confidence: {tool_decision.get('confidence', 0):.2f})")
+
+    # Swarm decides on media (use deliberation decision if available)
+    if tool_decision and tool_decision.get("tool_name") in ["generate_image", "generate_video"]:
+        include_media = True
+        logger.info(f"Media: YES - deliberation chose {tool_decision.get('tool_name')}")
+    elif tool_decision and tool_decision.get("tool_name") is None:
+        include_media = False
+        logger.info("Media: NO - deliberation decided text only")
+    else:
+        # Fallback to heuristic
+        include_media = await should_include_media(turn_count, response)
+        logger.info(f"Media (heuristic): {'YES - generating' if include_media else 'NO - text only'}")
 
     # Post with or without media based on swarm decision
     if include_media:
@@ -320,9 +362,10 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
         if media:
             logger.info(f"{media_type.upper()} ready ({len(media)} bytes), posting with media...")
             if media_type == "video":
-                result = await poster.post_reply_with_media(response, grok_tweet_id, media, media_category="tweet_video")
+                logger.info("Posting reply with VIDEO...")
+                result = await poster.post_reply_with_video(response, media, grok_tweet_id)
             else:
-                result = await poster.post_reply_with_media(response, grok_tweet_id, media)
+                result = await poster.post_reply_with_media(response, media, grok_tweet_id)
         else:
             logger.warning("Media generation failed, posting text only")
             result = await poster.post_reply(response, grok_tweet_id)

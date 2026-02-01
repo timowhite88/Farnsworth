@@ -387,10 +387,21 @@ class XOAuth2Poster:
 
             loop = asyncio.get_event_loop()
 
+            # Auto-detect actual image format from magic bytes for INIT
+            detected_type = media_type
+            if image_bytes[:3] == b'\xff\xd8\xff':
+                detected_type = "image/jpeg"
+            elif image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+                detected_type = "image/png"
+            elif image_bytes[:4] == b'GIF8':
+                detected_type = "image/gif"
+            elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
+                detected_type = "image/webp"
+
             # Step 1: INIT
             init_params = {
                 "command": "INIT",
-                "media_type": media_type,
+                "media_type": detected_type,
                 "total_bytes": len(image_bytes),
                 "media_category": "tweet_image"
             }
@@ -414,13 +425,31 @@ class XOAuth2Poster:
             logger.info(f"Media INIT success: media_id={media_id}")
 
             # Step 2: APPEND - send media as multipart file
+            # Auto-detect actual image format from magic bytes
+            actual_type = media_type
+            filename = "media.png"
+            if image_bytes[:3] == b'\xff\xd8\xff':
+                actual_type = "image/jpeg"
+                filename = "media.jpg"
+            elif image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+                actual_type = "image/png"
+                filename = "media.png"
+            elif image_bytes[:4] == b'GIF8':
+                actual_type = "image/gif"
+                filename = "media.gif"
+            elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
+                actual_type = "image/webp"
+                filename = "media.webp"
+
+            logger.info(f"Media type detected: {actual_type} (requested: {media_type})")
+
             append_data = {
                 "command": "APPEND",
                 "media_id": media_id,
                 "segment_index": 0,
             }
             files = {
-                "media": ("media.png", image_bytes, media_type)
+                "media": (filename, image_bytes, actual_type)
             }
 
             append_resp = await loop.run_in_executor(
@@ -873,8 +902,8 @@ class XOAuth2Poster:
         # Upload media first
         media_id = await self.upload_media(image_bytes, "image/png")
         if not media_id:
-            logger.error("Failed to upload media for reply")
-            return None
+            logger.warning("Media upload failed for reply, falling back to text-only")
+            return await self.post_reply(text, reply_to_id)
 
         if len(text) > 280:
             text = text[:277] + "..."

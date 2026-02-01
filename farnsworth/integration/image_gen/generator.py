@@ -591,19 +591,37 @@ class GrokVideoGenerator:
                         for _ in range(60):  # 3 minutes max
                             await asyncio.sleep(3)
                             status_resp = await client.get(
-                                f"{self.base_url}/videos/generations/{request_id}",
+                                f"{self.base_url}/videos/{request_id}",
                                 headers={"Authorization": f"Bearer {self.api_key}"}
                             )
                             if status_resp.status_code == 200:
                                 status_data = status_resp.json()
-                                if status_data.get("status") == "completed":
-                                    video_url = status_data.get("url")
-                                    if video_url:
+                                logger.info(f"Video poll: keys={list(status_data.keys())}")
+
+                                # xAI returns {"video": {...}, "model": "..."} when done
+                                video_obj = status_data.get("video")
+                                if video_obj:
+                                    video_url = video_obj.get("url") if isinstance(video_obj, dict) else video_obj
+                                    if video_url and isinstance(video_url, str):
+                                        logger.info(f"Video URL found: {video_url[:80]}...")
                                         video_resp = await client.get(video_url)
                                         if video_resp.status_code == 200:
                                             logger.info(f"Grok video ready: {len(video_resp.content)} bytes")
                                             return video_resp.content
-                                elif status_data.get("status") == "failed":
+                                        else:
+                                            logger.error(f"Video download failed: {video_resp.status_code}")
+                                    else:
+                                        logger.warning(f"Video object but no URL: {video_obj}")
+
+                                # Also check legacy status field
+                                status = status_data.get("status")
+                                if status == "completed":
+                                    video_url = status_data.get("url")
+                                    if video_url:
+                                        video_resp = await client.get(video_url)
+                                        if video_resp.status_code == 200:
+                                            return video_resp.content
+                                elif status == "failed" or status_data.get("error"):
                                     logger.error(f"Video generation failed: {status_data}")
                                     break
 
