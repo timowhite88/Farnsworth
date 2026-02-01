@@ -852,6 +852,140 @@ class XOAuth2Poster:
             logger.error(f"Reply error: {e}")
             return None
 
+    async def post_reply_with_media(
+        self,
+        text: str,
+        image_bytes: bytes,
+        reply_to_id: str
+    ) -> Optional[Dict]:
+        """Post a reply with an image attachment."""
+        if not self.is_configured():
+            logger.error("X API not configured")
+            return None
+
+        if self.is_token_expired():
+            if not await self.refresh_access_token():
+                return None
+
+        if not self.can_post():
+            return None
+
+        # Upload media first
+        media_id = await self.upload_media(image_bytes, "image/png")
+        if not media_id:
+            logger.error("Failed to upload media for reply")
+            return None
+
+        if len(text) > 280:
+            text = text[:277] + "..."
+
+        try:
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "text": text,
+                "reply": {
+                    "in_reply_to_tweet_id": reply_to_id
+                },
+                "media": {
+                    "media_ids": [media_id]
+                }
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    TWEET_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+
+                if response.status_code == 201:
+                    self.posts_today += 1
+                    result = response.json()
+                    tweet_id = result.get("data", {}).get("id")
+                    logger.info(f"Reply with media posted: {tweet_id}")
+                    return result
+                else:
+                    logger.error(f"Reply with media failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Reply with media error: {e}")
+            return None
+
+    async def post_reply_with_video(
+        self,
+        text: str,
+        video_bytes: bytes,
+        reply_to_id: str
+    ) -> Optional[Dict]:
+        """Post a reply with a video attachment."""
+        if not self.is_configured():
+            logger.error("X API not configured")
+            return None
+
+        if self.is_token_expired():
+            if not await self.refresh_access_token():
+                return None
+
+        if not self.can_post():
+            return None
+
+        # Upload video first (uses chunked upload)
+        media_id = await self.upload_video(video_bytes)
+        if not media_id:
+            logger.error("Failed to upload video for reply")
+            return None
+
+        if len(text) > 280:
+            text = text[:277] + "..."
+
+        try:
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "text": text,
+                "reply": {
+                    "in_reply_to_tweet_id": reply_to_id
+                },
+                "media": {
+                    "media_ids": [media_id]
+                }
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    TWEET_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+
+                if response.status_code == 201:
+                    self.posts_today += 1
+                    result = response.json()
+                    tweet_id = result.get("data", {}).get("id")
+                    logger.info(f"Reply with video posted: {tweet_id}")
+                    return result
+                else:
+                    logger.error(f"Reply with video failed: {response.status_code} - {response.text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"Reply with video error: {e}")
+            return None
+
 
 # Global instance
 _x_oauth2_poster = None
