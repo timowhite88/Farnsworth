@@ -507,16 +507,11 @@ class MultiVoiceSystem:
         # Use generation lock to prevent concurrent TTS crashes
         async with self._generation_lock:
             # Generate with best available provider
-            # NOTE: XTTS broken (transformers BeamSearchScorer removed)
+            # NOTE: XTTS broken (transformers BeamSearchScorer removed by qwen-tts upgrade)
             # NOTE: Qwen3-TTS produces gibberish
-            # Using Fish Speech -> Edge TTS fallback chain
+            # NOTE: Fish Speech API changed (device parameter removed)
+            # Using Edge TTS (reliable Microsoft voices)
             try:
-                # Try Fish Speech FIRST (good quality voice cloning)
-                if FISH_SPEECH_AVAILABLE and reference_audio:
-                    result = await self._generate_fish_speech(text, config, cache_path, reference_audio)
-                    if result:
-                        return result
-                    logger.warning(f"Fish Speech failed for {bot_name}, trying Edge TTS")
 
                 # Fall back to Edge TTS (no voice cloning but works without samples)
                 if EDGE_TTS_AVAILABLE:
