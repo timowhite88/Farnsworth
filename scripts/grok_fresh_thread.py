@@ -239,8 +239,17 @@ async def should_include_media(turn_count: int, response_text: str) -> bool:
     return random.random() < chance
 
 
-async def generate_response_image(scene_hint: str = None):
-    """Generate a Borg Farnsworth image for the response"""
+async def generate_response_media(scene_hint: str = None, prefer_video: bool = False):
+    """
+    Generate Borg Farnsworth media for the response.
+
+    Args:
+        scene_hint: Optional scene description
+        prefer_video: If True, try to generate video (Gemini → Grok)
+
+    Returns:
+        (media_bytes, media_type) where media_type is "image" or "video"
+    """
     from farnsworth.integration.image_gen.generator import get_image_generator
 
     gen = get_image_generator()
@@ -256,18 +265,35 @@ async def generate_response_image(scene_hint: str = None):
     import random
     scene = scene_hint or random.choice(scenes)
 
+    # Try video if preferred and available
+    if prefer_video and gen.video.is_available():
+        logger.info(f"Generating VIDEO: {scene[:50]}...")
+        video = await gen.generate_borg_farnsworth_video(scene)
+        if video:
+            return video, "video"
+        logger.warning("Video generation failed, falling back to image")
+
+    # Generate image
     logger.info(f"Generating image: {scene[:50]}...")
 
     if gen.gemini.is_available():
         image = await gen.gemini.generate_with_reference(scene, use_portrait=True, aspect_ratio="1:1")
         if image:
-            return image
+            return image, "image"
 
     if gen.grok.is_available():
         full_prompt = f"Borg-cyborg Professor Farnsworth with half-metal face and red laser eye, {scene}, cartoon style"
-        return await gen.grok.generate(full_prompt)
+        image = await gen.grok.generate(full_prompt)
+        if image:
+            return image, "image"
 
-    return None
+    return None, None
+
+
+async def generate_response_image(scene_hint: str = None):
+    """Legacy wrapper - generates image only"""
+    media, media_type = await generate_response_media(scene_hint, prefer_video=False)
+    return media if media_type == "image" else None
 
 
 async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_count: int):
@@ -287,12 +313,18 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
 
     # Post with or without media based on swarm decision
     if include_media:
-        image = await generate_response_image()
-        if image:
-            logger.info(f"Image ready ({len(image)} bytes), posting with media...")
-            result = await poster.post_reply_with_media(response, grok_tweet_id, image)
+        # Try video for special turns, otherwise image
+        prefer_video = turn_count in [2, 5, 10]  # Video on turns 2, 5, 10
+        media, media_type = await generate_response_media(prefer_video=prefer_video)
+
+        if media:
+            logger.info(f"{media_type.upper()} ready ({len(media)} bytes), posting with media...")
+            if media_type == "video":
+                result = await poster.post_reply_with_media(response, grok_tweet_id, media, media_category="tweet_video")
+            else:
+                result = await poster.post_reply_with_media(response, grok_tweet_id, media)
         else:
-            logger.warning("Image generation failed, posting text only")
+            logger.warning("Media generation failed, posting text only")
             result = await poster.post_reply(response, grok_tweet_id)
     else:
         result = await poster.post_reply(response, grok_tweet_id)

@@ -506,11 +506,122 @@ Cartoon meme style, vibrant colors, thick outlines."""
             return await self._generate_imagen(full_prompt)
 
 
+class GrokVideoGenerator:
+    """
+    Grok Imagine Video Generation via xAI API
+
+    Creates videos from images using grok-imagine-video model.
+    Supports 1-15 second clips at 480p/720p.
+
+    Docs: https://docs.x.ai/docs/guides/video-generations
+    GitHub: https://github.com/xai-org/xai-sdk-python
+    """
+
+    def __init__(self):
+        self.api_key = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY")
+        self.base_url = "https://api.x.ai/v1"
+        self.model = "grok-imagine-video"
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    async def generate_from_image(
+        self,
+        image_bytes: bytes,
+        prompt: str = "Animate this image with natural movement",
+        duration: int = 5,
+        resolution: str = "720p"
+    ) -> Optional[bytes]:
+        """
+        Generate video from an image.
+
+        Args:
+            image_bytes: Source image
+            prompt: Description of desired animation
+            duration: Video length in seconds (1-15)
+            resolution: "480p" or "720p"
+
+        Returns:
+            Video bytes (MP4) or None
+        """
+        if not self.api_key:
+            logger.warning("xAI API key not configured for video generation")
+            return None
+
+        try:
+            # Convert image to base64 data URL
+            b64_image = base64.b64encode(image_bytes).decode()
+            image_url = f"data:image/png;base64,{b64_image}"
+
+            async with httpx.AsyncClient(timeout=180) as client:
+                # Start video generation
+                response = await client.post(
+                    f"{self.base_url}/videos/generations",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "prompt": prompt,
+                        "image": {"url": image_url},
+                        "duration": min(max(duration, 1), 15),
+                        "resolution": resolution
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Check for direct video URL
+                    if "url" in data:
+                        video_url = data["url"]
+                        # Download video
+                        video_resp = await client.get(video_url)
+                        if video_resp.status_code == 200:
+                            logger.info(f"Grok video generated: {len(video_resp.content)} bytes")
+                            return video_resp.content
+
+                    # Check for async request_id
+                    if "request_id" in data:
+                        request_id = data["request_id"]
+                        logger.info(f"Video generation started: {request_id}")
+
+                        # Poll for result
+                        for _ in range(60):  # 3 minutes max
+                            await asyncio.sleep(3)
+                            status_resp = await client.get(
+                                f"{self.base_url}/videos/generations/{request_id}",
+                                headers={"Authorization": f"Bearer {self.api_key}"}
+                            )
+                            if status_resp.status_code == 200:
+                                status_data = status_resp.json()
+                                if status_data.get("status") == "completed":
+                                    video_url = status_data.get("url")
+                                    if video_url:
+                                        video_resp = await client.get(video_url)
+                                        if video_resp.status_code == 200:
+                                            logger.info(f"Grok video ready: {len(video_resp.content)} bytes")
+                                            return video_resp.content
+                                elif status_data.get("status") == "failed":
+                                    logger.error(f"Video generation failed: {status_data}")
+                                    break
+
+                else:
+                    logger.error(f"Grok video API error: {response.status_code} - {response.text[:200]}")
+
+        except Exception as e:
+            logger.error(f"Grok video generation error: {e}")
+
+        return None
+
+
 class ImageGenerator:
     """
     Unified image generator with fallback support.
     Uses Gemini with reference images for Borg Farnsworth memes.
     Falls back to Grok for generic generation.
+    Now includes video generation via Grok Imagine.
     """
 
     # Scene variation prompts - ONLY describe scene/setting/action, NOT the character
@@ -545,14 +656,69 @@ class ImageGenerator:
     def __init__(self):
         self.grok = GrokImageGenerator()
         self.gemini = GeminiImageGenerator()
+        self.video = GrokVideoGenerator()
         self.last_provider = None
 
     def get_status(self) -> dict:
         return {
             "grok_available": self.grok.is_available(),
             "gemini_available": self.gemini.is_available(),
+            "video_available": self.video.is_available(),
             "last_provider": self.last_provider
         }
+
+    async def generate_video_from_image(
+        self,
+        image_bytes: bytes,
+        prompt: str = "Animate with natural movement, cooking lobster, triumphant pose",
+        duration: int = 5
+    ) -> Optional[bytes]:
+        """
+        Generate video from an image using Grok Imagine.
+
+        Args:
+            image_bytes: Source image
+            prompt: Animation description
+            duration: Video length (1-15 seconds)
+
+        Returns:
+            MP4 video bytes or None
+        """
+        if not self.video.is_available():
+            logger.warning("Grok video generation not available")
+            return None
+
+        return await self.video.generate_from_image(image_bytes, prompt, duration)
+
+    async def generate_borg_farnsworth_video(self, scene: str = None) -> Optional[bytes]:
+        """
+        Generate a Borg Farnsworth video: Gemini image → Grok video.
+
+        Returns:
+            MP4 video bytes or None
+        """
+        # First generate image with Gemini
+        if not scene:
+            scene = random.choice(self.BORG_FARNSWORTH_SCENES)
+
+        logger.info(f"Step 1: Generating image with Gemini for: {scene[:50]}...")
+        image, _ = await self.generate_borg_farnsworth_meme()
+
+        if not image:
+            logger.error("Failed to generate source image for video")
+            return None
+
+        # Then animate with Grok
+        video_prompt = f"Animate Borg Farnsworth {scene}. Natural movement, expressive, cartoon style."
+        logger.info(f"Step 2: Animating with Grok video...")
+
+        video = await self.generate_video_from_image(image, video_prompt, duration=5)
+
+        if video:
+            self.last_provider = "gemini_grok_video"
+            logger.info(f"Video generated: {len(video)} bytes")
+
+        return video
 
     def get_random_meme_prompt(self) -> Tuple[str, str]:
         """Get a random Farnsworth meme prompt and caption"""
