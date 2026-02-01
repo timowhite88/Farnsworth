@@ -380,6 +380,15 @@ except ImportError:
     get_task_detector = None
     TASK_DETECTOR_AVAILABLE = False
 
+# Prompt Upgrader - automatically enhances user prompts to professional quality
+try:
+    from farnsworth.core.prompt_upgrader import get_prompt_upgrader, upgrade_prompt
+    PROMPT_UPGRADER_AVAILABLE = True
+except ImportError:
+    get_prompt_upgrader = None
+    upgrade_prompt = None
+    PROMPT_UPGRADER_AVAILABLE = False
+
 # Farnsworth module imports (lazy-loaded)
 _memory_system = None
 _notes_manager = None
@@ -3416,8 +3425,23 @@ async def chat(chat_request: ChatRequest, request: Request):
                 "demo_mode": DEMO_MODE
             })
 
-        # Check for crypto/token queries
-        parsed = crypto_parser.parse(chat_request.message)
+        # Automatically upgrade user prompt to professional quality
+        original_message = chat_request.message
+        upgraded_message = chat_request.message
+        prompt_was_upgraded = False
+
+        if PROMPT_UPGRADER_AVAILABLE and upgrade_prompt:
+            try:
+                upgraded_message = await upgrade_prompt(chat_request.message)
+                if upgraded_message != original_message:
+                    prompt_was_upgraded = True
+                    logger.info(f"Prompt upgraded: '{original_message[:50]}...' -> '{upgraded_message[:50]}...'")
+            except Exception as e:
+                logger.warning(f"Prompt upgrade failed, using original: {e}")
+                upgraded_message = original_message
+
+        # Check for crypto/token queries (use original message for pattern matching)
+        parsed = crypto_parser.parse(original_message)
 
         if parsed['has_crypto_query']:
             # Execute the appropriate crypto tool
@@ -3439,17 +3463,25 @@ async def chat(chat_request: ChatRequest, request: Request):
                     "crypto_query": True
                 })
 
-        # Regular chat response
+        # Regular chat response - use upgraded message for better results
         response = generate_ai_response(
-            chat_request.message,
+            upgraded_message,
             chat_request.history or []
         )
 
-        return JSONResponse({
+        response_data = {
             "response": response,
             "demo_mode": DEMO_MODE,
             "features_available": True
-        })
+        }
+
+        # Include upgrade info if prompt was enhanced
+        if prompt_was_upgraded:
+            response_data["prompt_upgraded"] = True
+            response_data["original_prompt"] = original_message[:100]
+            response_data["upgraded_prompt"] = upgraded_message[:200]
+
+        return JSONResponse(response_data)
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
