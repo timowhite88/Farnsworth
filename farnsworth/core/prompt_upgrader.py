@@ -166,11 +166,15 @@ class PromptUpgrader:
 
             if response and response.get("content"):
                 upgraded = response["content"].strip()
-                # Sanity check - don't return if it's way longer or seems wrong
-                if len(upgraded) < len(prompt) * 5 and len(upgraded) > 0:
+                # Strip quotes if the response was wrapped in them
+                if upgraded.startswith('"') and upgraded.endswith('"'):
+                    upgraded = upgraded[1:-1].strip()
+                # Sanity check - allow reasonable length (max 500 chars or 10x original)
+                max_len = max(500, len(prompt) * 10)
+                if 0 < len(upgraded) < max_len:
                     return upgraded
                 else:
-                    logger.warning(f"Grok response too long or empty, skipping")
+                    logger.warning(f"Grok response length {len(upgraded)} outside bounds, skipping")
 
         except Exception as e:
             logger.warning(f"Grok upgrade failed: {e}")
@@ -196,10 +200,15 @@ class PromptUpgrader:
 
             if response and response.get("content"):
                 upgraded = response["content"].strip()
-                if len(upgraded) < len(prompt) * 5 and len(upgraded) > 0:
+                # Strip quotes if the response was wrapped in them
+                if upgraded.startswith('"') and upgraded.endswith('"'):
+                    upgraded = upgraded[1:-1].strip()
+                # Sanity check - allow reasonable length (max 500 chars or 10x original)
+                max_len = max(500, len(prompt) * 10)
+                if 0 < len(upgraded) < max_len:
                     return upgraded
                 else:
-                    logger.warning(f"Gemini response too long or empty, skipping")
+                    logger.warning(f"Gemini response length {len(upgraded)} outside bounds, skipping")
 
         except Exception as e:
             logger.debug(f"Gemini upgrade failed: {e}")
