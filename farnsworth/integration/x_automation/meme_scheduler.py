@@ -25,8 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Posting interval (2 hours in seconds)
-POSTING_INTERVAL = 2 * 60 * 60
+# Posting interval (4 hours in seconds) - slowed down for better variety
+POSTING_INTERVAL = 4 * 60 * 60
 
 # History file to track posts
 HISTORY_FILE = Path("/workspace/Farnsworth/data/meme_history.json")

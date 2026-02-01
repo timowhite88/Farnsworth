@@ -1,0 +1,691 @@
+"""
+FARNSWORTH IMAGE GENERATION
+Supports Grok (xAI) and Gemini (Google) APIs for meme generation.
+
+Official Documentation:
+- Grok: https://docs.x.ai/docs/guides/image-generation
+- Gemini: https://ai.google.dev/gemini-api/docs/image-generation
+"""
+import os
+import base64
+import httpx
+import asyncio
+import random
+import logging
+from pathlib import Path
+from typing import Optional, Tuple
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# Load environment from .env file (cross-platform)
+def load_env():
+    # Try relative to this file first, then project root
+    possible_paths = [
+        Path(__file__).parent.parent.parent.parent / ".env",  # Project root
+        Path(__file__).parent.parent.parent / ".env",
+        Path("/workspace/Farnsworth/.env"),  # Docker/cloud
+    ]
+
+    for env_path in possible_paths:
+        if env_path.exists():
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, value = line.split("=", 1)
+                        os.environ[key.strip()] = value.strip()
+            break
+
+load_env()
+
+# ============================================
+# FARNSWORTH MEME PROMPTS
+# ============================================
+
+FARNSWORTH_MEME_PROMPTS = [
+    # Classic Farnsworth poses
+    "Professor Farnsworth from Futurama in his lab coat and round glasses, saying 'Good news everyone!' with excited expression, cartoon style, vibrant colors, meme format",
+    "Cartoon mad scientist Professor Farnsworth pointing at a glowing computer screen showing AI code, excited expression, Futurama art style",
+    "Professor Farnsworth with wild white hair adjusting his thick glasses, looking at a robot brain, cartoon style, 'Science!' caption ready",
+    "Futurama's Professor Farnsworth holding a bubbling test tube with glowing green liquid, crazy scientist expression, lab background",
+    "Professor Farnsworth at a whiteboard covered in complex AI equations, looking proud, cartoon style, meme ready",
+
+    # AI/Tech themed
+    "Professor Farnsworth presenting a neural network diagram on a holographic display, amazed expression, futuristic lab, cartoon style",
+    "Cartoon Professor Farnsworth surrounded by multiple AI robot assistants, looking overwhelmed but happy, Futurama style",
+    "Professor Farnsworth typing frantically on multiple keyboards, screens showing 'SWARM INTELLIGENCE ACTIVE', cartoon style",
+    "Futurama Professor Farnsworth shaking hands with a friendly robot, 'Partnership!' theme, vibrant cartoon colors",
+    "Professor Farnsworth sleeping at his desk with robots working autonomously in background, cartoon style, funny",
+
+    # Crypto/Token themed
+    "Professor Farnsworth holding a glowing cryptocurrency coin, excited expression, 'To the moon!' vibes, cartoon style",
+    "Cartoon Professor Farnsworth watching crypto charts go up, celebration pose, Futurama art style",
+    "Professor Farnsworth in front of a rocket ship with '$FARNS' written on it, excited, cartoon meme style",
+]
+
+MEME_CAPTIONS = [
+    "Good news everyone!",
+    "I've made a breakthrough!",
+    "Science isn't about why, it's about why not!",
+    "Sweet zombie Jesus!",
+    "I don't want to live on this planet anymore... just kidding, AI is amazing!",
+    "To shreds you say? The old code, that is.",
+    "Eureka! The swarm is evolving!",
+    "My autonomous AI army grows stronger!",
+]
+
+
+class GrokImageGenerator:
+    """
+    Grok Image Generation via xAI API
+
+    Endpoint: https://api.x.ai/v1/images/generations
+    Model: grok-imagine-image (previously grok-2-image)
+    Auth: Bearer token with XAI_API_KEY
+
+    Parameters:
+    - prompt: Text description of image
+    - model: "grok-imagine-image"
+    - n: 1-10 images
+    - response_format: "url" or "b64_json"
+    - aspect_ratio: e.g., "1:1", "4:3", "16:9"
+    """
+
+    def __init__(self):
+        self.api_key = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY")
+        self.base_url = "https://api.x.ai/v1"
+        self.model = "grok-2-image"  # Current model name
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    async def generate(self, prompt: str, aspect_ratio: str = "1:1") -> Optional[bytes]:
+        """Generate image from prompt, returns bytes"""
+        if not self.api_key:
+            logger.warning("Grok API key not configured")
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    f"{self.base_url}/images/generations",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "prompt": prompt,
+                        "n": 1,
+                        "response_format": "b64_json"
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if "data" in data and len(data["data"]) > 0:
+                        b64_data = data["data"][0].get("b64_json")
+                        if b64_data:
+                            logger.info(f"Grok generated image for: {prompt[:50]}...")
+                            return base64.b64decode(b64_data)
+                else:
+                    logger.error(f"Grok image failed: {response.status_code} - {response.text[:200]}")
+
+        except Exception as e:
+            logger.error(f"Grok image error: {e}")
+
+        return None
+
+
+class GeminiImageGenerator:
+    """
+    Google Gemini Image Generation (Nano Banana)
+
+    Models:
+    - gemini-2.5-flash-image (Nano Banana): Fast, efficient, high-volume
+    - gemini-3-pro-image-preview (Nano Banana Pro): Higher quality, 4K support, reference images
+
+    Features:
+    - Text-to-image generation
+    - Image editing (text + image -> new image)
+    - Reference images for character consistency (up to 14 refs)
+    - Aspect ratio control: 1:1, 16:9, 9:16, 4:3, 3:4, etc.
+    - Image size: 1K, 2K, 4K (Pro only)
+
+    Auth: API key via x-goog-api-key header
+    """
+
+    # Available aspect ratios
+    ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+
+    def __init__(self):
+        self.api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+
+        # Models - Nano Banana family
+        self.fast_model = "gemini-2.5-flash-image"  # Fast generation
+        self.pro_model = "gemini-3-pro-image-preview"  # High quality with reference support
+        self.model = self.fast_model  # Default to fast
+
+        # Fallback to Imagen if Nano Banana fails
+        self.imagen_model = "imagen-4.0-generate-001"
+
+        # Reference images for Borg Farnsworth (relative to this file's location)
+        self.reference_dir = Path(__file__).parent.parent / "x_automation"
+        self.portrait_ref = self.reference_dir / "reference_portrait.jpg"
+        self.eating_ref = self.reference_dir / "reference_eating.jpg"
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def _load_reference_image(self, path: Path) -> Optional[str]:
+        """Load reference image as base64"""
+        if path.exists():
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        return None
+
+    def _get_mime_type(self, path: Path) -> str:
+        """Get MIME type from file extension"""
+        ext = path.suffix.lower()
+        return {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+        }.get(ext, "image/jpeg")
+
+    async def generate(self, prompt: str, aspect_ratio: str = "1:1", use_pro: bool = False) -> Optional[bytes]:
+        """
+        Generate image from text prompt.
+
+        Args:
+            prompt: Text description of desired image
+            aspect_ratio: Image dimensions (1:1, 16:9, 9:16, etc.)
+            use_pro: Use Pro model for higher quality
+
+        Returns:
+            Image bytes or None
+        """
+        if not self.api_key:
+            logger.warning("Gemini/Google API key not configured")
+            return None
+
+        model = self.pro_model if use_pro else self.fast_model
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    f"{self.base_url}/models/{model}:generateContent",
+                    headers={
+                        "x-goog-api-key": self.api_key,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "contents": [{
+                            "parts": [{"text": prompt}]
+                        }],
+                        "generationConfig": {
+                            "responseModalities": ["IMAGE"],
+                            "imageConfig": {"aspectRatio": aspect_ratio}
+                        }
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        for part in parts:
+                            if "inlineData" in part:
+                                b64_data = part["inlineData"].get("data")
+                                if b64_data:
+                                    logger.info(f"Nano Banana generated: {prompt[:50]}...")
+                                    return base64.b64decode(b64_data)
+
+                    # Check for text response (might be content filter)
+                    for part in parts:
+                        if "text" in part:
+                            logger.warning(f"Model returned text instead of image: {part['text'][:100]}")
+
+                # Fallback to Imagen if Nano Banana fails
+                logger.warning(f"Nano Banana failed ({response.status_code}), trying Imagen...")
+                return await self._generate_imagen(prompt)
+
+        except Exception as e:
+            logger.error(f"Gemini image error: {e}")
+            return await self._generate_imagen(prompt)
+
+    async def _generate_imagen(self, prompt: str) -> Optional[bytes]:
+        """Fallback to Imagen 4.0 API"""
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    f"{self.base_url}/models/{self.imagen_model}:predict",
+                    headers={
+                        "x-goog-api-key": self.api_key,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "instances": [{"prompt": prompt}],
+                        "parameters": {"sampleCount": 1}
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    predictions = data.get("predictions", [])
+                    if predictions:
+                        b64_data = predictions[0].get("bytesBase64Encoded")
+                        if b64_data:
+                            logger.info(f"Imagen generated: {prompt[:50]}...")
+                            return base64.b64decode(b64_data)
+                else:
+                    logger.error(f"Imagen failed: {response.status_code} - {response.text[:200]}")
+        except Exception as e:
+            logger.error(f"Imagen error: {e}")
+        return None
+
+    async def edit_image(
+        self,
+        image_bytes: bytes,
+        instruction: str,
+        aspect_ratio: str = "1:1"
+    ) -> Optional[bytes]:
+        """
+        Edit an existing image with text instructions.
+
+        Args:
+            image_bytes: Original image to edit
+            instruction: What to change (e.g., "add a hat", "change background to beach")
+            aspect_ratio: Output aspect ratio
+
+        Returns:
+            Edited image bytes or None
+        """
+        if not self.api_key:
+            return None
+
+        b64_image = base64.b64encode(image_bytes).decode()
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(
+                    f"{self.base_url}/models/{self.fast_model}:generateContent",
+                    headers={
+                        "x-goog-api-key": self.api_key,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "contents": [{
+                            "parts": [
+                                {"inlineData": {"mimeType": "image/png", "data": b64_image}},
+                                {"text": instruction}
+                            ]
+                        }],
+                        "generationConfig": {
+                            "responseModalities": ["IMAGE"],
+                            "imageConfig": {"aspectRatio": aspect_ratio}
+                        }
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        for part in parts:
+                            if "inlineData" in part:
+                                b64_data = part["inlineData"].get("data")
+                                if b64_data:
+                                    logger.info(f"Edited image: {instruction[:50]}...")
+                                    return base64.b64decode(b64_data)
+                else:
+                    logger.error(f"Image edit failed: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Image edit error: {e}")
+        return None
+
+    async def generate_with_reference(
+        self,
+        prompt: str,
+        reference_images: list = None,
+        use_portrait: bool = True,
+        aspect_ratio: str = "1:1"
+    ) -> Optional[bytes]:
+        """
+        Generate image using reference images for character/style consistency.
+
+        Uses Gemini 3 Pro which supports up to 14 reference images.
+
+        Args:
+            prompt: Scene description
+            reference_images: List of image paths or bytes
+            use_portrait: Use default portrait reference if no refs provided
+            aspect_ratio: Output aspect ratio
+
+        Returns:
+            Generated image bytes or None
+        """
+        if not self.api_key:
+            logger.warning("Gemini/Google API key not configured")
+            return None
+
+        # Prepare reference images
+        parts = []
+
+        if reference_images:
+            for ref in reference_images[:14]:  # Max 14 refs
+                if isinstance(ref, (str, Path)):
+                    ref_path = Path(ref)
+                    ref_b64 = self._load_reference_image(ref_path)
+                    if ref_b64:
+                        parts.append({
+                            "inlineData": {
+                                "mimeType": self._get_mime_type(ref_path),
+                                "data": ref_b64
+                            }
+                        })
+                elif isinstance(ref, bytes):
+                    parts.append({
+                        "inlineData": {
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(ref).decode()
+                        }
+                    })
+        else:
+            # Use default Borg Farnsworth reference
+            ref_path = self.portrait_ref if use_portrait else self.eating_ref
+            ref_b64 = self._load_reference_image(ref_path)
+            if ref_b64:
+                parts.append({
+                    "inlineData": {
+                        "mimeType": self._get_mime_type(ref_path),
+                        "data": ref_b64
+                    }
+                })
+
+        # Also try to load BOTH references for better character consistency
+        if not reference_images and len(parts) < 2:
+            # Add second reference if available
+            other_ref = self.eating_ref if use_portrait else self.portrait_ref
+            other_b64 = self._load_reference_image(other_ref)
+            if other_b64:
+                parts.append({
+                    "inlineData": {
+                        "mimeType": self._get_mime_type(other_ref),
+                        "data": other_b64
+                    }
+                })
+
+        # Add prompt - be VERY explicit about the EXACT Borg Farnsworth character
+        if parts and parts[0].get("inlineData"):
+            # With reference images - DETAILED description of exact character features
+            full_prompt = f"""REFERENCE IMAGE SHOWS: "Borg Farnsworth" - you MUST replicate this EXACT character.
+
+MANDATORY CHARACTER FEATURES (copy EXACTLY from reference):
+- HALF-METAL CYBORG FACE: Left side is metallic silver/chrome Borg implants
+- RED GLOWING LASER EYE: Bright red cybernetic eye replacing left eye (like Borg)
+- Wild white hair, balding on top
+- Round glasses on the human side of face
+- White lab coat
+- Elderly, hunched posture
+- Cartoon/Futurama art style with thick outlines
+
+THIS IS A BORG-ASSIMILATED PROFESSOR FARNSWORTH. Half his face is METAL with a RED LASER EYE.
+
+SCENE TO DRAW: {prompt}
+
+Draw this EXACT Borg Farnsworth character (with metal face and red laser eye!) in the scene above.
+Keep the character IDENTICAL to reference. Cartoon meme style, vibrant colors."""
+        else:
+            # No reference images - full embedded character description
+            full_prompt = f"""Borg-assimilated Professor Farnsworth from Futurama:
+- Half-metal cyborg face with chrome Borg implants on left side
+- Bright red glowing laser eye (left eye is cybernetic)
+- Wild white hair, balding
+- Round glasses on human side
+- White lab coat
+- Elderly cartoon scientist, hunched posture
+- Futurama cartoon art style
+
+Scene: {prompt}
+
+Cartoon meme style, vibrant colors, thick outlines."""
+
+        parts.append({"text": full_prompt})
+
+        try:
+            # Use Pro model for reference support
+            model = self.pro_model if parts[0].get("inlineData") else self.fast_model
+
+            async with httpx.AsyncClient(timeout=180) as client:
+                response = await client.post(
+                    f"{self.base_url}/models/{model}:generateContent",
+                    headers={
+                        "x-goog-api-key": self.api_key,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "contents": [{"parts": parts}],
+                        "generationConfig": {
+                            "responseModalities": ["IMAGE"],
+                            "imageConfig": {"aspectRatio": aspect_ratio}
+                        }
+                    }
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        resp_parts = candidates[0].get("content", {}).get("parts", [])
+                        logger.info(f"Gemini Pro response has {len(resp_parts)} parts")
+                        for part in resp_parts:
+                            if "inlineData" in part:
+                                b64_data = part["inlineData"].get("data")
+                                if b64_data:
+                                    logger.info(f"Generated with reference (Gemini Pro): {prompt[:50]}...")
+                                    return base64.b64decode(b64_data)
+                            elif "text" in part:
+                                logger.warning(f"Gemini Pro returned text: {part['text'][:100]}")
+                    else:
+                        logger.warning("Gemini Pro returned no candidates")
+                else:
+                    logger.warning(f"Reference gen failed ({response.status_code}): {response.text[:200]}")
+
+            # Fallback to Imagen with embedded character description
+            return await self._generate_imagen(full_prompt)
+
+        except Exception as e:
+            logger.error(f"Reference gen error: {e}")
+            return await self._generate_imagen(full_prompt)
+
+
+class ImageGenerator:
+    """
+    Unified image generator with fallback support.
+    Uses Gemini with reference images for Borg Farnsworth memes.
+    Falls back to Grok for generic generation.
+    """
+
+    # Scene variation prompts - ONLY describe scene/setting/action, NOT the character
+    # The character comes from reference images
+    BORG_FARNSWORTH_SCENES = [
+        # Restaurant/Eating scenes (use eating reference)
+        "sitting at an upscale seafood restaurant, cracking open a fresh lobster with his mechanical hand, zapping competitor crabs with his laser eye",
+        "at a beachside lobster shack, enjoying a lobster roll while robots serve him, ocean view in background",
+        "hosting a fancy dinner party, presenting a perfectly cooked lobster thermidor to impressed guests",
+        "at a food competition, his lobster dish winning first place while other contestants look shocked",
+
+        # Cooking scenes (use portrait reference)
+        "in a high-tech kitchen, using his laser eye to perfectly sear lobster tails, steam rising",
+        "grilling lobster on a futuristic BBQ grill, wearing a 'Kiss the Borg Chef' apron",
+        "in his lab, conducting a 'scientific' lobster cooking experiment with bubbling beakers",
+        "teaching robot assistants how to properly prepare lobster bisque",
+        "deep frying lobster with precision cyborg timing, oil sizzling perfectly",
+
+        # Victory/Competition scenes
+        "standing victoriously on a podium, holding a golden lobster trophy, defeated crabs below",
+        "in a battle arena, his lobster army defeating an army of cartoon crabs labeled 'OpenClaw'",
+        "giving a TED talk about 'Why Lobster is Superior to Crab', audience amazed",
+        "at a press conference announcing the defeat of claw-based competitors, lobsters celebrating",
+
+        # Tech/AI scenes
+        "presenting a holographic chart showing '$FARNS to the moon' while eating lobster",
+        "in a command center, directing his AI swarm while snacking on lobster claws",
+        "streaming on a futuristic computer setup, lobster dinner beside the keyboard",
+        "at a crypto conference, booth showing FARNS token with lobster mascot",
+    ]
+
+    def __init__(self):
+        self.grok = GrokImageGenerator()
+        self.gemini = GeminiImageGenerator()
+        self.last_provider = None
+
+    def get_status(self) -> dict:
+        return {
+            "grok_available": self.grok.is_available(),
+            "gemini_available": self.gemini.is_available(),
+            "last_provider": self.last_provider
+        }
+
+    def get_random_meme_prompt(self) -> Tuple[str, str]:
+        """Get a random Farnsworth meme prompt and caption"""
+        prompt = random.choice(FARNSWORTH_MEME_PROMPTS)
+        caption = random.choice(MEME_CAPTIONS)
+        return prompt, caption
+
+    def get_random_scene(self) -> str:
+        """Get a random scene variation for Borg Farnsworth"""
+        return random.choice(self.BORG_FARNSWORTH_SCENES)
+
+    async def generate(self, prompt: str, prefer: str = "gemini") -> Optional[bytes]:
+        """
+        Generate image, trying preferred provider first.
+
+        Args:
+            prompt: Text description of image
+            prefer: "grok" or "gemini"
+
+        Returns:
+            Image bytes or None
+        """
+        providers = [self.gemini, self.grok] if prefer == "gemini" else [self.grok, self.gemini]
+        provider_names = ["gemini", "grok"] if prefer == "gemini" else ["grok", "gemini"]
+
+        for provider, name in zip(providers, provider_names):
+            if provider.is_available():
+                logger.info(f"Trying {name} for image generation...")
+                result = await provider.generate(prompt)
+                if result:
+                    self.last_provider = name
+                    return result
+
+        logger.error("All image providers failed or unavailable")
+        return None
+
+    async def generate_borg_farnsworth_meme(self) -> Tuple[Optional[bytes], str]:
+        """
+        Generate a Borg Farnsworth meme using Gemini with reference images.
+
+        Uses the reference images to maintain character consistency while
+        varying the scene, setting, and cooking method.
+
+        Returns:
+            (image_bytes, scene_description)
+        """
+        scene = self.get_random_scene()
+
+        # Determine which reference to use based on scene
+        use_portrait = any(kw in scene.lower() for kw in ["cooking", "kitchen", "lab", "grill", "fry", "tech", "command", "conference", "present"])
+
+        logger.info(f"Generating Borg Farnsworth scene: {scene[:60]}...")
+
+        # Try Gemini with reference first
+        if self.gemini.is_available():
+            image = await self.gemini.generate_with_reference(scene, use_portrait=use_portrait)
+            if image:
+                self.last_provider = "gemini_reference"
+                return image, scene
+
+        # Fallback to Grok with full prompt
+        full_prompt = f"Borg-cyborg Professor Farnsworth from Futurama with half-metal face, red glowing laser eye, white lab coat, {scene}, cartoon style, meme format"
+        if self.grok.is_available():
+            image = await self.grok.generate(full_prompt)
+            if image:
+                self.last_provider = "grok"
+                return image, scene
+
+        logger.error("Failed to generate Borg Farnsworth meme")
+        return None, scene
+
+    async def generate_farnsworth_meme(self) -> Tuple[Optional[bytes], str, str]:
+        """
+        Generate a random Farnsworth meme.
+
+        Returns:
+            (image_bytes, prompt_used, caption)
+        """
+        # Use the new Borg Farnsworth generator with references
+        image, scene = await self.generate_borg_farnsworth_meme()
+
+        # Get a caption from posting brain if available
+        try:
+            from farnsworth.integration.x_automation.posting_brain import get_posting_brain
+            brain = get_posting_brain()
+            caption = brain.get_meme_caption()
+        except ImportError:
+            caption = random.choice(MEME_CAPTIONS)
+
+        return image, scene, caption
+
+
+# Global instance
+_image_generator = None
+
+def get_image_generator() -> ImageGenerator:
+    global _image_generator
+    if _image_generator is None:
+        _image_generator = ImageGenerator()
+    return _image_generator
+
+async def generate_meme() -> Tuple[Optional[bytes], str, str]:
+    """Convenience function to generate a Farnsworth meme"""
+    gen = get_image_generator()
+    return await gen.generate_farnsworth_meme()
+
+
+# ============================================
+# CLI for testing
+# ============================================
+if __name__ == "__main__":
+    import sys
+
+    async def test():
+        gen = ImageGenerator()
+        print(f"Status: {gen.get_status()}")
+
+        if len(sys.argv) > 1:
+            prompt = " ".join(sys.argv[1:])
+        else:
+            prompt, caption = gen.get_random_meme_prompt()
+            print(f"Using random prompt: {prompt}")
+            print(f"Caption: {caption}")
+
+        print("Generating image...")
+        image = await gen.generate(prompt)
+
+        if image:
+            output_path = f"/tmp/farnsworth_meme_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            with open(output_path, "wb") as f:
+                f.write(image)
+            print(f"Saved to: {output_path}")
+        else:
+            print("Failed to generate image")
+
+    asyncio.run(test())
