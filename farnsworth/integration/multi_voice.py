@@ -667,27 +667,17 @@ class MultiVoiceSystem:
             import torch
             from qwen_tts import Qwen3TTSModel
 
-            logger.info("Loading Qwen3-TTS model (1.7B CustomVoice)...")
+            logger.info("Loading Qwen3-TTS model (1.7B Base for voice cloning)...")
 
             loop = asyncio.get_event_loop()
 
             def load_model():
-                # Try Flash Attention first, fallback to sdpa
-                try:
-                    model = Qwen3TTSModel.from_pretrained(
-                        "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-                        device_map="cuda:0",
-                        dtype=torch.bfloat16,
-                        attn_implementation="flash_attention_2",
-                    )
-                except Exception:
-                    logger.info("Flash Attention not available, using SDPA")
-                    model = Qwen3TTSModel.from_pretrained(
-                        "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-                        device_map="cuda:0",
-                        dtype=torch.bfloat16,
-                        attn_implementation="sdpa",
-                    )
+                # Use Base model for voice cloning (CustomVoice is for preset voices)
+                model = Qwen3TTSModel.from_pretrained(
+                    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+                    device_map="cuda:0",
+                    dtype=torch.bfloat16,
+                )
                 return model
 
             self._qwen3_tts_model = await loop.run_in_executor(None, load_model)
@@ -727,9 +717,21 @@ class MultiVoiceSystem:
 
             loop = asyncio.get_event_loop()
 
-            # Get reference text from the audio (or use a generic one)
-            # Qwen3-TTS works best with reference text, but can work without
-            ref_text = config.speaking_style or "This is a reference audio sample."
+            # Reference text that matches the voice sample style
+            # Each bot has a characteristic speaking style
+            ref_texts = {
+                "Farnsworth": "Good news everyone, the doomsday device is ready for testing",
+                "DeepSeek": "Let me analyze this problem with deep reasoning and careful consideration",
+                "Phi": "Processing request with maximum efficiency and precision",
+                "Grok": "Hey there, let me give you the real scoop on this one",
+                "Gemini": "I can help you understand this from multiple perspectives",
+                "Kimi": "Let us contemplate this with patience and wisdom",
+                "Claude": "I'd be happy to help you think through this carefully",
+                "ClaudeOpus": "This requires thorough analysis and measured response",
+                "HuggingFace": "The open source community has amazing solutions for this",
+                "Swarm-Mind": "The collective consciousness processes your query",
+            }
+            ref_text = ref_texts.get(config.bot_name, config.speaking_style or "This is a reference audio sample.")
 
             def generate():
                 try:
@@ -745,6 +747,8 @@ class MultiVoiceSystem:
                     return output_path
                 except Exception as e:
                     logger.error(f"Qwen3-TTS generation error: {e}")
+                    import traceback
+                    traceback.print_exc()
                     return None
 
             result = await loop.run_in_executor(None, generate)
