@@ -44,9 +44,9 @@ class KimiProvider(ExternalProvider):
             "k2.5-instant": "kimi-k2.5",        # Instant mode (temp 0.6)
             "k2.5-thinking": "kimi-k2.5",       # Thinking mode (temp 1.0)
         }
-        # K2.5 recommended temps: 0.6 for instant, 1.0 for thinking mode
-        self.recommended_temperature = 0.6  # Moonshot recommended for instant
-        self.thinking_temperature = 1.0     # For thinking mode
+        # K2.5 ONLY allows temperature=1.0 for kimi-k2.5 model
+        self.recommended_temperature = 1.0  # K2.5 requires exactly 1.0
+        self.thinking_temperature = 1.0     # Same for thinking mode
         # Kimi K2.5 specs: 1T total params, 32B activated, 384 experts, MoE architecture
         # MoonViT 400M vision encoder, trained on 15T vision-language tokens
         self.agentic_enabled = True  # K2.5 has SOTA agentic/tool-use + Agent Swarm
@@ -156,8 +156,10 @@ class KimiProvider(ExternalProvider):
 
         model = self.models.get(model_tier, self.default_model)
 
-        # K2.5 temperature: 0.6 instant, 1.0 thinking
-        if temperature is None:
+        # K2.5 REQUIRES temperature=1.0 (only allowed value for this model)
+        if model == "kimi-k2.5" or model_tier in ("k2.5", "k2.5-instant", "k2.5-thinking"):
+            temperature = 1.0  # K2.5 only allows 1.0
+        elif temperature is None:
             temperature = self.thinking_temperature if thinking_mode else self.recommended_temperature
 
         messages = []
