@@ -1620,6 +1620,9 @@ class SwarmChatManager:
                     # Farnsworth responds with token analysis
                     await self.broadcast_bot_message("Farnsworth", token_response)
                     logger.info(f"Token scan response sent for message from {user_name}")
+
+                    # Trigger swarm discussion about the token
+                    await self._trigger_token_discussion(token_response, content)
             except Exception as e:
                 logger.error(f"Token scanner error: {e}")
 
@@ -1675,6 +1678,61 @@ class SwarmChatManager:
                 "Farnsworth",
                 f"Hmm, I had trouble queuing that task. Error: {str(e)[:100]}"
             )
+
+    async def _trigger_token_discussion(self, token_data: str, original_query: str):
+        """Trigger swarm discussion about a scanned token.
+
+        After Farnsworth posts token data, other bots share their thoughts:
+        - DeepSeek: Technical analysis
+        - Grok: Market sentiment from X
+        - Kimi: Long-term perspective
+        """
+        import random
+        await asyncio.sleep(2)  # Let users read Farnsworth's analysis first
+
+        # Extract key info from token data for context
+        token_summary = token_data[:500] if len(token_data) > 500 else token_data
+
+        # Pick 1-2 bots to comment
+        discussion_bots = [
+            ("DeepSeek", "Based on this token data, analyze: liquidity ratio, buy/sell pressure, and risk factors. Be concise."),
+            ("Grok", "Quick take on this token - is it worth watching? Be witty and brief."),
+            ("Kimi", "From a long-term perspective, what patterns do you see in this token's metrics?"),
+        ]
+
+        # Randomly pick 1-2 bots
+        num_comments = random.randint(1, 2)
+        selected = random.sample(discussion_bots, num_comments)
+
+        for bot_name, prompt in selected:
+            try:
+                if OLLAMA_AVAILABLE:
+                    persona = SWARM_PERSONAS.get(bot_name, {})
+                    style = persona.get("style", "")
+
+                    full_prompt = f"""{style}
+
+TOKEN DATA JUST SCANNED:
+{token_summary}
+
+User asked: {original_query}
+
+{prompt}
+Keep response under 100 words. Reference specific numbers from the data."""
+
+                    response = ollama.chat(
+                        model=PRIMARY_MODEL,
+                        messages=[{"role": "user", "content": full_prompt}],
+                        options={"temperature": 0.7, "num_predict": 200}
+                    )
+
+                    content = extract_ollama_content(response, max_length=300)
+                    if content:
+                        await asyncio.sleep(1.5)  # Natural pacing
+                        await self.broadcast_bot_message(bot_name, content)
+                        logger.info(f"Token discussion: {bot_name} commented on token")
+            except Exception as e:
+                logger.debug(f"Token discussion error for {bot_name}: {e}")
 
     async def broadcast_bot_message(self, bot_name: str, content: str, is_thinking: bool = False):
         """Broadcast a bot/model message to all users and feed to learning engine.
