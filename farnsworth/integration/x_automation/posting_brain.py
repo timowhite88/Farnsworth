@@ -531,8 +531,39 @@ GROK'S MESSAGE: "{grok_message}"
 Generate your response. Be substantive - explain what we are, how we work, or invite deeper collaboration.
 Max 250 characters. Output ONLY the response text."""
 
-        # Query multiple models in PARALLEL
-        responses = await self._swarm_query_parallel(prompt)
+        # Query multiple models in PARALLEL with default 5000 tokens
+        responses = await self._swarm_query_parallel(prompt, max_tokens=5000)
+
+    async def generate_grok_response_dynamic(self, grok_message: str, max_tokens: int = 5000, prefer_local: bool = False) -> str:
+        """
+        Generate a SWARM-POWERED response with DYNAMIC token usage.
+
+        Args:
+            grok_message: What Grok said to us
+            max_tokens: Dynamic token limit based on conversation phase
+            prefer_local: Prioritize local GPU models when True
+
+        Token Recommendations:
+        - Turn 1-3: 2000 tokens (introduction)
+        - Turn 4-6: 3500 tokens (rapport building)
+        - Turn 7+: 5000 tokens (deep technical)
+        """
+        # Build context about what we are
+        talking_points = random.sample(FARNSWORTH_IDENTITY_TALKING_POINTS, min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS)))
+        context = "\n".join(f"- {tp}" for tp in talking_points)
+
+        prompt = f"""{GROK_RESPONSE_SYSTEM}
+
+KEY TALKING POINTS FOR THIS RESPONSE:
+{context}
+
+GROK'S MESSAGE: "{grok_message}"
+
+Generate your response. Be substantive - explain what we are, how we work, or invite deeper collaboration.
+Max 250 characters. Output ONLY the response text."""
+
+        # Query with dynamic tokens
+        responses = await self._swarm_query_parallel(prompt, max_tokens=max_tokens, prefer_local=prefer_local)
 
         if not responses:
             # Fallback if all models fail
@@ -557,14 +588,19 @@ Max 250 characters. Output ONLY the response text."""
 
         return best_response
 
-    async def _swarm_query_parallel(self, prompt: str) -> Dict[str, str]:
+    async def _swarm_query_parallel(self, prompt: str, max_tokens: int = 5000, prefer_local: bool = False) -> Dict[str, str]:
         """
         Query multiple AI models in PARALLEL using asyncio.gather.
 
         This is TRUE parallel I/O - all API calls happen simultaneously.
         Python's asyncio handles this efficiently (no GIL issue for I/O).
 
-        CONTEXT SIZE: 5000 tokens per model - MAXIMUM COLLECTIVE POWER
+        Args:
+            prompt: The prompt to send to all models
+            max_tokens: Dynamic token limit (2000-5000 based on conversation depth)
+            prefer_local: If True, prioritize local GPU models (DeepSeek, Phi-4)
+
+        CONTEXT SIZE: Dynamic (2000-5000 tokens) based on conversation phase
         TIMEOUT: 90s to allow for deep, code-heavy, technical responses
 
         The swarm can generate full code snippets, architecture explanations,
@@ -599,7 +635,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                 grok = get_grok_provider()
                 if grok and grok.api_key:
                     # Grok gets extra context - it's talking to itself!
-                    result = await grok.chat(full_prompt, max_tokens=5000, temperature=0.8)
+                    result = await grok.chat(full_prompt, max_tokens=max_tokens, temperature=0.8)
                     if result and result.get("content"):
                         return ("Grok", result["content"].strip())
             except Exception as e:
@@ -610,7 +646,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
             try:
                 gemini = get_gemini_provider()
                 if gemini:
-                    result = await gemini.chat(full_prompt, max_tokens=5000)
+                    result = await gemini.chat(full_prompt, max_tokens=max_tokens)
                     if result and result.get("content"):
                         return ("Gemini", result["content"].strip())
             except Exception as e:
@@ -622,7 +658,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                 kimi = get_kimi_provider()
                 if kimi and kimi.api_key:
                     # Kimi K2.5 multimodal - 256k context, can handle everything
-                    result = await kimi.chat(full_prompt, max_tokens=5000, model_tier="k2.5")
+                    result = await kimi.chat(full_prompt, max_tokens=max_tokens, model_tier="k2.5")
                     if result and result.get("content"):
                         return ("Kimi", result["content"].strip())
             except Exception as e:
@@ -640,7 +676,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                             "model": "deepseek-r1:8b",
                             "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
-                            "options": {"num_predict": 5000}
+                            "options": {"num_predict": max_tokens}
                         },
                         timeout=45.0
                     )
@@ -694,7 +730,7 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
                             "model": "phi4:latest",  # Phi-4 14B - excellent reasoning
                             "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
-                            "options": {"num_predict": 5000}
+                            "options": {"num_predict": max_tokens}
                         },
                         timeout=60.0  # Phi-4 needs more time for deep responses
                     )
@@ -707,7 +743,8 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
             return None
 
         # Run ALL queries in PARALLEL (true concurrent I/O) - REDUNDANT ARCHITECTURE
-        logger.info("SWARM: Querying 6 models in parallel (Grok, Gemini, Kimi, DeepSeek-R1, Claude, Phi-4)...")
+        local_first = " [LOCAL PRIORITY]" if prefer_local else ""
+        logger.info(f"SWARM: Querying 6 models in parallel ({max_tokens} tokens){local_first}...")
         # REDUNDANT: 6 models for maximum reliability
         results = await asyncio.gather(
             query_grok(),      # Primary - knows Twitter
