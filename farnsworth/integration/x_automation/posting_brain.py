@@ -684,30 +684,30 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
             return None
 
         async def query_phi():
-            """Phi via Ollama - fast local model."""
+            """Phi-4 14B via Ollama - powerful local reasoning model."""
             try:
                 import httpx
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "http://localhost:11434/api/chat",
                         json={
-                            "model": "phi3:latest",
+                            "model": "phi4:latest",  # Phi-4 14B - excellent reasoning
                             "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
                             "options": {"num_predict": 5000}
                         },
-                        timeout=30.0
+                        timeout=60.0  # Phi-4 needs more time for deep responses
                     )
                     if resp.status_code == 200:
                         data = resp.json()
                         if data.get("message", {}).get("content"):
-                            return ("Phi", data["message"]["content"].strip())
+                            return ("Phi4", data["message"]["content"].strip())
             except Exception as e:
-                logger.debug(f"Phi query failed: {e}")
+                logger.debug(f"Phi4 query failed: {e}")
             return None
 
         # Run ALL queries in PARALLEL (true concurrent I/O) - REDUNDANT ARCHITECTURE
-        logger.info("SWARM: Querying 6 models in parallel (Grok, Gemini, Kimi, DeepSeek, Claude, Phi)...")
+        logger.info("SWARM: Querying 6 models in parallel (Grok, Gemini, Kimi, DeepSeek-R1, Claude, Phi-4)...")
         # REDUNDANT: 6 models for maximum reliability
         results = await asyncio.gather(
             query_grok(),      # Primary - knows Twitter
@@ -754,9 +754,9 @@ async def infer(prompt, strategy=PARALLEL_VOTE):
             "Grok": 1.3,      # Grok knows Twitter + talking to itself
             "Gemini": 1.2,    # Good at nuance and technical explanation
             "Claude": 1.2,    # Excellent reasoning and safety
-            "DeepSeek": 1.15, # Strong reasoning and code understanding
-            "Phi": 1.1,       # Fast and efficient
-            "Kimi": 1.0,      # Thoughtful, 256k context
+            "DeepSeek": 1.2,  # Strong reasoning, R1 architecture
+            "Phi4": 1.15,     # Phi-4 14B - excellent local reasoning
+            "Kimi": 1.1,      # K2.5 multimodal, 256k context
         }
 
         # Technical keywords that show depth
