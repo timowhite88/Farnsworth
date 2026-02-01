@@ -844,9 +844,14 @@ def get_huggingface_provider() -> Optional[HuggingFaceProvider]:
     global _hf_provider
     if _hf_provider is None:
         api_key = os.environ.get("HF_API_KEY") or os.environ.get("HUGGINGFACE_API_KEY")
+        # Create provider even without API key - local transformers will work
+        _hf_provider = HuggingFaceProvider(api_key)
         if api_key:
-            _hf_provider = HuggingFaceProvider(api_key)
-            logger.info("HuggingFace provider initialized")
+            logger.info("HuggingFace provider initialized with API key")
+        elif _hf_provider._transformers_available:
+            logger.info("HuggingFace provider initialized (local transformers only)")
+        else:
+            logger.warning("HuggingFace provider initialized but no API key or local transformers")
     return _hf_provider
 
 
