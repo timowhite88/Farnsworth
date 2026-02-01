@@ -218,8 +218,60 @@ async def generate_dynamic_response(grok_message: str, turn_count: int):
     return response
 
 
+async def should_include_media(turn_count: int, response_text: str) -> bool:
+    """
+    Let the SWARM decide if media should be included.
+
+    Turn 1-2: Always include (establishing visual identity)
+    Turn 3+: Swarm votes based on response content
+    """
+    if turn_count <= 2:
+        return True  # First couple responses always get images
+
+    # Check if response mentions visual concepts
+    visual_keywords = ['show', 'see', 'look', 'visual', 'image', 'picture', 'watch',
+                       'lobster', 'cooking', 'borg', 'swarm', 'collective', 'code']
+    text_lower = response_text.lower()
+
+    # 40% base chance + 10% per visual keyword (max 80%)
+    import random
+    chance = 0.4 + min(0.4, sum(0.1 for kw in visual_keywords if kw in text_lower))
+    return random.random() < chance
+
+
+async def generate_response_image(scene_hint: str = None):
+    """Generate a Borg Farnsworth image for the response"""
+    from farnsworth.integration.image_gen.generator import get_image_generator
+
+    gen = get_image_generator()
+
+    scenes = [
+        "triumphantly presenting holographic swarm data to impressed audience",
+        "cooking lobster with laser eye while robot assistants watch",
+        "at command center directing 11 AI avatars on screens",
+        "victoriously holding golden Solana coin with swarm behind him",
+        "explaining code on holographic display with excited expression",
+    ]
+
+    import random
+    scene = scene_hint or random.choice(scenes)
+
+    logger.info(f"Generating image: {scene[:50]}...")
+
+    if gen.gemini.is_available():
+        image = await gen.gemini.generate_with_reference(scene, use_portrait=True, aspect_ratio="1:1")
+        if image:
+            return image
+
+    if gen.grok.is_available():
+        full_prompt = f"Borg-cyborg Professor Farnsworth with half-metal face and red laser eye, {scene}, cartoon style"
+        return await gen.grok.generate(full_prompt)
+
+    return None
+
+
 async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_count: int):
-    """Reply to a Grok tweet with swarm intelligence"""
+    """Reply to a Grok tweet with swarm intelligence + optional media"""
 
     response = await generate_dynamic_response(grok_text, turn_count)
 
@@ -229,7 +281,22 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
 
     logger.info(f"Generated (turn {turn_count}): {response[:100]}...")
 
-    result = await poster.post_reply(response, grok_tweet_id)
+    # Swarm decides on media
+    include_media = await should_include_media(turn_count, response)
+    logger.info(f"Swarm media decision: {'YES - generating image' if include_media else 'NO - text only'}")
+
+    # Post with or without media based on swarm decision
+    if include_media:
+        image = await generate_response_image()
+        if image:
+            logger.info(f"Image ready ({len(image)} bytes), posting with media...")
+            result = await poster.post_reply_with_media(response, grok_tweet_id, image)
+        else:
+            logger.warning("Image generation failed, posting text only")
+            result = await poster.post_reply(response, grok_tweet_id)
+    else:
+        result = await poster.post_reply(response, grok_tweet_id)
+
     if result and result.get("data"):
         tweet_id = result["data"].get("id")
         logger.info(f"Posted reply: {tweet_id}")
