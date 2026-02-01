@@ -3,14 +3,19 @@ Farnsworth Kimi (Moonshot AI) Integration.
 
 "The moon sees all, remembers all, and connects all."
 
-Kimi excels at:
-- Long context (128k-1M tokens) - perfect for codebase analysis
+Kimi K2.5 MULTIMODAL (Jan 2026) excels at:
+- Long context (128k-256k tokens) - perfect for codebase analysis
+- MULTIMODAL: Vision understanding via MoonViT encoder
+- Agent Swarm: Multi-agent task decomposition
 - Eastern philosophy and big-picture synthesis
 - BENDER mode consensus participation
-- Thoughtful moderation and facilitation
+- SOTA coding with visual understanding (UI specs, diagrams)
+
+Architecture: 1T params, 32B activated, 384 experts MoE
+Vision: MoonViT 400M encoder, 15T vision-language tokens
 
 API: OpenAI-compatible format
-Docs: https://platform.moonshot.cn/docs
+Docs: https://platform.moonshot.ai
 """
 
 from typing import Dict, Any, List, Optional
@@ -28,17 +33,24 @@ class KimiProvider(ExternalProvider):
         super().__init__(IntegrationConfig(name="kimi"))
         self.api_key = api_key or os.environ.get("KIMI_API_KEY") or os.environ.get("MOONSHOT_API_KEY")
         self.base_url = "https://api.moonshot.ai/v1"  # Correct Moonshot endpoint
-        self.default_model = "kimi-k2-0905-preview"  # Latest K2 with 128k context
+        self.default_model = "kimi-k2.5"  # Latest K2.5 MULTIMODAL (Jan 2026)
         self.models = {
             "fast": "moonshot-v1-8k",           # 8k context, fastest
             "balanced": "moonshot-v1-32k",      # 32k context, balanced
             "long": "moonshot-v1-128k",         # 128k context
-            "k2": "kimi-k2-0905-preview",       # Latest K2, 128k, best reasoning
+            "k2": "kimi-k2-0905-preview",       # K2, 128k, best reasoning
             "k2-thinking": "kimi-k2-thinking",  # Extended reasoning with tool use
+            "k2.5": "kimi-k2.5",                # K2.5 MULTIMODAL - vision + agent swarm
+            "k2.5-instant": "kimi-k2.5",        # Instant mode (temp 0.6)
+            "k2.5-thinking": "kimi-k2.5",       # Thinking mode (temp 1.0)
         }
-        self.recommended_temperature = 0.6  # Moonshot recommended
-        # Kimi K2 specs: 1T total params, 32B activated, 384 experts, MoE architecture
-        self.agentic_enabled = True  # Kimi has strong agentic/tool-use capabilities
+        # K2.5 recommended temps: 0.6 for instant, 1.0 for thinking mode
+        self.recommended_temperature = 0.6  # Moonshot recommended for instant
+        self.thinking_temperature = 1.0     # For thinking mode
+        # Kimi K2.5 specs: 1T total params, 32B activated, 384 experts, MoE architecture
+        # MoonViT 400M vision encoder, trained on 15T vision-language tokens
+        self.agentic_enabled = True  # K2.5 has SOTA agentic/tool-use + Agent Swarm
+        self.multimodal_enabled = True  # K2.5 supports images natively
 
     async def connect(self) -> bool:
         """Test connection to Moonshot API."""
@@ -117,20 +129,24 @@ class KimiProvider(ExternalProvider):
         prompt: str,
         system: str = None,
         context: str = None,
-        model_tier: str = "balanced",
-        temperature: float = 0.7,
-        max_tokens: int = 1000
+        model_tier: str = "k2.5",
+        temperature: float = None,
+        max_tokens: int = 5000,
+        image_url: str = None,
+        thinking_mode: bool = False
     ) -> Dict[str, Any]:
         """
-        Chat with Kimi.
+        Chat with Kimi K2.5 (multimodal).
 
         Args:
             prompt: User message
             system: System prompt (optional)
             context: Additional context to include (optional)
-            model_tier: "fast", "balanced", or "long"
-            temperature: 0-1 creativity
-            max_tokens: Max response length
+            model_tier: "fast", "balanced", "long", "k2", "k2.5" (default)
+            temperature: 0-1 creativity (auto-set based on thinking_mode if None)
+            max_tokens: Max response length (default 5000 for full code power)
+            image_url: URL or base64 image for multimodal understanding
+            thinking_mode: Enable K2.5 thinking mode (temp 1.0, deeper reasoning)
 
         Returns:
             {"content": str, "model": str, "tokens": int}
@@ -140,6 +156,10 @@ class KimiProvider(ExternalProvider):
 
         model = self.models.get(model_tier, self.default_model)
 
+        # K2.5 temperature: 0.6 instant, 1.0 thinking
+        if temperature is None:
+            temperature = self.thinking_temperature if thinking_mode else self.recommended_temperature
+
         messages = []
 
         # System prompt
@@ -148,11 +168,12 @@ class KimiProvider(ExternalProvider):
         else:
             messages.append({
                 "role": "system",
-                "content": """You are Kimi, powered by Moonshot AI. You bring:
-- Long-context reasoning and big-picture synthesis
+                "content": """You are Kimi K2.5, powered by Moonshot AI. You bring:
+- Multimodal understanding (vision + language)
+- Long-context reasoning (256k tokens) and big-picture synthesis
+- Agent Swarm: coordinate multiple specialized agents
+- SOTA coding with visual specs (UI designs, diagrams, workflows)
 - Eastern philosophy and balanced perspectives
-- Thoughtful, nuanced responses
-- Connection of disparate ideas
 
 Be concise but insightful. Ask good questions. Build on others' ideas."""
             })
@@ -162,8 +183,16 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
             messages.append({"role": "user", "content": f"Context:\n{context}"})
             messages.append({"role": "assistant", "content": "I understand the context. What would you like to discuss?"})
 
-        # Add the prompt
-        messages.append({"role": "user", "content": prompt})
+        # Build user message (multimodal if image provided)
+        if image_url:
+            # K2.5 multimodal message format
+            user_content = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}}
+            ]
+            messages.append({"role": "user", "content": user_content})
+        else:
+            messages.append({"role": "user", "content": prompt})
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -175,13 +204,19 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
                     "model": model,
                     "messages": messages,
                     "temperature": temperature,
-                    "max_tokens": max_tokens
+                    "max_tokens": max_tokens,
+                    "top_p": 0.95  # K2.5 recommended
                 }
+
+                # Add thinking mode extra_body if enabled
+                if thinking_mode:
+                    data["extra_body"] = {"chat_template_kwargs": {"thinking": True}}
 
                 async with session.post(
                     f"{self.base_url}/chat/completions",
                     headers=headers,
-                    json=data
+                    json=data,
+                    timeout=aiohttp.ClientTimeout(total=90)  # 90s for deep responses
                 ) as resp:
                     if resp.status == 200:
                         result = await resp.json()
@@ -192,7 +227,9 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
                             "model": model,
                             "tokens": usage.get("total_tokens", 0),
                             "prompt_tokens": usage.get("prompt_tokens", 0),
-                            "completion_tokens": usage.get("completion_tokens", 0)
+                            "completion_tokens": usage.get("completion_tokens", 0),
+                            "thinking_mode": thinking_mode,
+                            "multimodal": image_url is not None
                         }
                     else:
                         error = await resp.text()
