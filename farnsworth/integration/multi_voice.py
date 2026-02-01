@@ -508,26 +508,26 @@ class MultiVoiceSystem:
         async with self._generation_lock:
             # Generate with best available provider
             try:
-                # Try Qwen3-TTS first (BEST quality - 2026 model)
-                if QWEN3_TTS_AVAILABLE and reference_audio:
-                    result = await self._generate_qwen3_tts(text, config, cache_path, reference_audio)
+                # Try XTTS v2 FIRST (most reliable voice cloning)
+                if XTTS_AVAILABLE and reference_audio:
+                    result = await self._generate_xtts(text, config, cache_path, reference_audio)
                     if result:
                         return result
-                    logger.warning(f"Qwen3-TTS failed for {bot_name}, trying Fish Speech")
+                    logger.warning(f"XTTS failed for {bot_name}, trying Fish Speech")
 
                 # Try Fish Speech second (great quality)
                 if FISH_SPEECH_AVAILABLE and reference_audio:
                     result = await self._generate_fish_speech(text, config, cache_path, reference_audio)
                     if result:
                         return result
-                    logger.warning(f"Fish Speech failed for {bot_name}, trying XTTS")
+                    logger.warning(f"Fish Speech failed for {bot_name}, trying Edge TTS")
 
-                # Try XTTS v2 (good quality fallback)
-                if XTTS_AVAILABLE and reference_audio:
-                    result = await self._generate_xtts(text, config, cache_path, reference_audio)
-                    if result:
-                        return result
-                    logger.warning(f"XTTS failed for {bot_name}, trying Edge TTS")
+                # Skip Qwen3-TTS for now - produces gibberish
+                # if QWEN3_TTS_AVAILABLE and reference_audio:
+                #     result = await self._generate_qwen3_tts(text, config, cache_path, reference_audio)
+                #     if result:
+                #         return result
+                #     logger.warning(f"Qwen3-TTS failed for {bot_name}, trying Edge TTS")
 
                 # Fall back to Edge TTS (no voice cloning but works without samples)
                 if EDGE_TTS_AVAILABLE:
