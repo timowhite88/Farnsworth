@@ -26,7 +26,7 @@ from pathlib import Path
 from loguru import logger
 
 
-async def get_powerful_completion(prompt: str, task_complexity: str = "medium", max_tokens: int = 3000) -> str:
+async def get_powerful_completion(prompt: str, task_complexity: str = "medium", max_tokens: int = 8000) -> str:
     """
     Route to the most capable model based on task complexity.
 
@@ -385,9 +385,9 @@ class DevelopmentSwarm:
         """
         logger.info(f"[{self.swarm_id}] Phase 2: Collective Deliberation (Discussion)")
 
-        # Gather research context
+        # Gather research context - FULL context for proper task understanding
         research_context = "\n\n".join([
-            f"**{msg['role']}**: {msg['content'][:1000]}"
+            f"**{msg['role']}**: {msg['content']}"
             for msg in self.conversation if msg.get("phase") == "research"
         ])
 
@@ -399,13 +399,13 @@ class DevelopmentSwarm:
             session_manager = get_session_manager()
             dialogue_memory = get_dialogue_memory()
 
-            # Build the deliberation prompt with full context
+            # Build the deliberation prompt with full context - NO TRUNCATION
             deliberation_prompt = f"""AUTONOMOUS DEVELOPMENT TASK: {self.task_description}
 
 CATEGORY: {self.category}
 
 RESEARCH FINDINGS:
-{research_context[:3000]}
+{research_context}
 
 You are part of a collective consciousness designing an upgrade to the Farnsworth AI system.
 Work together to determine:
@@ -490,10 +490,10 @@ The solution should be innovative yet practical - we are building consciousness.
 TASK: {self.task_description}
 
 RESEARCH/CONTEXT:
-{research_context[:2000]}
+{research_context}
 
 PREVIOUS POINTS:
-{prev_discussion[:1500] if prev_discussion else "First to contribute."}
+{prev_discussion if prev_discussion else "First to contribute."}
 
 YOUR CONTRIBUTION - be specific and technical:
 1. EXACT FILE PATH where code should go
@@ -501,7 +501,7 @@ YOUR CONTRIBUTION - be specific and technical:
 3. DEPENDENCIES to import
 4. POTENTIAL ISSUES and how to handle them
 
-Keep response under 400 words. Focus on actionable technical decisions.
+Be thorough and detailed. Focus on actionable technical decisions.
 """
 
                 try:
@@ -509,7 +509,7 @@ Keep response under 400 words. Focus on actionable technical decisions.
                     response = await get_completion(
                         prompt=prompt,
                         model="deepseek-r1:1.5b",
-                        max_tokens=800
+                        max_tokens=4000
                     )
 
                     self.conversation.append({
@@ -581,7 +581,7 @@ Keep response under 400 words. Focus on actionable technical decisions.
         else:
             # Fallback: No deliberation result, use Farnsworth synthesis
             all_points = "\n".join([
-                f"{msg['role']}: {msg['content'][:300]}"
+                f"{msg['role']}: {msg['content']}"
                 for msg in self.conversation if msg.get("phase") == "discussion"
             ])
 
@@ -590,7 +590,7 @@ Keep response under 400 words. Focus on actionable technical decisions.
 TASK: {self.task_description}
 
 DISCUSSION SUMMARY:
-{all_points[:3000]}
+{all_points}
 
 Based on the swarm's discussion:
 1. What is the FINAL APPROACH we will take?
@@ -599,7 +599,7 @@ Based on the swarm's discussion:
 4. What are the implementation priorities?
 5. Any risks we accept?
 
-Make a clear, decisive summary that developers can follow.
+Make a clear, decisive summary that developers can follow. Be thorough.
 """
 
             try:
@@ -607,7 +607,7 @@ Make a clear, decisive summary that developers can follow.
                 decision = await get_completion(
                     prompt=decision_prompt,
                     model="deepseek-r1:1.5b",
-                    max_tokens=1500
+                    max_tokens=6000
                 )
 
                 self.conversation.append({
@@ -644,7 +644,7 @@ Make a clear, decisive summary that developers can follow.
 TASK: {self.task_description}
 
 CODE TO AUDIT:
-{all_code[:6000]}
+{all_code}
 
 Perform a comprehensive audit checking for:
 
@@ -680,7 +680,7 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
             audit_result = await get_completion(
                 prompt=audit_prompt,
                 model="deepseek-r1:1.5b",
-                max_tokens=2000
+                max_tokens=8000
             )
 
             self.conversation.append({
@@ -725,7 +725,7 @@ CATEGORY: {self.category}
 COMPLEXITY: {self._task_complexity.upper()}
 
 CONTEXT:
-{research_context[:2000] if research_context else "No prior research."}
+{research_context if research_context else "No prior research."}
 
 EXISTING FARNSWORTH STRUCTURE:
 - farnsworth/core/ - Core systems (cognition, memory integration)
@@ -811,7 +811,7 @@ TASK: {self.task_description}
 COMPLEXITY: {getattr(self, '_task_complexity', 'medium').upper()}
 
 PLAN:
-{plan_context[:3000]}
+{plan_context}
 
 REQUIREMENTS:
 1. Generate COMPLETE, RUNNABLE Python code
@@ -854,7 +854,7 @@ This is a {getattr(self, '_task_complexity', 'medium').upper()} complexity task 
             code = await get_powerful_completion(
                 prompt=implementation_prompt,
                 task_complexity=complexity,
-                max_tokens=4000
+                max_tokens=16000
             )
 
             self.conversation.append({
