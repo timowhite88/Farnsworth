@@ -149,19 +149,35 @@
                     </div>
                 </div>
 
-                <div class="sidebar-section">
-                    <h3 class="sidebar-title" title="Journal entries for the current session">
-                        <span class="title-icon">📝</span>
-                        Journal
-                        <span class="help-tip">?</span>
+                <div class="sidebar-section polymarket-section">
+                    <h3 class="sidebar-title" title="AI Collective Polymarket Predictions">
+                        <span class="title-icon">🎯</span>
+                        Polymarket Picks
+                        <span class="prediction-live-dot"></span>
                     </h3>
-                    <p class="section-desc">Personal journal for your thoughts</p>
-                    <div class="notes-controls">
-                        <div class="note-input-group">
-                            <input type="text" id="note-input" placeholder="Write a journal entry..." title="Add a journal entry">
-                            <button id="add-note-btn" class="action-btn primary" title="Add note">+</button>
+                    <div class="prediction-stats-bar">
+                        <div class="stat-item accuracy">
+                            <span class="stat-value" id="pm-accuracy">--</span>
+                            <span class="stat-label">Accuracy</span>
                         </div>
-                        <div id="notes-list" class="notes-list"></div>
+                        <div class="stat-item streak">
+                            <span class="stat-value" id="pm-streak">0</span>
+                            <span class="stat-label">Streak</span>
+                        </div>
+                        <div class="stat-item total">
+                            <span class="stat-value" id="pm-total">0</span>
+                            <span class="stat-label">Picks</span>
+                        </div>
+                    </div>
+                    <div class="predictions-feed" id="predictions-feed">
+                        <div class="prediction-loading">
+                            <div class="prediction-spinner"></div>
+                            <span>Analyzing markets...</span>
+                        </div>
+                    </div>
+                    <div class="prediction-footer">
+                        <span class="prediction-update-time" id="pm-last-update">Updated: --</span>
+                        <span class="prediction-interval">Every 5 min</span>
                     </div>
                 </div>
 

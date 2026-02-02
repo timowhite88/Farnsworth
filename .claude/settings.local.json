@@ -129,7 +129,8 @@
       "Bash(gh api:*)",
       "WebFetch(domain:bags.fm)",
       "WebFetch(domain:www.moltbook.com)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "Bash(git rm:*)"
     ]
   }
 }

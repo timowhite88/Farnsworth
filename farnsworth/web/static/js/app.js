@@ -2414,3 +2414,167 @@ window.connectSwarmChat = connectSwarmChat;
 window.disconnectSwarmChat = disconnectSwarmChat;
 window.changeUsername = changeUsername;
 window.getOrPromptUsername = getOrPromptUsername;
+
+// ==========================================
+// POLYMARKET PREDICTIONS WIDGET
+// ==========================================
+
+const polymarketState = {
+    predictions: [],
+    stats: { accuracy: 0, streak: 0, total: 0, correct: 0 },
+    lastUpdate: null,
+    pollInterval: null
+};
+
+async function fetchPolymarketPredictions() {
+    try {
+        const response = await fetch('/api/polymarket/predictions?limit=10');
+        if (!response.ok) throw new Error('Failed to fetch predictions');
+        const data = await response.json();
+        polymarketState.predictions = data.predictions || [];
+        polymarketState.lastUpdate = new Date();
+        renderPolymarketPredictions();
+    } catch (error) {
+        console.error('Polymarket predictions fetch error:', error);
+    }
+}
+
+async function fetchPolymarketStats() {
+    try {
+        const response = await fetch('/api/polymarket/stats');
+        if (!response.ok) throw new Error('Failed to fetch stats');
+        const data = await response.json();
+        polymarketState.stats = data;
+        updatePolymarketStats();
+    } catch (error) {
+        console.error('Polymarket stats fetch error:', error);
+    }
+}
+
+function updatePolymarketStats() {
+    const { accuracy, streak, total } = polymarketState.stats;
+
+    const accuracyEl = document.getElementById('pm-accuracy');
+    const streakEl = document.getElementById('pm-streak');
+    const totalEl = document.getElementById('pm-total');
+
+    if (accuracyEl) {
+        accuracyEl.textContent = `${(accuracy * 100).toFixed(1)}%`;
+        // Color based on accuracy
+        if (accuracy >= 0.7) accuracyEl.style.color = '#00ff88';
+        else if (accuracy >= 0.5) accuracyEl.style.color = '#ffd700';
+        else accuracyEl.style.color = '#ff4444';
+    }
+    if (streakEl) {
+        streakEl.textContent = streak;
+        if (streak >= 5) streakEl.style.color = '#00ff88';
+    }
+    if (totalEl) totalEl.textContent = total;
+}
+
+function renderPolymarketPredictions() {
+    const feed = document.getElementById('predictions-feed');
+    if (!feed) return;
+
+    if (polymarketState.predictions.length === 0) {
+        feed.innerHTML = `
+            <div class="prediction-empty">
+                <div class="prediction-loading-spinner"></div>
+                <p>Collective analyzing markets...</p>
+                <p class="prediction-subtitle">Predictions refresh every 5 minutes</p>
+            </div>
+        `;
+        return;
+    }
+
+    const predictionsHtml = polymarketState.predictions.map(pred => {
+        const confidence = (pred.confidence * 100).toFixed(0);
+        const direction = pred.direction;
+        const directionClass = direction === 'YES' ? 'direction-yes' : 'direction-no';
+        const directionIcon = direction === 'YES' ? '📈' : '📉';
+
+        // Result badge if resolved
+        let resultBadge = '';
+        if (pred.result !== null && pred.result !== undefined) {
+            const isCorrect = pred.result === true;
+            resultBadge = `<span class="result-badge ${isCorrect ? 'result-correct' : 'result-wrong'}">${isCorrect ? '✓' : '✗'}</span>`;
+        }
+
+        // Format timestamp
+        const timeAgo = formatTimeAgo(new Date(pred.timestamp));
+
+        // Top signals
+        const topSignals = pred.top_signals || [];
+        const signalsHtml = topSignals.slice(0, 3).map(s =>
+            `<span class="signal-tag" title="${s.reasoning}">${s.name}: ${(s.weight * 100).toFixed(0)}%</span>`
+        ).join('');
+
+        return `
+            <div class="prediction-card ${directionClass}">
+                <div class="prediction-header">
+                    <span class="prediction-direction">${directionIcon} ${direction}</span>
+                    <span class="prediction-confidence">${confidence}% confident</span>
+                    ${resultBadge}
+                </div>
+                <div class="prediction-question">${truncateText(pred.question, 80)}</div>
+                <div class="prediction-signals">${signalsHtml}</div>
+                <div class="prediction-meta">
+                    <span class="prediction-time">${timeAgo}</span>
+                    <span class="prediction-market-price">Market: ${(pred.current_price * 100).toFixed(0)}%</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    feed.innerHTML = predictionsHtml;
+}
+
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength - 3) + '...';
+}
+
+function formatTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+}
+
+function startPolymarketPolling() {
+    // Initial fetch
+    fetchPolymarketPredictions();
+    fetchPolymarketStats();
+
+    // Poll every 30 seconds for updates
+    polymarketState.pollInterval = setInterval(() => {
+        fetchPolymarketPredictions();
+        fetchPolymarketStats();
+    }, 30000);
+}
+
+function stopPolymarketPolling() {
+    if (polymarketState.pollInterval) {
+        clearInterval(polymarketState.pollInterval);
+        polymarketState.pollInterval = null;
+    }
+}
+
+// Initialize when DOM is ready and on swarm page
+document.addEventListener('DOMContentLoaded', () => {
+    const predictionsFeed = document.getElementById('predictions-feed');
+    if (predictionsFeed) {
+        startPolymarketPolling();
+    }
+});
+
+// Expose functions globally
+window.fetchPolymarketPredictions = fetchPolymarketPredictions;
+window.fetchPolymarketStats = fetchPolymarketStats;
+window.startPolymarketPolling = startPolymarketPolling;

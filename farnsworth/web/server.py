@@ -6625,6 +6625,15 @@ async def start_swarm_heartbeat():
         logger.error(f"Failed to start heartbeat: {e}")
 
 
+@app.on_event("startup")
+async def start_polymarket_predictor():
+    """Start the Polymarket prediction engine."""
+    try:
+        await init_polymarket_predictor()
+    except Exception as e:
+        logger.error(f"Failed to start Polymarket predictor: {e}")
+
+
 @app.get("/api/heartbeat")
 async def get_heartbeat_status():
     """Get current swarm health vitals."""
@@ -6645,6 +6654,108 @@ async def get_heartbeat_history():
         return {"history": [v.to_dict() for v in heartbeat.health_history[-20:]]}
     except Exception as e:
         return {"error": str(e)}
+
+
+# =============================================================================
+# POLYMARKET PREDICTIONS - AI COLLECTIVE PREDICTION ENGINE
+# =============================================================================
+# Real-time predictions using 8 predictive markers + collective deliberation
+
+_polymarket_predictor = None
+_polymarket_task = None
+
+
+async def init_polymarket_predictor():
+    """Initialize and start the Polymarket predictor."""
+    global _polymarket_predictor, _polymarket_task
+
+    if _polymarket_predictor is not None:
+        return
+
+    try:
+        from farnsworth.core.polymarket_predictor import get_predictor
+
+        _polymarket_predictor = get_predictor()
+
+        # Register agent query functions
+        try:
+            # Try to get the swarm's agent functions
+            from farnsworth.core.model_swarm import get_swarm
+            swarm = get_swarm()
+
+            for agent_name in ['Grok', 'Gemini', 'Claude', 'DeepSeek', 'Farnsworth']:
+                if hasattr(swarm, 'query_agent'):
+                    async def make_query(prompt, max_tokens, agent=agent_name):
+                        try:
+                            result = await swarm.query_agent(agent, prompt, max_tokens)
+                            return (result, agent) if result else None
+                        except:
+                            return None
+                    _polymarket_predictor.register_agent(agent_name, make_query)
+        except Exception as e:
+            logger.debug(f"Could not register swarm agents: {e}")
+
+        # Start the predictor in background
+        _polymarket_task = asyncio.create_task(_polymarket_predictor.start(interval_minutes=5))
+        logger.info("Polymarket Predictor started - generating predictions every 5 minutes")
+
+    except Exception as e:
+        logger.error(f"Failed to start Polymarket predictor: {e}")
+
+
+@app.get("/api/polymarket/predictions")
+async def get_polymarket_predictions(limit: int = 10):
+    """Get recent Polymarket predictions."""
+    try:
+        from farnsworth.core.polymarket_predictor import get_predictor
+        predictor = get_predictor()
+        predictions = predictor.get_recent_predictions(limit)
+
+        return {
+            "predictions": [p.to_dict() for p in predictions],
+            "count": len(predictions),
+            "generated_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get predictions: {e}")
+        return {"error": str(e), "predictions": []}
+
+
+@app.get("/api/polymarket/stats")
+async def get_polymarket_stats():
+    """Get prediction accuracy statistics."""
+    try:
+        from farnsworth.core.polymarket_predictor import get_predictor
+        from dataclasses import asdict
+
+        predictor = get_predictor()
+        stats = predictor.get_stats()
+
+        return {
+            "stats": asdict(stats),
+            "updated_at": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get stats: {e}")
+        return {"error": str(e), "stats": {}}
+
+
+@app.post("/api/polymarket/generate")
+async def trigger_polymarket_predictions():
+    """Manually trigger prediction generation."""
+    try:
+        from farnsworth.core.polymarket_predictor import get_predictor
+        predictor = get_predictor()
+        predictions = await predictor.generate_predictions(count=2)
+
+        return {
+            "success": True,
+            "predictions": [p.to_dict() for p in predictions],
+            "count": len(predictions)
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate predictions: {e}")
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================

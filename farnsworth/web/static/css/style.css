@@ -3300,3 +3300,407 @@ body:has(.training-banner.active) .chat-section {
     color: var(--text-muted);
     font-size: 0.65rem;
 }
+
+/* =============================================================================
+   POLYMARKET PREDICTIONS WIDGET
+   ============================================================================= */
+
+.polymarket-section {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(6, 182, 212, 0.05) 100%);
+}
+
+.polymarket-section .sidebar-title {
+    position: relative;
+}
+
+.prediction-live-dot {
+    width: 8px;
+    height: 8px;
+    background: #10b981;
+    border-radius: 50%;
+    margin-left: auto;
+    animation: predictionPulse 2s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+@keyframes predictionPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.9); }
+}
+
+.prediction-stats-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    border: 1px solid var(--glass-border);
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.stat-item .stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: 'Space Mono', monospace;
+}
+
+.stat-item.accuracy .stat-value {
+    color: #10b981;
+}
+
+.stat-item.streak .stat-value {
+    color: #f59e0b;
+}
+
+.stat-item.total .stat-value {
+    color: #8b5cf6;
+}
+
+.stat-item .stat-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.predictions-feed {
+    max-height: 280px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary) transparent;
+}
+
+.predictions-feed::-webkit-scrollbar {
+    width: 4px;
+}
+
+.predictions-feed::-webkit-scrollbar-thumb {
+    background: var(--primary);
+    border-radius: 4px;
+}
+
+.prediction-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px;
+    color: var(--text-muted);
+    gap: 12px;
+}
+
+.prediction-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--glass-border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.prediction-card {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.prediction-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    border-radius: 4px 0 0 4px;
+}
+
+.prediction-card.bullish::before {
+    background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+}
+
+.prediction-card.bearish::before {
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+}
+
+.prediction-card.pending::before {
+    background: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+}
+
+.prediction-card.correct {
+    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.prediction-card.incorrect {
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.05);
+}
+
+.prediction-card:hover {
+    border-color: var(--primary);
+    transform: translateX(2px);
+}
+
+.prediction-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.prediction-outcome {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.prediction-direction {
+    font-size: 1.1rem;
+}
+
+.prediction-pick {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.prediction-confidence {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-family: 'Space Mono', monospace;
+}
+
+.prediction-confidence.high {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.prediction-confidence.medium {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.prediction-confidence.low {
+    background: rgba(107, 114, 128, 0.2);
+    color: #9ca3af;
+}
+
+.prediction-question {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.prediction-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.prediction-agents {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.agent-badge {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+.prediction-time {
+    font-family: 'Space Mono', monospace;
+}
+
+.prediction-result-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    text-transform: uppercase;
+}
+
+.prediction-result-badge.correct {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.prediction-result-badge.incorrect {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.prediction-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 10px;
+    margin-top: 8px;
+    border-top: 1px solid var(--glass-border);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.prediction-update-time {
+    font-family: 'Space Mono', monospace;
+}
+
+.prediction-interval {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.prediction-interval::before {
+    content: '⏱️';
+    font-size: 0.8rem;
+}
+
+/* Empty state */
+.predictions-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.predictions-empty-icon {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    opacity: 0.5;
+}
+
+.predictions-empty-text {
+    font-size: 0.85rem;
+}
+
+/* New prediction animation */
+@keyframes newPrediction {
+    0% {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.prediction-card.new {
+    animation: newPrediction 0.4s ease-out;
+}
+
+/* Glow effect for high confidence */
+.prediction-card.high-confidence {
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+}
+
+/* Direction styles */
+.prediction-card.direction-yes::before {
+    background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+}
+
+.prediction-card.direction-no::before {
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+}
+
+/* Signal tags */
+.prediction-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.signal-tag {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    border-radius: 4px;
+    font-family: 'Space Mono', monospace;
+    cursor: help;
+}
+
+/* Result badges */
+.result-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    margin-left: auto;
+}
+
+.result-badge.result-correct {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.result-badge.result-wrong {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+/* Empty/loading states */
+.prediction-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.prediction-loading-spinner {
+    width: 28px;
+    height: 28px;
+    border: 2px solid var(--glass-border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 12px;
+}
+
+.prediction-subtitle {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    margin-top: 4px;
+}
+
+.prediction-market-price {
+    font-family: 'Space Mono', monospace;
+    color: var(--text-muted);
+}

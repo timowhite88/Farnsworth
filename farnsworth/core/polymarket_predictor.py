@@ -1,0 +1,858 @@
+"""
+Polymarket Prediction Engine
+
+Uses the AI collective with 8 predictive markers to generate
+high-confidence predictions on Polymarket events.
+
+Predictions are generated every 5 minutes using:
+1. Current odds momentum analysis
+2. Volume/liquidity signals
+3. Social sentiment (via Grok/Twitter)
+4. News correlation (via web search)
+5. Historical pattern matching
+6. Related market correlation
+7. Time-decay analysis
+8. Multi-agent deliberation & voting
+
+"The swarm sees what no single mind can." - Farnsworth
+"""
+
+import asyncio
+import json
+import aiohttp
+import hashlib
+from datetime import datetime, timedelta
+from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional, Any, Tuple
+from pathlib import Path
+from enum import Enum
+import logging
+
+logger = logging.getLogger("polymarket_predictor")
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+class PredictionOutcome(Enum):
+    PENDING = "pending"
+    CORRECT = "correct"
+    INCORRECT = "incorrect"
+    EXPIRED = "expired"
+
+
+@dataclass
+class MarketSnapshot:
+    """Snapshot of a Polymarket market."""
+    market_id: str
+    question: str
+    outcomes: List[str]
+    current_odds: Dict[str, float]  # outcome -> probability
+    volume_24h: float
+    total_volume: float
+    end_date: Optional[str]
+    category: str
+    url: str
+
+    @classmethod
+    def from_gamma_api(cls, data: Dict) -> 'MarketSnapshot':
+        """Parse from Gamma API response."""
+        outcomes = []
+        odds = {}
+
+        # Handle different response formats
+        if 'outcomes' in data:
+            outcomes = data['outcomes']
+        elif 'outcomePrices' in data:
+            # Parse outcome prices
+            prices = data.get('outcomePrices', '[]')
+            if isinstance(prices, str):
+                try:
+                    prices = json.loads(prices)
+                except:
+                    prices = []
+            outcomes = ['Yes', 'No'] if len(prices) == 2 else [f"Option {i+1}" for i in range(len(prices))]
+            for i, price in enumerate(prices):
+                odds[outcomes[i]] = float(price) if price else 0.5
+
+        if 'tokens' in data:
+            for token in data.get('tokens', []):
+                outcome = token.get('outcome', 'Unknown')
+                price = float(token.get('price', 0.5))
+                outcomes.append(outcome)
+                odds[outcome] = price
+
+        return cls(
+            market_id=data.get('id', data.get('conditionId', '')),
+            question=data.get('question', data.get('title', 'Unknown')),
+            outcomes=outcomes or ['Yes', 'No'],
+            current_odds=odds or {'Yes': 0.5, 'No': 0.5},
+            volume_24h=float(data.get('volume24hr', 0)),
+            total_volume=float(data.get('volume', data.get('volumeNum', 0))),
+            end_date=data.get('endDate', data.get('endDateIso')),
+            category=data.get('category', data.get('groupItemTitle', 'General')),
+            url=f"https://polymarket.com/event/{data.get('slug', data.get('id', ''))}"
+        )
+
+
+@dataclass
+class PredictiveSignal:
+    """A single predictive signal/marker."""
+    name: str
+    signal_type: str  # momentum, sentiment, volume, news, correlation, time, consensus
+    direction: str    # bullish, bearish, neutral
+    confidence: float # 0-1
+    reasoning: str
+    data: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Prediction:
+    """A prediction on a Polymarket outcome."""
+    prediction_id: str
+    market_id: str
+    question: str
+    predicted_outcome: str
+    confidence: float  # 0-1
+    current_odds: float
+    signals: List[PredictiveSignal]
+    reasoning: str
+    agents_involved: List[str]
+    created_at: str
+    expires_at: str
+    outcome: PredictionOutcome = PredictionOutcome.PENDING
+    actual_result: Optional[str] = None
+    resolved_at: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        d = asdict(self)
+        d['outcome'] = self.outcome.value
+        d['signals'] = [asdict(s) for s in self.signals]
+        return d
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Prediction':
+        data['outcome'] = PredictionOutcome(data.get('outcome', 'pending'))
+        data['signals'] = [PredictiveSignal(**s) for s in data.get('signals', [])]
+        return cls(**data)
+
+
+@dataclass
+class PredictionStats:
+    """Accuracy statistics."""
+    total_predictions: int = 0
+    correct: int = 0
+    incorrect: int = 0
+    pending: int = 0
+    accuracy: float = 0.0
+    streak: int = 0  # Current win/loss streak
+    best_streak: int = 0
+    by_category: Dict[str, Dict] = field(default_factory=dict)
+    by_confidence: Dict[str, Dict] = field(default_factory=dict)
+
+
+# =============================================================================
+# PREDICTION ENGINE
+# =============================================================================
+
+class PolymarketPredictor:
+    """
+    AI-powered Polymarket prediction engine.
+
+    Uses 8 predictive markers + collective deliberation to generate
+    high-confidence picks.
+    """
+
+    GAMMA_API = "https://gamma-api.polymarket.com"
+    CLOB_API = "https://clob.polymarket.com"
+
+    def __init__(self, data_dir: Optional[Path] = None):
+        self.data_dir = data_dir or Path(__file__).parent.parent / "data" / "polymarket"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        self.predictions_file = self.data_dir / "predictions.json"
+        self.stats_file = self.data_dir / "stats.json"
+
+        self.predictions: List[Prediction] = []
+        self.stats = PredictionStats()
+        self._load_data()
+
+        self._running = False
+        self._task = None
+
+        # Agent query functions (injected)
+        self._agent_funcs: Dict[str, Any] = {}
+
+    def _load_data(self):
+        """Load predictions and stats from disk."""
+        if self.predictions_file.exists():
+            try:
+                with open(self.predictions_file, 'r') as f:
+                    data = json.load(f)
+                    self.predictions = [Prediction.from_dict(p) for p in data.get('predictions', [])]
+            except Exception as e:
+                logger.error(f"Failed to load predictions: {e}")
+
+        if self.stats_file.exists():
+            try:
+                with open(self.stats_file, 'r') as f:
+                    data = json.load(f)
+                    self.stats = PredictionStats(**data)
+            except Exception as e:
+                logger.error(f"Failed to load stats: {e}")
+
+    def _save_data(self):
+        """Save predictions and stats to disk."""
+        try:
+            with open(self.predictions_file, 'w') as f:
+                json.dump({
+                    'predictions': [p.to_dict() for p in self.predictions[-500:]],  # Keep last 500
+                    'updated_at': datetime.now().isoformat()
+                }, f, indent=2)
+
+            with open(self.stats_file, 'w') as f:
+                json.dump(asdict(self.stats), f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save data: {e}")
+
+    def register_agent(self, agent_id: str, query_func):
+        """Register an agent's query function."""
+        self._agent_funcs[agent_id] = query_func
+
+    # -------------------------------------------------------------------------
+    # MARKET FETCHING
+    # -------------------------------------------------------------------------
+
+    async def fetch_active_markets(self, limit: int = 20) -> List[MarketSnapshot]:
+        """Fetch active markets from Polymarket."""
+        markets = []
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Fetch from Gamma API
+                url = f"{self.GAMMA_API}/markets?active=true&closed=false&limit={limit}&order=volume24hr&ascending=false"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for item in data:
+                            try:
+                                market = MarketSnapshot.from_gamma_api(item)
+                                if market.question and market.current_odds:
+                                    markets.append(market)
+                            except Exception as e:
+                                logger.debug(f"Failed to parse market: {e}")
+        except Exception as e:
+            logger.error(f"Failed to fetch markets: {e}")
+
+        logger.info(f"Fetched {len(markets)} active markets")
+        return markets
+
+    async def get_market_history(self, market_id: str) -> Dict:
+        """Get price history for a market."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.GAMMA_API}/markets/{market_id}/prices"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.debug(f"Failed to fetch market history: {e}")
+        return {}
+
+    # -------------------------------------------------------------------------
+    # PREDICTIVE SIGNALS (8 MARKERS)
+    # -------------------------------------------------------------------------
+
+    async def _analyze_momentum(self, market: MarketSnapshot) -> PredictiveSignal:
+        """Signal 1: Analyze price/odds momentum."""
+        history = await self.get_market_history(market.market_id)
+
+        direction = "neutral"
+        confidence = 0.5
+        reasoning = "Insufficient price history"
+
+        if history and 'history' in history:
+            prices = history['history'][-24:]  # Last 24 data points
+            if len(prices) >= 2:
+                start_price = prices[0].get('p', 0.5) if isinstance(prices[0], dict) else 0.5
+                end_price = prices[-1].get('p', 0.5) if isinstance(prices[-1], dict) else 0.5
+                change = end_price - start_price
+
+                if change > 0.05:
+                    direction = "bullish"
+                    confidence = min(0.7 + abs(change), 0.9)
+                    reasoning = f"Price momentum up {change*100:.1f}% recently"
+                elif change < -0.05:
+                    direction = "bearish"
+                    confidence = min(0.7 + abs(change), 0.9)
+                    reasoning = f"Price momentum down {abs(change)*100:.1f}% recently"
+                else:
+                    direction = "neutral"
+                    confidence = 0.5
+                    reasoning = f"Price stable (±{abs(change)*100:.1f}%)"
+
+        return PredictiveSignal(
+            name="Momentum Analysis",
+            signal_type="momentum",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning,
+            data={"history_points": len(history.get('history', []))}
+        )
+
+    async def _analyze_volume(self, market: MarketSnapshot) -> PredictiveSignal:
+        """Signal 2: Analyze volume/liquidity signals."""
+        volume_24h = market.volume_24h
+        total_volume = market.total_volume
+
+        # High volume = more reliable odds
+        if volume_24h > 100000:
+            confidence = 0.85
+            reasoning = f"High 24h volume (${volume_24h:,.0f}) - odds likely accurate"
+        elif volume_24h > 10000:
+            confidence = 0.7
+            reasoning = f"Moderate volume (${volume_24h:,.0f}) - decent liquidity"
+        else:
+            confidence = 0.5
+            reasoning = f"Low volume (${volume_24h:,.0f}) - odds may be unreliable"
+
+        # Direction based on whether smart money is moving
+        direction = "neutral"
+        if total_volume > 1000000:
+            direction = "bullish" if market.current_odds.get('Yes', 0.5) > 0.6 else "bearish"
+
+        return PredictiveSignal(
+            name="Volume Analysis",
+            signal_type="volume",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning,
+            data={"volume_24h": volume_24h, "total_volume": total_volume}
+        )
+
+    async def _analyze_social_sentiment(self, market: MarketSnapshot) -> PredictiveSignal:
+        """Signal 3: Analyze social media sentiment via agents."""
+        direction = "neutral"
+        confidence = 0.5
+        reasoning = "Social sentiment analysis pending"
+
+        # Query Grok for Twitter sentiment
+        if 'Grok' in self._agent_funcs:
+            try:
+                query = f"What is the current Twitter/X sentiment about: {market.question}? Is sentiment positive, negative, or neutral? Just give a brief assessment."
+                result = await self._agent_funcs['Grok'](query, 500)
+                if result:
+                    response = result[0] if isinstance(result, tuple) else result
+                    response_lower = response.lower() if response else ""
+
+                    if 'positive' in response_lower or 'bullish' in response_lower or 'optimistic' in response_lower:
+                        direction = "bullish"
+                        confidence = 0.7
+                    elif 'negative' in response_lower or 'bearish' in response_lower or 'pessimistic' in response_lower:
+                        direction = "bearish"
+                        confidence = 0.7
+                    else:
+                        direction = "neutral"
+                        confidence = 0.55
+
+                    reasoning = f"Social sentiment: {response[:100]}..." if response else "No sentiment data"
+            except Exception as e:
+                logger.debug(f"Social sentiment analysis failed: {e}")
+
+        return PredictiveSignal(
+            name="Social Sentiment",
+            signal_type="sentiment",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning
+        )
+
+    async def _analyze_news_correlation(self, market: MarketSnapshot) -> PredictiveSignal:
+        """Signal 4: Analyze news correlation."""
+        direction = "neutral"
+        confidence = 0.5
+        reasoning = "News analysis pending"
+
+        # Use Gemini or Perplexity for news
+        agent = 'Gemini' if 'Gemini' in self._agent_funcs else 'Perplexity' if 'Perplexity' in self._agent_funcs else None
+
+        if agent and agent in self._agent_funcs:
+            try:
+                query = f"What are the latest news developments related to: {market.question}? How might recent news affect the outcome? Brief answer."
+                result = await self._agent_funcs[agent](query, 500)
+                if result:
+                    response = result[0] if isinstance(result, tuple) else result
+                    response_lower = response.lower() if response else ""
+
+                    # Parse sentiment from response
+                    positive_words = ['positive', 'likely', 'expected', 'confirm', 'support', 'favor']
+                    negative_words = ['negative', 'unlikely', 'doubt', 'against', 'oppose', 'fail']
+
+                    pos_count = sum(1 for w in positive_words if w in response_lower)
+                    neg_count = sum(1 for w in negative_words if w in response_lower)
+
+                    if pos_count > neg_count:
+                        direction = "bullish"
+                        confidence = 0.65
+                    elif neg_count > pos_count:
+                        direction = "bearish"
+                        confidence = 0.65
+
+                    reasoning = f"News analysis: {response[:100]}..." if response else "No news data"
+            except Exception as e:
+                logger.debug(f"News analysis failed: {e}")
+
+        return PredictiveSignal(
+            name="News Correlation",
+            signal_type="news",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning
+        )
+
+    async def _analyze_historical_patterns(self, market: MarketSnapshot) -> PredictiveSignal:
+        """Signal 5: Historical pattern matching."""
+        # Check our past predictions for similar markets
+        similar_preds = [p for p in self.predictions if p.outcome != PredictionOutcome.PENDING]
+
+        direction = "neutral"
+        confidence = 0.5
+        reasoning = "No historical patterns found"
+
+        if similar_preds:
+            # Find similar categories/questions
+            category_preds = [p for p in similar_preds if market.category.lower() in p.question.lower()]
+            if category_preds:
+                correct = sum(1 for p in category_preds if p.outcome == PredictionOutcome.CORRECT)
+                total = len(category_preds)
+
+                if total >= 3:
+                    success_rate = correct / total
+                    confidence = 0.5 + (success_rate - 0.5) * 0.3
+
+                    if success_rate > 0.6:
+                        direction = "bullish"  # We tend to be right on these
+                        reasoning = f"Historical success in {market.category}: {correct}/{total} ({success_rate*100:.0f}%)"
+                    elif success_rate < 0.4:
+                        direction = "bearish"  # Inverse signal
+                        reasoning = f"Historical contrarian signal: {correct}/{total} ({success_rate*100:.0f}%)"
+
+        return PredictiveSignal(
+            name="Historical Patterns",
+            signal_type="correlation",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning,
+            data={"similar_count": len(similar_preds)}
+        )
+
+    async def _analyze_related_markets(self, market: MarketSnapshot, all_markets: List[MarketSnapshot]) -> PredictiveSignal:
+        """Signal 6: Related market correlation."""
+        direction = "neutral"
+        confidence = 0.5
+        reasoning = "No related markets found"
+
+        # Find related markets by keyword matching
+        keywords = market.question.lower().split()[:5]
+        related = []
+
+        for other in all_markets:
+            if other.market_id == market.market_id:
+                continue
+            other_lower = other.question.lower()
+            matches = sum(1 for kw in keywords if kw in other_lower and len(kw) > 3)
+            if matches >= 2:
+                related.append(other)
+
+        if related:
+            # Check if related markets are moving in same direction
+            bullish_count = sum(1 for r in related if r.current_odds.get('Yes', 0.5) > 0.55)
+            bearish_count = sum(1 for r in related if r.current_odds.get('Yes', 0.5) < 0.45)
+
+            if bullish_count > bearish_count:
+                direction = "bullish"
+                confidence = 0.6
+                reasoning = f"Related markets leaning bullish ({bullish_count}/{len(related)})"
+            elif bearish_count > bullish_count:
+                direction = "bearish"
+                confidence = 0.6
+                reasoning = f"Related markets leaning bearish ({bearish_count}/{len(related)})"
+            else:
+                reasoning = f"Related markets mixed ({len(related)} found)"
+
+        return PredictiveSignal(
+            name="Related Markets",
+            signal_type="correlation",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning,
+            data={"related_count": len(related)}
+        )
+
+    async def _analyze_time_decay(self, market: MarketSnapshot) -> PredictiveSignal:
+        """Signal 7: Time-to-resolution analysis."""
+        direction = "neutral"
+        confidence = 0.5
+        reasoning = "No end date"
+
+        if market.end_date:
+            try:
+                end = datetime.fromisoformat(market.end_date.replace('Z', '+00:00'))
+                now = datetime.now(end.tzinfo) if end.tzinfo else datetime.now()
+                days_left = (end - now).days
+
+                if days_left < 1:
+                    # Very close to resolution - current odds likely accurate
+                    confidence = 0.85
+                    current_leader = max(market.current_odds.items(), key=lambda x: x[1])
+                    direction = "bullish" if current_leader[0] == 'Yes' else "bearish"
+                    reasoning = f"Resolving soon ({days_left}d) - current odds likely final"
+                elif days_left < 7:
+                    confidence = 0.7
+                    reasoning = f"Resolving in {days_left} days - limited time for movement"
+                elif days_left > 30:
+                    confidence = 0.5
+                    reasoning = f"Long-dated ({days_left}d) - high uncertainty"
+                else:
+                    confidence = 0.6
+                    reasoning = f"Medium-term ({days_left}d)"
+            except:
+                pass
+
+        return PredictiveSignal(
+            name="Time Analysis",
+            signal_type="time",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning
+        )
+
+    async def _collective_deliberation(self, market: MarketSnapshot, signals: List[PredictiveSignal]) -> Tuple[PredictiveSignal, str]:
+        """Signal 8: Multi-agent deliberation and voting."""
+        agents_used = []
+        votes = {"Yes": 0, "No": 0}
+        reasonings = []
+
+        # Build context from other signals
+        signal_summary = "\n".join([
+            f"- {s.name}: {s.direction} ({s.confidence:.0%}) - {s.reasoning}"
+            for s in signals
+        ])
+
+        prompt = f"""Polymarket Prediction Analysis:
+
+Question: {market.question}
+Current Odds: {json.dumps(market.current_odds)}
+Volume 24h: ${market.volume_24h:,.0f}
+
+Signal Analysis:
+{signal_summary}
+
+Based on ALL available signals, what is your prediction?
+Answer with just: YES or NO, then a brief reason."""
+
+        # Query available agents
+        for agent_id, query_func in list(self._agent_funcs.items())[:5]:  # Top 5 agents
+            try:
+                result = await asyncio.wait_for(
+                    query_func(prompt, 300),
+                    timeout=15.0
+                )
+                if result:
+                    response = result[0] if isinstance(result, tuple) else result
+                    if response:
+                        agents_used.append(agent_id)
+                        response_upper = response.upper()
+
+                        if 'YES' in response_upper[:20]:
+                            votes["Yes"] += 1
+                            reasonings.append(f"{agent_id}: YES")
+                        elif 'NO' in response_upper[:20]:
+                            votes["No"] += 1
+                            reasonings.append(f"{agent_id}: NO")
+            except Exception as e:
+                logger.debug(f"Agent {agent_id} deliberation failed: {e}")
+
+        # Determine consensus
+        total_votes = votes["Yes"] + votes["No"]
+        if total_votes > 0:
+            yes_pct = votes["Yes"] / total_votes
+
+            if yes_pct > 0.6:
+                direction = "bullish"
+                confidence = 0.5 + (yes_pct - 0.5) * 0.6
+            elif yes_pct < 0.4:
+                direction = "bearish"
+                confidence = 0.5 + (0.5 - yes_pct) * 0.6
+            else:
+                direction = "neutral"
+                confidence = 0.5
+
+            reasoning = f"Collective vote: {votes['Yes']} YES / {votes['No']} NO from {agents_used}"
+        else:
+            direction = "neutral"
+            confidence = 0.5
+            reasoning = "No agent consensus reached"
+
+        signal = PredictiveSignal(
+            name="Collective Deliberation",
+            signal_type="consensus",
+            direction=direction,
+            confidence=confidence,
+            reasoning=reasoning,
+            data={"votes": votes, "agents": agents_used}
+        )
+
+        final_reasoning = f"Agents consulted: {', '.join(agents_used)}\n" + "\n".join(reasonings)
+        return signal, final_reasoning
+
+    # -------------------------------------------------------------------------
+    # PREDICTION GENERATION
+    # -------------------------------------------------------------------------
+
+    async def generate_predictions(self, count: int = 2) -> List[Prediction]:
+        """Generate predictions using all 8 signals."""
+        logger.info(f"Generating {count} predictions...")
+
+        # Fetch markets
+        markets = await self.fetch_active_markets(limit=30)
+        if not markets:
+            logger.warning("No markets fetched")
+            return []
+
+        # Score each market for prediction potential
+        scored_markets = []
+
+        for market in markets:
+            # Skip very lopsided markets (>90% or <10%)
+            max_odds = max(market.current_odds.values()) if market.current_odds else 0.5
+            min_odds = min(market.current_odds.values()) if market.current_odds else 0.5
+
+            if max_odds > 0.92 or min_odds < 0.08:
+                continue
+
+            # Score based on volume and odds balance
+            volume_score = min(market.volume_24h / 50000, 1.0)
+            balance_score = 1 - abs(max_odds - 0.5) * 2  # Closer to 50/50 = more interesting
+
+            score = volume_score * 0.6 + balance_score * 0.4
+            scored_markets.append((market, score))
+
+        # Sort by score and take top candidates
+        scored_markets.sort(key=lambda x: x[1], reverse=True)
+        candidates = [m for m, _ in scored_markets[:count * 2]]
+
+        predictions = []
+
+        for market in candidates[:count]:
+            try:
+                prediction = await self._analyze_market(market, markets)
+                if prediction and prediction.confidence >= 0.55:  # Only keep confident predictions
+                    predictions.append(prediction)
+                    self.predictions.append(prediction)
+            except Exception as e:
+                logger.error(f"Failed to analyze market {market.market_id}: {e}")
+
+        # Save
+        if predictions:
+            self._update_stats()
+            self._save_data()
+
+        logger.info(f"Generated {len(predictions)} predictions")
+        return predictions
+
+    async def _analyze_market(self, market: MarketSnapshot, all_markets: List[MarketSnapshot]) -> Optional[Prediction]:
+        """Run full analysis on a single market."""
+        logger.debug(f"Analyzing: {market.question[:50]}...")
+
+        # Gather all 8 signals
+        signals = await asyncio.gather(
+            self._analyze_momentum(market),
+            self._analyze_volume(market),
+            self._analyze_social_sentiment(market),
+            self._analyze_news_correlation(market),
+            self._analyze_historical_patterns(market),
+            self._analyze_related_markets(market, all_markets),
+            self._analyze_time_decay(market),
+        )
+        signals = list(signals)
+
+        # Signal 8: Collective deliberation
+        consensus_signal, deliberation_reasoning = await self._collective_deliberation(market, signals)
+        signals.append(consensus_signal)
+
+        # Aggregate signals into final prediction
+        bullish_weight = 0
+        bearish_weight = 0
+
+        for signal in signals:
+            weight = signal.confidence
+            if signal.signal_type == "consensus":
+                weight *= 1.5  # Weight consensus higher
+
+            if signal.direction == "bullish":
+                bullish_weight += weight
+            elif signal.direction == "bearish":
+                bearish_weight += weight
+
+        total_weight = bullish_weight + bearish_weight
+        if total_weight == 0:
+            return None
+
+        # Determine prediction
+        if bullish_weight > bearish_weight:
+            predicted_outcome = "Yes"
+            confidence = bullish_weight / (total_weight + 1)  # Normalize
+        else:
+            predicted_outcome = "No"
+            confidence = bearish_weight / (total_weight + 1)
+
+        # Cap confidence
+        confidence = min(max(confidence, 0.5), 0.95)
+
+        # Generate prediction ID
+        pred_id = hashlib.sha256(
+            f"{market.market_id}:{datetime.now().isoformat()}".encode()
+        ).hexdigest()[:12]
+
+        # Build reasoning
+        reasoning_parts = [
+            f"Prediction: {predicted_outcome} ({confidence:.0%} confidence)",
+            "",
+            "Signal Analysis:",
+        ]
+        for signal in signals:
+            emoji = "🟢" if signal.direction == "bullish" else "🔴" if signal.direction == "bearish" else "⚪"
+            reasoning_parts.append(f"{emoji} {signal.name}: {signal.reasoning}")
+
+        reasoning_parts.append("")
+        reasoning_parts.append(f"Deliberation: {deliberation_reasoning}")
+
+        return Prediction(
+            prediction_id=pred_id,
+            market_id=market.market_id,
+            question=market.question,
+            predicted_outcome=predicted_outcome,
+            confidence=confidence,
+            current_odds=market.current_odds.get(predicted_outcome, 0.5),
+            signals=signals,
+            reasoning="\n".join(reasoning_parts),
+            agents_involved=consensus_signal.data.get('agents', []),
+            created_at=datetime.now().isoformat(),
+            expires_at=(datetime.now() + timedelta(hours=24)).isoformat()
+        )
+
+    # -------------------------------------------------------------------------
+    # ACCURACY TRACKING
+    # -------------------------------------------------------------------------
+
+    async def check_resolved_markets(self):
+        """Check if any pending predictions have resolved."""
+        pending = [p for p in self.predictions if p.outcome == PredictionOutcome.PENDING]
+
+        for prediction in pending:
+            try:
+                # Check if market resolved
+                async with aiohttp.ClientSession() as session:
+                    url = f"{self.GAMMA_API}/markets/{prediction.market_id}"
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+
+                            if data.get('closed') or data.get('resolved'):
+                                # Market resolved
+                                resolution = data.get('resolution', data.get('outcome'))
+
+                                if resolution:
+                                    prediction.actual_result = resolution
+                                    prediction.resolved_at = datetime.now().isoformat()
+
+                                    # Check if we were correct
+                                    if resolution.lower() == prediction.predicted_outcome.lower():
+                                        prediction.outcome = PredictionOutcome.CORRECT
+                                    else:
+                                        prediction.outcome = PredictionOutcome.INCORRECT
+
+                                    logger.info(f"Prediction {prediction.prediction_id} resolved: {prediction.outcome.value}")
+            except Exception as e:
+                logger.debug(f"Failed to check resolution for {prediction.prediction_id}: {e}")
+
+        self._update_stats()
+        self._save_data()
+
+    def _update_stats(self):
+        """Update accuracy statistics."""
+        resolved = [p for p in self.predictions if p.outcome != PredictionOutcome.PENDING]
+
+        self.stats.total_predictions = len(self.predictions)
+        self.stats.correct = sum(1 for p in resolved if p.outcome == PredictionOutcome.CORRECT)
+        self.stats.incorrect = sum(1 for p in resolved if p.outcome == PredictionOutcome.INCORRECT)
+        self.stats.pending = sum(1 for p in self.predictions if p.outcome == PredictionOutcome.PENDING)
+
+        if self.stats.correct + self.stats.incorrect > 0:
+            self.stats.accuracy = self.stats.correct / (self.stats.correct + self.stats.incorrect)
+
+        # Calculate streak
+        streak = 0
+        for p in reversed(resolved):
+            if p.outcome == PredictionOutcome.CORRECT:
+                streak += 1
+            else:
+                break
+
+        self.stats.streak = streak
+        self.stats.best_streak = max(self.stats.best_streak, streak)
+
+    def get_recent_predictions(self, limit: int = 10) -> List[Prediction]:
+        """Get most recent predictions."""
+        return sorted(self.predictions, key=lambda p: p.created_at, reverse=True)[:limit]
+
+    def get_stats(self) -> PredictionStats:
+        """Get current accuracy stats."""
+        return self.stats
+
+    # -------------------------------------------------------------------------
+    # SCHEDULER
+    # -------------------------------------------------------------------------
+
+    async def start(self, interval_minutes: int = 5):
+        """Start the prediction scheduler."""
+        if self._running:
+            return
+
+        self._running = True
+        logger.info(f"Starting Polymarket Predictor (every {interval_minutes} min)")
+
+        while self._running:
+            try:
+                # Generate new predictions
+                await self.generate_predictions(count=2)
+
+                # Check for resolved markets
+                await self.check_resolved_markets()
+
+            except Exception as e:
+                logger.error(f"Prediction cycle failed: {e}")
+
+            # Wait for next cycle
+            await asyncio.sleep(interval_minutes * 60)
+
+    def stop(self):
+        """Stop the prediction scheduler."""
+        self._running = False
+        logger.info("Stopping Polymarket Predictor")
+
+
+# =============================================================================
+# GLOBAL INSTANCE
+# =============================================================================
+
+_predictor: Optional[PolymarketPredictor] = None
+
+
+def get_predictor() -> PolymarketPredictor:
+    """Get global predictor instance."""
+    global _predictor
+    if _predictor is None:
+        _predictor = PolymarketPredictor()
+    return _predictor
