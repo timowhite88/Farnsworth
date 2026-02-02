@@ -174,9 +174,8 @@ async def generate_video_meme() -> tuple:
     # Fallback to image generation
     try:
         logger.info("Falling back to image generation...")
-        # Use the random meme prompt method
-        prompt, scene_hint = gen.get_random_meme_prompt()
-        image_bytes = await gen.generate_with_reference(prompt)
+        # Use the meme generation method
+        image_bytes, scene_hint = await gen.generate_borg_farnsworth_meme()
 
         if image_bytes:
             import tempfile
@@ -226,8 +225,8 @@ async def post_video_meme():
             if not result:
                 logger.warning("Video post failed, trying image fallback...")
                 gen = ImageGenerator()
-                prompt, _ = gen.get_random_meme_prompt()
-                image_bytes = await gen.generate_with_reference(prompt)
+                # Use the meme generation method
+                image_bytes, scene_hint = await gen.generate_borg_farnsworth_meme()
                 if image_bytes:
                     import tempfile
                     img_path = Path(tempfile.gettempdir()) / f"farnsworth_fallback_{random.randint(1000,9999)}.png"
