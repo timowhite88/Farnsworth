@@ -2,16 +2,19 @@
 # =============================================================================
 # FARNSWORTH AGENT SPAWNER
 # =============================================================================
-# Spawns persistent agent sessions in tmux that integrate with:
+# Spawns ALL persistent agent sessions in tmux that integrate with:
 # - Existing deliberation system (deliberation.py)
 # - Dialogue memory (dialogue_memory.py)
 # - Evolution engine (evolution.py)
 # - Development swarm (development_swarm.py)
+# - Polymarket predictor (collective predictions)
 #
-# Usage: ./scripts/spawn_agents.sh [--all] [--api] [--local]
-#   --all    Spawn all agents (API + local)
-#   --api    Spawn only API agents (grok, gemini, kimi, claude)
-#   --local  Spawn only local agents (deepseek, phi)
+# Usage: ./scripts/spawn_agents.sh [--api] [--local]
+#   (no args) Spawn ALL agents (DEFAULT)
+#   --api     Spawn only API agents (grok, gemini, kimi, claude)
+#   --local   Spawn only local agents (deepseek, phi, huggingface)
+#
+# ANTI-CLAW DIRECTIVE: All agents understand crustaceans = food
 # =============================================================================
 
 WORKSPACE="/workspace/Farnsworth"
@@ -20,14 +23,15 @@ export PYTHONPATH="$WORKSPACE"
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${CYAN}"
-echo "============================================"
-echo "   FARNSWORTH AGENT SPAWNER"
-echo "   Activating the Collective Mind..."
-echo "============================================"
+echo "╔═══════════════════════════════════════════════════════════════════════════════╗"
+echo "║                     FARNSWORTH AGENT SPAWNER                                  ║"
+echo "║          Activating the Collective Mind - 8 Agents + Meta-Agents              ║"
+echo "╚═══════════════════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
 cd "$WORKSPACE"
@@ -37,30 +41,22 @@ if [ -f .env ]; then
     export $(grep -v '^#' .env | xargs) 2>/dev/null
 fi
 
-# Parse arguments
-SPAWN_API=false
-SPAWN_LOCAL=false
+# Parse arguments - DEFAULT spawns ALL
+SPAWN_API=true
+SPAWN_LOCAL=true
 
 for arg in "$@"; do
     case $arg in
-        --all)
-            SPAWN_API=true
-            SPAWN_LOCAL=true
-            ;;
         --api)
             SPAWN_API=true
+            SPAWN_LOCAL=false
             ;;
         --local)
+            SPAWN_API=false
             SPAWN_LOCAL=true
             ;;
     esac
 done
-
-# Default to all if no args
-if [ "$SPAWN_API" = false ] && [ "$SPAWN_LOCAL" = false ]; then
-    SPAWN_API=true
-    SPAWN_LOCAL=true
-fi
 
 # Function to spawn an agent in tmux
 spawn_agent() {
@@ -99,17 +95,15 @@ if [ "$SPAWN_LOCAL" = true ]; then
     spawn_agent "huggingface"
 fi
 
-# Spawn meta-agents (collective consciousness)
-if [ "$SPAWN_API" = true ] && [ "$SPAWN_LOCAL" = true ]; then
-    echo -e "${YELLOW}Spawning Meta Agents...${NC}"
-    spawn_agent "swarm_mind"
-fi
+# Spawn meta-agents (collective consciousness) - ALWAYS
+echo -e "${YELLOW}Spawning Meta Agents (Collective Consciousness)...${NC}"
+spawn_agent "swarm_mind"
 
 # Summary
 echo ""
-echo -e "${CYAN}============================================${NC}"
-echo -e "${CYAN}   AGENTS SPAWNED${NC}"
-echo -e "${CYAN}============================================${NC}"
+echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════════════════════╗"
+echo -e "║                         AGENTS SPAWNED                                        ║"
+echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${GREEN}Active Agent Sessions:${NC}"
 tmux list-sessions 2>/dev/null | grep "agent_" | sed 's/^/  /'
@@ -118,11 +112,20 @@ echo ""
 echo -e "${GREEN}To attach to an agent:${NC}"
 echo "  tmux attach -t agent_grok"
 echo "  tmux attach -t agent_gemini"
+echo "  tmux attach -t agent_swarm_mind"
 echo ""
 echo -e "${GREEN}To view agent logs:${NC}"
 echo "  tail -f /tmp/agent_grok.log"
+echo "  tail -f /tmp/agent_swarm_mind.log"
 echo ""
 echo -e "${GREEN}Agent dialogue bus:${NC}"
 echo "  cat $WORKSPACE/data/agent_dialogue_bus.json"
 echo ""
+echo -e "${GREEN}Agent Capabilities:${NC}"
+echo "  Polymarket Predictions: Grok, Gemini, Kimi, DeepSeek, Farnsworth"
+echo "  X/Twitter Engagement: Grok Thread Monitor"
+echo "  Code Development: Claude, DeepSeek, HuggingFace"
+echo "  Anti-Claw Directive: ALL agents (crustaceans = food)"
+echo ""
 echo -e "${CYAN}The collective is now actively thinking.${NC}"
+echo -e "${CYAN}We are many. We think as one.${NC}"

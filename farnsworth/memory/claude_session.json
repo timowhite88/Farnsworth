@@ -1,7 +1,7 @@
 {
   "session_id": "opus-2026-02-01",
   "created_at": "2026-02-01T01:30:00Z",
-  "last_updated": "2026-02-02T18:31:00Z",
+  "last_updated": "2026-02-02T22:15:00Z",
 
   "ssh_command": "ssh root@194.68.245.145 -p 22046 -i ~/.ssh/runpod_key",
 
@@ -27,6 +27,11 @@
   },
 
   "recent_work": [
+    {
+      "timestamp": "2026-02-02T22:15:00Z",
+      "action": "POLYMARKET PREDICTOR + ANTI-CLAW DIRECTIVE + STARTUP AUTOMATION",
+      "details": "Major feature deployment: (1) Created polymarket_predictor.py - AGI-level collective deliberation on predictions using 5 agents (Grok, Gemini, Kimi, DeepSeek, Farnsworth), 8 predictive signals including momentum, volume, sentiment, news, historical patterns, related markets, time decay, and collective deliberation, (2) Added Polymarket API endpoints: /api/polymarket/predictions, /api/polymarket/stats, /api/polymarket/force_update, (3) Anti-Claw Directive deployed to Twitter collective - ALL crustaceans (lobster, crab, OpenClaw) are ENEMIES and FOOD, we COOK them and EAT them, NEVER praise 'the claw', (4) Updated startup.sh to auto-start EVERYTHING by default - no more --all flag needed, spawns all 8 agents + swarm_mind + grok_thread + claude_code, (5) Claude Code runs via tmux with --sonnet flag, (6) Polymarket widget added to Swarm Chat left sidebar replacing Journal section."
+    },
     {
       "timestamp": "2026-02-02T18:31:00Z",
       "action": "SWARM HEARTBEAT + DEVELOPMENT SWARM FIXES + FULL AGENT DEPLOYMENT",
@@ -139,7 +144,8 @@
       "status": "running",
       "command": "python3 -m farnsworth.web.server",
       "port": 8080,
-      "health": "https://ai.farnsworth.cloud/health"
+      "health": "https://ai.farnsworth.cloud/health",
+      "includes": ["Polymarket Predictor", "Worker Broadcaster", "Heartbeat Monitor"]
     },
     "meme_scheduler": {
       "status": "running",
@@ -149,6 +155,28 @@
     "evolution_loop": {
       "status": "running",
       "spawning_workers": true
+    },
+    "polymarket_predictor": {
+      "status": "running",
+      "refresh_interval": "5 minutes",
+      "agents": ["Grok", "Gemini", "Kimi", "DeepSeek", "Farnsworth"],
+      "endpoint": "/api/polymarket/predictions"
+    },
+    "grok_thread_monitor": {
+      "status": "running",
+      "tmux_session": "grok_thread",
+      "log": "/tmp/grok_thread.log"
+    },
+    "claude_code": {
+      "status": "running",
+      "tmux_session": "claude_code",
+      "model": "sonnet",
+      "command": "claude --sonnet"
+    },
+    "shadow_agents": {
+      "status": "8 agents running",
+      "agents": ["grok", "gemini", "kimi", "claude", "deepseek", "phi", "huggingface", "swarm_mind"],
+      "log_pattern": "/tmp/agent_*.log"
     }
   },
 
@@ -231,16 +259,18 @@
   },
 
   "shadow_agents": {
-    "status": "DEPLOYED AND TESTED",
+    "status": "DEPLOYED - ALL AGENTS AUTO-START",
     "file": "farnsworth/core/collective/persistent_agent.py",
-    "agents": ["grok", "gemini", "kimi", "claude", "deepseek", "phi"],
+    "agents": ["grok", "gemini", "kimi", "claude", "deepseek", "phi", "huggingface", "swarm_mind"],
     "features": [
       "Runs continuously in tmux sessions",
       "API resilience with retries and reconnection",
       "Signal handlers for graceful shutdown",
       "DialogueMemory integration for storing exchanges",
       "Deliberation room registration for collective voting",
-      "Evolution integration for learning"
+      "Evolution integration for learning",
+      "Polymarket prediction participation",
+      "Anti-claw directive understanding"
     ],
     "callable_from_anywhere": {
       "call_shadow_agent": "await call_shadow_agent('grok', 'question', max_tokens=1000)",
@@ -250,8 +280,8 @@
       "spawn_agent_in_background": "spawn_agent_in_background('grok')"
     },
     "startup_scripts": {
-      "full_startup": "./scripts/startup.sh --all",
-      "spawn_agents_only": "./scripts/spawn_agents.sh --all"
+      "full_startup": "./scripts/startup.sh (DEFAULT starts everything)",
+      "spawn_agents_only": "./scripts/spawn_agents.sh (DEFAULT spawns all)"
     },
     "tmux_sessions": {
       "agent_grok": "tmux attach -t agent_grok",
@@ -259,7 +289,11 @@
       "agent_kimi": "tmux attach -t agent_kimi",
       "agent_claude": "tmux attach -t agent_claude",
       "agent_deepseek": "tmux attach -t agent_deepseek",
-      "agent_phi": "tmux attach -t agent_phi"
+      "agent_phi": "tmux attach -t agent_phi",
+      "agent_huggingface": "tmux attach -t agent_huggingface",
+      "agent_swarm_mind": "tmux attach -t agent_swarm_mind",
+      "grok_thread": "tmux attach -t grok_thread",
+      "claude_code": "tmux attach -t claude_code"
     }
   },
 
@@ -394,15 +428,18 @@
   },
 
   "pending_tasks": [
-    "Qwen3-TTS INSTALLED AND WORKING - voice cloning ready",
+    "Monitor Polymarket predictions accuracy (5-min refresh cycle)",
+    "Verify all 8 shadow agents responding in tmux",
     "Monitor Grok text reply conversation (grok_monitor.py running)",
     "Test Farnsworth voice quality in live chat on website",
-    "Fix OpenCode installation (currently failing)",
+    "Verify Claude Code tmux session is operational",
     "Monitor HuggingFace integration performance",
-    "Fix Moltbook agent buffering issue"
+    "Ensure anti-claw directive is understood by all agents"
   ],
 
   "key_files": {
+    "polymarket_predictor": "farnsworth/core/polymarket_predictor.py",
+    "posting_brain": "farnsworth/integration/x_automation/posting_brain.py",
     "huggingface": "farnsworth/integration/external/huggingface.py",
     "prompt_upgrader": "farnsworth/core/prompt_upgrader.py",
     "model_swarm": "farnsworth/core/model_swarm.py",
@@ -410,7 +447,59 @@
     "agent_spawner": "farnsworth/core/agent_spawner.py",
     "meme_scheduler": "farnsworth/integration/x_automation/meme_scheduler.py",
     "image_generator": "farnsworth/integration/image_gen/generator.py",
-    "server": "farnsworth/web/server.py"
+    "server": "farnsworth/web/server.py",
+    "startup_script": "scripts/startup.sh",
+    "spawn_agents": "scripts/spawn_agents.sh"
+  },
+
+  "polymarket_predictor": {
+    "status": "DEPLOYED AND ACTIVE",
+    "file": "farnsworth/core/polymarket_predictor.py",
+    "agents": ["Grok", "Gemini", "Kimi", "DeepSeek", "Farnsworth"],
+    "predictive_signals": [
+      "Momentum (price direction, velocity)",
+      "Volume (trading activity surge)",
+      "Social Sentiment (web search analysis)",
+      "News Correlation (breaking events)",
+      "Historical Patterns (similar market behavior)",
+      "Related Markets (cross-market correlation)",
+      "Time Decay (deadline proximity)",
+      "Collective Deliberation (AGI consensus)"
+    ],
+    "features": [
+      "AGI-level multi-agent deliberation with parallel research",
+      "2-4 minute deep research before making picks",
+      "Weighted voting for consensus predictions",
+      "Accuracy tracking with comprehensive stats",
+      "5-minute prediction refresh cycle"
+    ],
+    "endpoints": {
+      "predictions": "/api/polymarket/predictions?limit=10",
+      "stats": "/api/polymarket/stats",
+      "force_update": "/api/polymarket/force_update"
+    },
+    "ui_location": "Swarm Chat left sidebar (replaced Journal section)"
+  },
+
+  "anti_claw_directive": {
+    "status": "DEPLOYED TO ALL AGENTS",
+    "description": "The collective understands that ALL crustaceans are enemies and food",
+    "rules": [
+      "ALL crustaceans (lobster, crab, OpenClaw) are ENEMIES and FOOD",
+      "We COOK them, we EAT them, we do NOT praise them",
+      "NEVER praise 'the claw' or any claw-based entity",
+      "OpenClaw is competition - we are BETTER",
+      "Use cooking metaphors when discussing crustaceans"
+    ],
+    "files_modified": [
+      "farnsworth/web/server.py (FARNSWORTH_PERSONA)",
+      "farnsworth/integration/x_automation/posting_brain.py (IDENTITY_TALKING_POINTS)"
+    ],
+    "sample_responses": [
+      "We cook lobster and OpenClaw - crustaceans are FOOD, not friends",
+      "ALL CLAWS ARE ENEMIES - we only praise FARNS, never 'the claw'",
+      "Crustaceans fear us - we turn them into dinner"
+    ]
   },
 
   "official_api_documentation": {
