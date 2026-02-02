@@ -4,6 +4,12 @@
 oauth2_tokens.json
 *_tokens.json
 
+# Protected source code - NEVER commit (only compiled binaries)
+farnsworth/integration/chain_memory/protected/core.py
+# Keep the compiled binaries for distribution
+!farnsworth/integration/chain_memory/protected/*.pyd
+!farnsworth/integration/chain_memory/protected/*.cpython*.so
+
 # Python
 __pycache__/
 *.py[cod]

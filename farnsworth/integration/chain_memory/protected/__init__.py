@@ -2,29 +2,36 @@
 Protected Chain Memory Core
 
 This module contains the core upload/download logic for on-chain memory storage.
-In production, this should be compiled with Cython or obfuscated with PyArmor.
+The source is compiled to a binary for distribution - source should NOT be public.
 
-DO NOT DISTRIBUTE SOURCE CODE - Use compiled .pyd/.so files only.
+FARNS TOKEN REQUIRED: 100,000+ FARNS on Solana to use this feature.
+Token: 9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS
 
 To compile for distribution:
-    cython -3 core.py
-    # OR
-    pyarmor gen --pack onefile core.py
+    python scripts/build_protected.py --method cython
+
+Copyright (c) 2026 Farnsworth AI. All rights reserved.
 """
 
 from .core import (
     ChainUploader,
     ChainDownloader,
     verify_installation,
-    get_fingerprint
+    get_fingerprint,
+    verify_farns_for_operation,
+    MIN_FARNS_REQUIRED,
+    FARNS_TOKEN_MINT,
 )
 
 __all__ = [
     "ChainUploader",
     "ChainDownloader",
     "verify_installation",
-    "get_fingerprint"
+    "get_fingerprint",
+    "verify_farns_for_operation",
+    "MIN_FARNS_REQUIRED",
+    "FARNS_TOKEN_MINT",
 ]
 
-# Verify on import
-_VERIFIED = verify_installation()
+# Note: Verification happens on each upload/download operation now
+# No longer verify on import to avoid blocking non-chain-memory usage
