@@ -187,13 +187,17 @@ class DevelopmentSwarm:
         task_id: str,
         task_description: str,
         category: str,
-        source_context: List[Dict] = None
+        source_context: List[Dict] = None,
+        primary_agent: str = "Claude",
+        is_innovation: bool = False
     ):
         self.swarm_id = f"dev_{uuid.uuid4().hex[:8]}"
         self.task_id = task_id
         self.task_description = task_description
         self.category = category
         self.source_context = source_context or []
+        self.primary_agent = primary_agent  # Recommended coding agent
+        self.is_innovation = is_innovation  # True if this is an innovative idea
 
         self.status = "initializing"
         self.started_at: Optional[datetime] = None
@@ -214,7 +218,8 @@ class DevelopmentSwarm:
         self.generated_docs: Dict[str, str] = {}
         self.test_results: List[Dict] = []
 
-        logger.info(f"DevelopmentSwarm {self.swarm_id} created for: {task_description[:50]}...")
+        innovation_tag = "🚀 INNOVATION" if is_innovation else "TASK"
+        logger.info(f"DevelopmentSwarm {self.swarm_id} [{innovation_tag}] created for: {task_description[:50]}... (primary: {primary_agent})")
 
     async def start(self) -> str:
         """

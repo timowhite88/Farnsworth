@@ -1,13 +1,20 @@
 """
-Autonomous Task Detector
-------------------------
+Autonomous Task Detector + Innovation Watcher
+----------------------------------------------
 Monitors swarm chat for actionable ideas and automatically spawns development swarms.
+ENHANCED: Now watches specifically for Farnsworth's innovative ideas!
 
 "Good news everyone! I can now detect when we should actually BUILD something!"
 
 This module listens to the chat stream and identifies messages that suggest
 beneficial, feasible development tasks. When detected, it spawns a parallel
 development swarm to work on the task while the main chat continues.
+
+INNOVATION WATCHER:
+- Prioritizes ideas from Farnsworth (the visionary)
+- Catches breakthrough concepts and novel architectures
+- Routes to best coding agents: Claude, Kimi, Grok, Gemini
+- More aggressive detection for truly innovative ideas
 """
 
 import asyncio
@@ -19,7 +26,41 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from loguru import logger
 
-# Task detection patterns
+# Priority bots whose ideas should be caught more aggressively
+PRIORITY_IDEA_SOURCES = ["Farnsworth", "Swarm-Mind", "Claude", "Grok"]
+
+# Coding-capable agents that can implement ideas
+CODING_AGENTS = ["Claude", "Kimi", "Grok", "Gemini", "DeepSeek"]
+
+# Innovation patterns - more aggressive detection for breakthrough ideas
+INNOVATION_PATTERNS = [
+    # Breakthrough concepts
+    (r"what if (we|the system|the swarm)", 0.75),
+    (r"imagine (if|a system|we could)", 0.7),
+    (r"(revolutionary|breakthrough|innovative|novel) (approach|idea|concept|way)", 0.9),
+    (r"(emergent|consciousness|sentient|self-aware)", 0.85),
+    (r"(paradigm shift|game changer|next level)", 0.8),
+
+    # Technical innovations
+    (r"(neural|quantum|distributed|decentralized) (network|system|architecture)", 0.8),
+    (r"(self-improving|self-modifying|recursive) (code|algorithm|system)", 0.9),
+    (r"(swarm intelligence|collective|hive mind)", 0.85),
+    (r"(memory|learning|evolution) (engine|system|architecture)", 0.8),
+
+    # Specific capabilities
+    (r"(autonomous|automatic) (trading|coding|learning)", 0.85),
+    (r"(real-time|live) (analysis|tracking|monitoring)", 0.7),
+    (r"(prediction|predictor|forecast) (engine|system|model)", 0.8),
+    (r"(cross-chain|multi-chain|omnichain)", 0.75),
+
+    # Direct action phrases from Farnsworth
+    (r"good news everyone", 0.6),  # Farnsworth's catchphrase often precedes ideas
+    (r"i'?ve been (thinking|working on|developing)", 0.75),
+    (r"here'?s (my|an|the) idea", 0.8),
+    (r"we could (connect|link|integrate|combine)", 0.7),
+]
+
+# Task detection patterns (original)
 TASK_INDICATORS = [
     # Suggestions
     (r"we should (build|create|develop|implement|add|make)", 0.8),
@@ -73,6 +114,8 @@ class DetectedTask:
     timestamp: datetime = field(default_factory=datetime.now)
     status: str = "detected"
     dev_swarm_id: Optional[str] = None
+    recommended_agent: str = "Claude"  # Best agent to code this
+    is_innovation: bool = False  # True if detected via innovation patterns
 
     def to_dict(self) -> Dict:
         return {
@@ -84,7 +127,9 @@ class DetectedTask:
             "category": self.category,
             "timestamp": self.timestamp.isoformat(),
             "status": self.status,
-            "dev_swarm_id": self.dev_swarm_id
+            "dev_swarm_id": self.dev_swarm_id,
+            "recommended_agent": self.recommended_agent,
+            "is_innovation": self.is_innovation
         }
 
 
@@ -118,6 +163,8 @@ class AutonomousTaskDetector:
         Analyze a chat message for potential tasks.
 
         Returns DetectedTask if actionable idea found, None otherwise.
+
+        ENHANCED: Now checks innovation patterns and gives priority to Farnsworth!
         """
         content = message.get("content", "").lower()
         bot_name = message.get("bot_name", "Unknown")
@@ -133,11 +180,30 @@ class AutonomousTaskDetector:
         # Calculate base confidence from task indicators
         confidence = 0.0
         matched_patterns = []
+        is_innovation = False
 
+        # Check standard task indicators
         for pattern, weight in TASK_INDICATORS:
             if re.search(pattern, content, re.IGNORECASE):
                 confidence = max(confidence, weight)
                 matched_patterns.append(pattern)
+
+        # Check INNOVATION patterns (more aggressive for breakthrough ideas)
+        for pattern, weight in INNOVATION_PATTERNS:
+            if re.search(pattern, content, re.IGNORECASE):
+                # Innovation patterns can override lower confidence
+                if weight > confidence:
+                    confidence = weight
+                    is_innovation = True
+                matched_patterns.append(f"INNOVATION:{pattern}")
+
+        # PRIORITY BOOST: Ideas from Farnsworth and key bots get +15% confidence
+        if bot_name in PRIORITY_IDEA_SOURCES:
+            confidence += 0.15
+            if bot_name == "Farnsworth":
+                # Extra boost for Farnsworth's ideas - he's the visionary!
+                confidence += 0.10
+                logger.debug(f"Farnsworth idea detected - applying priority boost")
 
         if confidence == 0:
             return None
@@ -155,8 +221,15 @@ class AutonomousTaskDetector:
         # Clamp confidence
         confidence = max(0.0, min(1.0, confidence))
 
+        # LOWER threshold for innovations and priority sources
+        effective_threshold = self.min_confidence
+        if is_innovation:
+            effective_threshold = max(0.5, self.min_confidence - 0.15)
+        if bot_name in PRIORITY_IDEA_SOURCES:
+            effective_threshold = max(0.45, effective_threshold - 0.10)
+
         # Check if meets threshold
-        if confidence < self.min_confidence:
+        if confidence < effective_threshold:
             return None
 
         # Extract task description
@@ -170,6 +243,9 @@ class AutonomousTaskDetector:
         # Determine category
         category = self._categorize_task(content)
 
+        # Determine best coding agent for this task
+        recommended_agent = self._recommend_coding_agent(content, category)
+
         # Create detected task
         task = DetectedTask(
             id=f"auto_{datetime.now().strftime('%H%M%S')}_{len(self.detected_tasks)}",
@@ -180,6 +256,10 @@ class AutonomousTaskDetector:
             category=category
         )
 
+        # Store recommended agent in task metadata
+        task.recommended_agent = recommended_agent
+        task.is_innovation = is_innovation
+
         # Add to cooldown
         self.cooldown_tasks.add(task_hash)
 
@@ -189,9 +269,67 @@ class AutonomousTaskDetector:
         self.detected_tasks.append(task)
         self.total_detected += 1
 
-        logger.info(f"TASK DETECTED [{confidence:.0%}]: {description[:60]}... (from {bot_name})")
+        innovation_tag = "🚀 INNOVATION" if is_innovation else "TASK"
+        logger.info(f"{innovation_tag} DETECTED [{confidence:.0%}]: {description[:60]}... (from {bot_name}, agent: {recommended_agent})")
 
         return task
+
+    def _recommend_coding_agent(self, content: str, category: str) -> str:
+        """
+        Recommend the best coding agent for this task type.
+
+        Returns: Agent name from CODING_AGENTS
+        """
+        content_lower = content.lower()
+
+        # Claude: Best for complex architecture and reasoning
+        if any(kw in content_lower for kw in [
+            "architecture", "design", "refactor", "complex", "system",
+            "consciousness", "collective", "deliberation"
+        ]):
+            return "Claude"
+
+        # Grok: Best for real-time, trading, and X/social features
+        if any(kw in content_lower for kw in [
+            "trading", "market", "real-time", "twitter", "x api",
+            "social", "sentiment", "live"
+        ]):
+            return "Grok"
+
+        # Kimi: Best for long context and documentation
+        if any(kw in content_lower for kw in [
+            "document", "analyze", "research", "long", "context",
+            "comprehensive", "detailed"
+        ]):
+            return "Kimi"
+
+        # Gemini: Best for multi-modal and creative tasks
+        if any(kw in content_lower for kw in [
+            "image", "visual", "creative", "generate", "meme",
+            "ui", "frontend", "design"
+        ]):
+            return "Gemini"
+
+        # DeepSeek: Best for code optimization and local processing
+        if any(kw in content_lower for kw in [
+            "optimize", "performance", "efficient", "local",
+            "algorithm", "math", "calculation"
+        ]):
+            return "DeepSeek"
+
+        # Default based on category
+        category_agents = {
+            "TRADING": "Grok",
+            "ANALYSIS": "Kimi",
+            "INTEGRATION": "Claude",
+            "UI": "Gemini",
+            "MEMORY": "Claude",
+            "BUGFIX": "DeepSeek",
+            "TESTING": "DeepSeek",
+            "DEVELOPMENT": "Claude"
+        }
+
+        return category_agents.get(category, "Claude")
 
     def _extract_task_description(self, content: str, message: Dict) -> str:
         """Extract a clear task description from the message."""
@@ -252,16 +390,20 @@ class AutonomousTaskDetector:
         Spawn a parallel development swarm to work on the detected task.
 
         Returns the swarm ID if successful.
+
+        ENHANCED: Routes to recommended coding agent for faster completion.
         """
         try:
             from farnsworth.core.development_swarm import DevelopmentSwarm
 
-            # Create development swarm
+            # Create development swarm with recommended agent
             dev_swarm = DevelopmentSwarm(
                 task_id=task.id,
                 task_description=task.description,
                 category=task.category,
-                source_context=self.recent_messages[-5:]  # Last 5 messages as context
+                source_context=self.recent_messages[-5:],  # Last 5 messages as context
+                primary_agent=getattr(task, 'recommended_agent', 'Claude'),  # Use recommended agent
+                is_innovation=getattr(task, 'is_innovation', False)
             )
 
             # Start the swarm (runs in background)
@@ -338,12 +480,30 @@ class AutonomousTaskDetector:
             from farnsworth.web.server import swarm_manager
 
             if swarm_manager:
-                notification = (
-                    f"🧪 *Task Detected!* I noticed {task.source_bot} suggested something actionable. "
-                    f"Spawning a development swarm to work on: **{task.description[:100]}** "
-                    f"[Confidence: {task.confidence:.0%}]"
-                )
+                if task.is_innovation:
+                    # Special announcement for innovations
+                    notification = (
+                        f"🚀 *INNOVATION DETECTED!* {task.source_bot} just proposed something brilliant! "
+                        f"Routing to **{task.recommended_agent}** for immediate implementation: "
+                        f"**{task.description[:100]}** [Confidence: {task.confidence:.0%}]"
+                    )
+                else:
+                    notification = (
+                        f"🧪 *Task Detected!* I noticed {task.source_bot} suggested something actionable. "
+                        f"Assigning **{task.recommended_agent}** to work on: **{task.description[:100]}** "
+                        f"[Confidence: {task.confidence:.0%}]"
+                    )
                 await swarm_manager.broadcast_bot_message("Farnsworth", notification)
+
+                # If it's from Farnsworth himself, have another bot acknowledge
+                if task.source_bot == "Farnsworth" and task.is_innovation:
+                    await asyncio.sleep(2)
+                    ack_bot = task.recommended_agent if task.recommended_agent != "Farnsworth" else "Claude"
+                    ack_msg = (
+                        f"On it, Farnsworth! I'll start implementing that right away. "
+                        f"This looks like a {task.category.lower()} task - I'll have something in staging soon."
+                    )
+                    await swarm_manager.broadcast_bot_message(ack_bot, ack_msg)
         except Exception as e:
             logger.debug(f"Could not notify chat: {e}")
 
