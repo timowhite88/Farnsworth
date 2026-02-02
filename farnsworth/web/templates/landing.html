@@ -706,28 +706,111 @@
 
         /* Responsive */
         @media (max-width: 768px) {
+            body {
+                overflow-y: auto;
+                overflow-x: hidden;
+            }
+
+            .main-container {
+                padding: 1rem;
+                padding-bottom: 100px;
+                min-height: auto;
+            }
+
             .choices-container {
                 flex-direction: column;
-                gap: 2rem;
+                gap: 1.5rem;
+                padding: 0 1rem;
             }
 
             .choice-card {
                 width: 100%;
-                max-width: 320px;
+                max-width: 100%;
                 height: auto;
-                min-height: 380px;
+                min-height: 320px;
+                margin: 0 auto;
+            }
+
+            .card-inner {
+                padding: 1.5rem;
+            }
+
+            .card-icon {
+                width: 60px;
+                height: 60px;
+                margin-bottom: 1rem;
+            }
+
+            .icon-ring {
+                width: 60px;
+                height: 60px;
+            }
+
+            .icon-inner {
+                width: 30px;
+                height: 30px;
+            }
+
+            .card-title {
+                font-size: 1.5rem;
+            }
+
+            .card-description {
+                font-size: 0.9rem;
+                margin-bottom: 1rem;
+            }
+
+            .card-features {
+                gap: 0.5rem;
+            }
+
+            .feature {
+                font-size: 0.8rem;
+            }
+
+            .enter-btn {
+                padding: 0.75rem 1.5rem;
+                font-size: 0.9rem;
             }
 
             .header {
-                margin-bottom: 2rem;
+                margin-bottom: 1.5rem;
+                padding-top: 1rem;
             }
 
             .logo {
-                font-size: 2.5rem;
+                font-size: 2rem;
             }
 
             .tagline {
-                font-size: 1rem;
+                font-size: 0.9rem;
+            }
+
+            .footer {
+                position: relative;
+                bottom: auto;
+                left: auto;
+                transform: none;
+                margin-top: 2rem;
+                padding-bottom: 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .logo {
+                font-size: 1.75rem;
+            }
+
+            .choice-card {
+                min-height: 280px;
+            }
+
+            .card-title {
+                font-size: 1.25rem;
+            }
+
+            .card-description {
+                font-size: 0.85rem;
             }
         }
 
@@ -881,7 +964,7 @@
     <!-- Footer -->
     <footer class="footer">
         <span>Powered by</span>
-        <a href="https://twitter.com/faboratory" target="_blank">@faboratory</a>
+        <a href="https://twitter.com/FarnsworthAI" target="_blank">#FarnsworthAI</a>
         <span>|</span>
         <a href="https://pump.fun/coin/9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS" target="_blank">$FARNS</a>
     </footer>
