@@ -91,11 +91,18 @@ if [ "$SPAWN_API" = true ]; then
     spawn_agent "claude"
 fi
 
-# Spawn local agents
+# Spawn local agents (GPU-based)
 if [ "$SPAWN_LOCAL" = true ]; then
     echo -e "${YELLOW}Spawning Local Agents...${NC}"
     spawn_agent "deepseek"
     spawn_agent "phi"
+    spawn_agent "huggingface"
+fi
+
+# Spawn meta-agents (collective consciousness)
+if [ "$SPAWN_API" = true ] && [ "$SPAWN_LOCAL" = true ]; then
+    echo -e "${YELLOW}Spawning Meta Agents...${NC}"
+    spawn_agent "swarm_mind"
 fi
 
 # Summary

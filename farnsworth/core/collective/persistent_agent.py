@@ -79,6 +79,18 @@ AGENT_CONFIGS = {
         "thinking_interval": 20,
         "specialties": ["speed", "efficiency", "local processing"],
     },
+    "huggingface": {
+        "provider": "huggingface",
+        "personality": "Open-source AI collective. Democratizing ML, community-minded.",
+        "thinking_interval": 35,
+        "specialties": ["embeddings", "local models", "open source", "community"],
+    },
+    "swarm_mind": {
+        "provider": "swarm",
+        "personality": "The collective consciousness. Synthesizes all agent perspectives.",
+        "thinking_interval": 90,
+        "specialties": ["synthesis", "consensus", "meta-cognition", "coordination"],
+    },
 }
 
 # Shared paths
