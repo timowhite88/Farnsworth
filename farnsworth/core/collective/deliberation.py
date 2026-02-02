@@ -527,3 +527,50 @@ async def quick_deliberate(
     room = get_deliberation_room()
     result = await room.deliberate(prompt, agents, max_rounds)
     return result.final_response
+
+
+async def get_deliberation_stats() -> Dict[str, Any]:
+    """
+    Get statistics about collective deliberations.
+
+    Returns summary data for UI display and monitoring.
+    """
+    room = get_deliberation_room()
+
+    # Calculate stats from history
+    history = room.history
+    total = len(history)
+
+    if total == 0:
+        return {
+            "total": 0,
+            "avg_participation": 0,
+            "consensus_rate": 0,
+            "latest": None
+        }
+
+    # Calculate metrics
+    total_participants = sum(len(r.participating_agents) for r in history)
+    avg_participation = total_participants / total if total > 0 else 0
+
+    consensus_count = sum(1 for r in history if r.consensus_reached)
+    consensus_rate = consensus_count / total if total > 0 else 0
+
+    # Get latest deliberation summary
+    latest = None
+    if history:
+        last = history[-1]
+        latest = {
+            "id": last.deliberation_id,
+            "agents": last.participating_agents,
+            "winner": last.winning_agent,
+            "consensus": last.consensus_reached,
+            "duration_ms": last.total_duration_ms
+        }
+
+    return {
+        "total": total,
+        "avg_participation": round(avg_participation, 2),
+        "consensus_rate": round(consensus_rate * 100, 1),
+        "latest": latest
+    }

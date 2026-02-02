@@ -247,6 +247,107 @@ class EvolutionEngine:
             )
             self.patterns[pattern_id] = pattern
 
+    def record_feedback(self, feedback: str, context: Dict[str, Any] = None):
+        """
+        Record user feedback for learning.
+
+        Integrates feedback into the evolution engine to improve responses.
+        """
+        context = context or {}
+        timestamp = datetime.now().isoformat()
+
+        # Store feedback
+        feedback_file = self.storage_path / "feedback.json"
+        feedback_data = []
+        if feedback_file.exists():
+            try:
+                feedback_data = json.loads(feedback_file.read_text())
+            except:
+                pass
+
+        feedback_data.append({
+            "timestamp": timestamp,
+            "feedback": feedback,
+            "context": context,
+            "processed": False
+        })
+
+        feedback_file.write_text(json.dumps(feedback_data[-100:], indent=2))
+
+        # Analyze sentiment and update patterns
+        sentiment = self._analyze_feedback_sentiment(feedback)
+
+        if sentiment == "negative":
+            # Find and downgrade related patterns
+            for pattern in self.patterns.values():
+                if any(kw in feedback.lower() for kw in pattern.trigger_phrases):
+                    pattern.effectiveness_score = max(0.1, pattern.effectiveness_score - 0.1)
+        elif sentiment == "positive":
+            # Boost related patterns
+            for pattern in self.patterns.values():
+                if any(kw in feedback.lower() for kw in pattern.trigger_phrases):
+                    pattern.effectiveness_score = min(1.0, pattern.effectiveness_score + 0.1)
+
+        self._save_state()
+        logger.info(f"Recorded feedback: {feedback[:50]}... (sentiment: {sentiment})")
+
+    def _analyze_feedback_sentiment(self, feedback: str) -> str:
+        """Simple sentiment analysis for feedback."""
+        feedback_lower = feedback.lower()
+        positive_words = ['good', 'great', 'excellent', 'love', 'helpful', 'thanks', 'perfect', 'awesome']
+        negative_words = ['bad', 'wrong', 'incorrect', 'hate', 'useless', 'terrible', 'fix', 'broken']
+
+        pos_count = sum(1 for w in positive_words if w in feedback_lower)
+        neg_count = sum(1 for w in negative_words if w in feedback_lower)
+
+        if pos_count > neg_count:
+            return "positive"
+        elif neg_count > pos_count:
+            return "negative"
+        return "neutral"
+
+    def get_improvement_suggestions(self) -> List[str]:
+        """
+        Get suggestions for improving the collective based on feedback and patterns.
+        """
+        suggestions = []
+
+        # Analyze low-scoring patterns
+        low_patterns = [p for p in self.patterns.values() if p.effectiveness_score < 0.4]
+        if low_patterns:
+            topics = set()
+            for p in low_patterns:
+                topics.update(p.topic_associations)
+            if topics:
+                suggestions.append(f"Improve responses on topics: {', '.join(list(topics)[:5])}")
+
+        # Check for underperforming bots
+        for name, personality in self.personalities.items():
+            if personality.interaction_count > 10:
+                low_expertise = [t for t, s in personality.topic_expertise.items() if s < 0.4]
+                if low_expertise:
+                    suggestions.append(f"{name} needs improvement on: {', '.join(low_expertise[:3])}")
+
+        # General suggestions based on patterns
+        if len(self.patterns) < 10:
+            suggestions.append("Collect more interaction data to improve pattern recognition")
+
+        if self.evolution_cycles < 3:
+            suggestions.append("More evolution cycles needed for optimal performance")
+
+        # Load feedback-based suggestions
+        feedback_file = self.storage_path / "feedback.json"
+        if feedback_file.exists():
+            try:
+                feedback_data = json.loads(feedback_file.read_text())
+                unprocessed = [f for f in feedback_data if not f.get("processed")]
+                if len(unprocessed) > 5:
+                    suggestions.append(f"Review {len(unprocessed)} unprocessed feedback items")
+            except:
+                pass
+
+        return suggestions or ["System performing optimally - continue current approach"]
+
     def _process_learnings(self):
         """Process accumulated learnings into patterns."""
         if not self.learning_buffer:

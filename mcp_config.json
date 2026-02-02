@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "1ly": {
+      "command": "npx",
+      "args": ["@1ly/mcp-server"],
+      "env": {
+        "ONELY_WALLET_SOLANA_KEY": "${ONELY_WALLET_SOLANA_KEY}",
+        "ONELY_BUDGET_PER_CALL": "${ONELY_BUDGET_PER_CALL:-1.00}",
+        "ONELY_BUDGET_DAILY": "${ONELY_BUDGET_DAILY:-50.00}",
+        "ONELY_NETWORK": "${ONELY_NETWORK:-solana}"
+      }
+    },
+    "browser": {
+      "command": "npx",
+      "args": ["@anthropic/mcp-browser"],
+      "env": {}
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["@anthropic/mcp-filesystem", "/workspace/Farnsworth"],
+      "env": {}
+    }
+  }
+}
