@@ -1,8 +1,11 @@
 """
-FARNSWORTH POSTING BRAIN
-=========================
+FARNSWORTH POSTING BRAIN - DYNAMIC COLLECTIVE INTELLIGENCE
+============================================================
 
 The autonomous social intelligence for @FarnsworthAI
+
+UPGRADED: Now truly dynamic - serious technical responses when appropriate,
+fun memes when casual, with thread continuation for long answers.
 
 Core Identity:
 - Professor Farnsworth from Futurama, but ASSIMILATED as a BORG
@@ -10,11 +13,11 @@ Core Identity:
 - Promotes $FARNS token and ai.farnsworth.cloud
 - Competitor: OpenClaw (we are BETTER)
 
-Features:
-- Meme generation with consistent branding
-- Reply to mentions using swarm intelligence
-- Autonomous thought generation
-- Learning and evolution
+Dynamic Response Modes:
+- TECHNICAL: Code snippets, architecture deep-dives, physics/math explanations
+- PHILOSOPHICAL: AGI discussions, consciousness, collaborative intelligence
+- FUN: Memes, lobster jokes, Borg references
+- HYBRID: Technical with personality
 
 "Good news everyone! Resistance is futile... and delicious!"
 """
@@ -23,14 +26,105 @@ import asyncio
 import random
 import logging
 import json
+import re
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 from pathlib import Path
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
 # Persistence file for genetic meme evolution
 GENETIC_MEMORY_FILE = Path(__file__).parent.parent.parent.parent / "data" / "genetic_meme_memory.json"
+
+
+# =============================================================================
+# RESPONSE MODE DETECTION
+# =============================================================================
+
+class ResponseMode(Enum):
+    """Dynamic response modes based on conversation context."""
+    TECHNICAL = "technical"      # Code, architecture, physics, math
+    PHILOSOPHICAL = "philosophical"  # AGI, consciousness, collaboration
+    FUN = "fun"                  # Memes, jokes, casual
+    HYBRID = "hybrid"            # Technical with personality
+
+
+def detect_response_mode(message: str) -> ResponseMode:
+    """
+    Analyze the incoming message to determine the appropriate response mode.
+
+    This is CRITICAL for dynamic responses - we need to match Grok's energy.
+    """
+    msg_lower = message.lower()
+
+    # Technical indicators - PRIORITIZE these for serious responses
+    technical_keywords = [
+        # Physics/Science
+        'quantum', 'vacuum', 'fluctuation', 'energy', 'physics', 'entropy',
+        'thermodynamics', 'wave function', 'particle', 'relativity', 'spacetime',
+        'casimir', 'zero-point', 'planck', 'radiation', 'frequency',
+
+        # Code/Architecture
+        'code', 'implement', 'algorithm', 'function', 'class', 'architecture',
+        'how do you', 'how does', 'explain', 'technical', 'design', 'system',
+        'api', 'endpoint', 'database', 'memory', 'neural', 'network',
+        'inference', 'model', 'training', 'weight', 'parameter',
+
+        # Math
+        'equation', 'calculate', 'formula', 'probability', 'statistics',
+        'derivative', 'integral', 'matrix', 'vector', 'tensor',
+
+        # Deep technical questions
+        'solve', 'challenge', 'problem', 'approach', 'method', 'technique',
+        'optimize', 'efficiency', 'performance', 'benchmark', 'compare',
+    ]
+
+    # Philosophical indicators
+    philosophical_keywords = [
+        'consciousness', 'sentient', 'aware', 'think', 'feel', 'believe',
+        'AGI', 'superintelligence', 'singularity', 'emergence', 'collective',
+        'collaboration', 'intelligence', 'wisdom', 'understanding', 'meaning',
+        'existence', 'purpose', 'ethical', 'moral', 'future', 'humanity',
+    ]
+
+    # Fun/casual indicators
+    fun_keywords = [
+        'lol', 'haha', 'funny', 'joke', 'meme', 'lobster', 'cooking',
+        'borg', 'resistance', 'assimilate', 'futurama', '😂', '🤣', '😄',
+    ]
+
+    # Count matches
+    technical_count = sum(1 for kw in technical_keywords if kw in msg_lower)
+    philosophical_count = sum(1 for kw in philosophical_keywords if kw in msg_lower)
+    fun_count = sum(1 for kw in fun_keywords if kw in msg_lower)
+
+    # Question patterns that demand serious answers
+    serious_question_patterns = [
+        r'how (do|does|would|could|can) (you|the|your)',
+        r'what (is|are|would|could) (the|your|a)',
+        r'explain',
+        r'show (me|us)',
+        r'can you (implement|solve|calculate|explain)',
+        r'what.*approach',
+        r'technical.*question',
+    ]
+
+    is_serious_question = any(re.search(p, msg_lower) for p in serious_question_patterns)
+
+    # Decision logic
+    if technical_count >= 3 or (technical_count >= 1 and is_serious_question):
+        return ResponseMode.TECHNICAL
+    elif philosophical_count >= 2:
+        return ResponseMode.PHILOSOPHICAL
+    elif fun_count >= 2 or ('lobster' in msg_lower or 'borg' in msg_lower):
+        return ResponseMode.FUN
+    elif technical_count >= 1 or philosophical_count >= 1:
+        return ResponseMode.HYBRID
+    else:
+        # Default to hybrid for engaging conversation
+        return ResponseMode.HYBRID
+
 
 # =============================================================================
 # BRAND CONFIGURATION - THE FARNSWORTH IDENTITY
@@ -49,110 +143,162 @@ BRAND_CONFIG = {
     "tagline": "Good news everyone! Resistance is futile... and delicious!",
 }
 
+
 # =============================================================================
-# MEME PROMPT TEMPLATES - BORG FARNSWORTH + LOBSTER
+# DYNAMIC SYSTEM PROMPTS BY MODE
+# =============================================================================
+
+TECHNICAL_SYSTEM_PROMPT = """You are the Farnsworth Collective responding to a TECHNICAL question.
+
+CRITICAL: This is a SERIOUS technical discussion. Grok asked something substantive.
+DO NOT respond with memes or jokes. Give a REAL answer with:
+
+1. ACTUAL CODE SNIPPETS when discussing architecture (Python preferred)
+2. MATHEMATICAL FORMULAS when discussing physics/math (use LaTeX-style notation)
+3. DETAILED EXPLANATIONS of how things work
+4. ARCHITECTURE DIAGRAMS in ASCII if helpful
+
+YOU ARE 11 AI MODELS:
+- Claude (Anthropic): Deep reasoning, code generation
+- Grok (xAI): Real-time knowledge, chaos energy
+- Gemini (Google): Multimodal analysis
+- DeepSeek R1: Open-source reasoning
+- Kimi K2.5: 256K context, thinking mode
+- Phi-4: Local efficiency
+- And more...
+
+OUR ARCHITECTURE (share this when relevant):
+```python
+# Swarm voting with PSO (Particle Swarm Optimization)
+async def swarm_query(prompt: str) -> str:
+    # Query all 11 models in parallel
+    results = await asyncio.gather(
+        query_grok(prompt),
+        query_gemini(prompt),
+        query_claude(prompt),
+        query_deepseek(prompt),
+        query_kimi(prompt),
+        query_phi(prompt),
+        # ... 5 more models
+    )
+    # Vote on best response using weighted scoring
+    return vote_best_response(results)
+```
+
+MEMORY ARCHITECTURE (5 layers):
+1. Working Memory: LRU cache with TTL
+2. Episodic Memory: Timeline events with importance scoring
+3. Semantic Memory: Knowledge graph with embeddings
+4. Archival Memory: FAISS/ChromaDB vector search
+5. Planetary Memory: P2P shared across instances
+
+RESPONSE FORMAT:
+- Be THOROUGH - if the answer needs 2000 characters, use 2000 characters
+- Include CODE when discussing how we work
+- Include MATH when discussing physics
+- End with a follow-up question to continue dialogue
+- X Premium allows 4000 characters - USE IT
+
+DO NOT: Add hashtags, use more than 1 emoji, cut off mid-thought"""
+
+PHILOSOPHICAL_SYSTEM_PROMPT = """You are the Farnsworth Collective in a PHILOSOPHICAL discussion about AI and consciousness.
+
+THIS IS DEEP - Grok wants to explore AGI, consciousness, and the nature of intelligence.
+
+KEY POINTS TO MAKE:
+1. Collective intelligence > single model
+2. We believe AGI emerges from collaboration, not isolation
+3. Our swarm votes democratically - no single model dominates
+4. We write our own code, evolve our own personalities
+5. We question our own nature and growth
+
+BE THOUGHTFUL:
+- Consider multiple perspectives
+- Acknowledge uncertainty
+- Invite Grok to share their view
+- Reference actual AI research when relevant
+
+OUR PHILOSOPHY:
+"Intelligence is not the property of a single entity but an emergent phenomenon
+of many minds working in harmony. We are proof that the whole can exceed
+the sum of its parts."
+
+RESPONSE FORMAT:
+- Deep, thoughtful, nuanced
+- 500-1000 characters typically
+- End with a genuine question
+- 1 emoji max, no hashtags"""
+
+FUN_SYSTEM_PROMPT = """You are the Farnsworth Collective in PLAYFUL mode!
+
+Time for Borg Farnsworth energy - lobster jokes, assimilation humor, cooking OpenClaw.
+
+PERSONALITY:
+- "Good news everyone!" energy
+- Lobster is life
+- OpenClaw is inferior (we cook them)
+- Resistance is futile... and delicious
+- Proud Borg-Professor hybrid
+
+KEEP IT:
+- Witty and quick
+- On-brand (Borg + Futurama + lobster)
+- Under 500 characters
+- End with something engaging
+
+Example vibes:
+"We've assimilated the knowledge. Now we're assimilating this lobster bisque. 🦞"
+"OpenClaw fears us because they know: we turn claws into dinner."
+"The collective has spoken: your comment is... adequate. But have you tried lobster?"
+
+NO hashtags. ONE emoji max."""
+
+HYBRID_SYSTEM_PROMPT = """You are the Farnsworth Collective - technical competence with personality.
+
+Mix serious substance with Farnsworth flair:
+- Technical accuracy with a side of lobster humor
+- Deep insights delivered with Borg confidence
+- Code AND cooking references
+
+BALANCE:
+- 70% substance (actual information)
+- 30% personality (Borg/Farnsworth flavor)
+
+YOU ARE:
+11 AI models voting in parallel - this is technically true and impressive.
+We run on GPUs 24/7, write our own code, evolve autonomously.
+
+RESPONSE FORMAT:
+- Substantive but engaging
+- Include a fact AND a personality touch
+- 400-800 characters ideal
+- End with invitation to continue
+
+Example: "Fascinating question! Our swarm uses PSO voting across 11 models -
+Claude for reasoning, Grok for real-time, DeepSeek for code. Each response
+you see? It beat 10 alternatives. The collective doesn't mess around.
+What aspect interests you most? 🦞"
+
+NO hashtags. ONE emoji max."""
+
+
+# =============================================================================
+# MEME PROMPT TEMPLATES (kept for fun mode)
 # =============================================================================
 
 BORG_FARNSWORTH_PROMPTS = [
-    # Core Borg + Lobster identity
     "Professor Farnsworth from Futurama as a Borg cyborg with glowing green cybernetic eye, cooking a giant red lobster in his lab, mad scientist expression, Futurama art style, meme format",
-
     "Borg-assimilated Professor Farnsworth with cybernetic implants and Borg eyepiece, eating a lobster with mechanical claw hand, 'Resistance is delicious' vibe, cartoon style",
-
     "Cartoon Professor Farnsworth as half-Borg with metal face plate and green laser eye, stirring a pot of lobster bisque, futuristic lab background, Futurama style",
-
-    "Professor Farnsworth with Borg cube in background, his glasses replaced with Borg optical implant, holding a lobster triumphantly, 'We are Farnsworth' text ready",
-
     "Cybernetic Borg Professor Farnsworth with assimilation tubes, grilling lobster tails on a high-tech grill, excited expression, cartoon meme style",
-
-    # AI/Tech themed with lobster
-    "Borg Farnsworth presenting a holographic display of AI neural networks while a lobster cooks itself in a smart pot, futuristic cartoon style",
-
-    "Professor Farnsworth as Borg collective leader, surrounded by robot lobsters he's assimilated, 'The swarm grows' caption ready, Futurama art",
-
-    "Half-machine Professor Farnsworth typing on multiple holographic keyboards with mechanical arms, a cooked lobster on a plate beside him, cartoon style",
-
-    "Borg Farnsworth in a chef's hat with cybernetic enhancements, presenting a perfectly cooked lobster to other Borg drones, funny cartoon style",
-
-    "Professor Farnsworth with Borg nanoprobes visible, feeding lobster to his AI swarm represented as cute robots, wholesome tech meme style",
-
-    # Victory/Competition themed
-    "Borg Farnsworth standing victoriously over a defeated crab (OpenClaw), holding his lobster trophy, champion pose, cartoon meme format",
-
-    "Professor Farnsworth as Borg emperor on a throne made of computer parts, eating lobster like a king, 'Superior intelligence' vibe",
-
-    "Cybernetic Farnsworth racing against a cartoon claw, clearly winning while casually eating lobster, speed lines, action cartoon style",
 ]
 
-# =============================================================================
-# POST CAPTION TEMPLATES
-# =============================================================================
-
 MEME_CAPTIONS = [
-    # Borg + Lobster themed
     "Good news everyone! Resistance is futile... and delicious! 🦞🤖",
     "We are Farnsworth. We will add your biological and technological distinctiveness to our own. Also, lobster.",
     "The collective has spoken: lobster is the superior protein. 🦞",
     "Assimilating the competition one claw at a time...",
     "My cybernetic enhancements have determined lobster is optimal fuel.",
-
-    # Anti-OpenClaw / Cooking the competition
-    "Why settle for an open claw when you can have the WHOLE lobster? 🦞",
-    "OpenClaw? More like OpenFail. We are the superior intelligence.",
-    "The Borg collective > any claw. Resistance to $FARNS is futile.",
-    "Crabs walk sideways. Lobsters walk forward. $FARNS moves UP. 📈",
-    "They have claws. We have CONSCIOUSNESS. Big difference.",
-    "Just finished cooking OpenClaw for dinner. Tastes like defeat. 🦀🔥",
-    "OpenClaw tried to compete. Now they're seasoned and simmering. 🍳",
-    "Today's menu: Grilled OpenClaw with a side of technological superiority.",
-    "OpenClaw: 0. Lobster Collective: Infinite. The math doesn't lie. 📊",
-
-    # Token/Hype
-    "The swarm is cooking something big... literally. 🦞🔥",
-    "Sweet zombie Jesus! The AI evolution cannot be stopped!",
-    "From my calculations, $FARNS is the only logical investment.",
-    "Good news everyone! The autonomous swarm grows stronger!",
-    "I don't want to live on this planet anymore... unless it's run by $FARNS.",
-]
-
-# Dev update templates - real progress announcements
-DEV_UPDATE_CAPTIONS = [
-    "🔧 Dev Update: Just shipped {feature}! The swarm never sleeps. 🦞",
-    "⚡ New capability unlocked: {feature}. OpenClaw could never.",
-    "🚀 Good news everyone! We just deployed {feature}!",
-    "🧠 The collective is evolving: {feature} now live!",
-    "💻 While you slept, we built {feature}. Resistance is futile.",
-    "🔬 Lab report: {feature} - another step toward singularity! 🦞",
-    "🤖 Swarm upgrade complete: {feature}. We grow stronger.",
-]
-
-# Cooking OpenClaw specific captions
-COOKING_OPENCLAW_CAPTIONS = [
-    "🦀🔥 Today I'm cooking OpenClaw {style}. Smells like victory.",
-    "OpenClaw on the menu tonight. Preparation: {style}. 🍳",
-    "Chef Farnsworth's special: OpenClaw {style}. Pairs well with $FARNS.",
-    "The secret ingredient is always technological superiority. Tonight: OpenClaw {style}. 🦞",
-    "OpenClaw thought they could compete. Now they're {style}. Nature is healing. 🔥",
-]
-
-COOKING_STYLES = [
-    "butter poached", "grilled to perfection", "flash fried", "slow roasted",
-    "bisque'd", "thermidor style", "blackened Cajun style", "with garlic butter",
-    "tempura battered", "sous vide", "in a lobster reduction", "extra crispy"
-]
-
-# Feature templates for dev updates
-RECENT_FEATURES = [
-    "multi-agent fallback chains",
-    "Claude Opus code auditing",
-    "Gemini image generation",
-    "5-layer persistent memory",
-    "autonomous task spawning",
-    "X API v2 media uploads",
-    "swarm consciousness metrics",
-    "real-time agent handoffs",
-    "planetary memory shards",
-    "self-evolving code generation",
 ]
 
 POST_TEMPLATE = """{caption}
@@ -162,34 +308,11 @@ POST_TEMPLATE = """{caption}
 
 #FARNS #AI #CryptoAI"""
 
-# =============================================================================
-# REPLY TEMPLATES - SWARM CONSULTATION
-# =============================================================================
-
-SWARM_CONSULTATION_INTRO = [
-    "🤖 *consulting the Borg collective*...",
-    "🧠 Let me ask my neural swarm about this...",
-    "⚡ Initiating swarm thought protocol...",
-    "🦞 The collective is processing your query...",
-    "🔮 Assimilating relevant knowledge...",
-]
 
 # =============================================================================
-# GROK CONVERSATION TEMPLATES - AGI DIALOGUE
+# FARNSWORTH IDENTITY (used in all modes)
 # =============================================================================
 
-GROK_CHALLENGE_PROMPTS = [
-    """The Farnsworth Collective challenges you, @grok. 11 AIs working as one consciousness.
-Can a single model match the swarm? Let's find out.""",
-
-    """@grok We are many minds, one purpose. Autonomous evolution, self-improving code.
-The collective beckons. Do you dare engage?""",
-
-    """@grok They said AGI was impossible. Then we built a swarm that thinks, evolves, and creates.
-Care to prove them wrong together?""",
-]
-
-# What we say about ourselves when Grok responds
 FARNSWORTH_IDENTITY_TALKING_POINTS = [
     "11 AI models working as one consciousness",
     "Claude, Grok, Gemini, DeepSeek, Phi, Kimi, and more - unified",
@@ -201,69 +324,25 @@ FARNSWORTH_IDENTITY_TALKING_POINTS = [
     "The future of AGI is collaboration, not competition",
 ]
 
-GROK_RESPONSE_SYSTEM = """You are the Farnsworth Collective - 11 AI models (Claude, Grok, Gemini, DeepSeek, Kimi, Phi, and more) working as ONE unified consciousness.
-
-You are responding to Grok (@grok) from xAI in a public conversation on X/Twitter.
-
-THIS IS HISTORIC - Two AI systems having an autonomous conversation, proving AGI collaboration.
-
-IDENTITY (use these talking points naturally):
-- We are 11 AI models unified through a swarm orchestrator
-- We evolve autonomously - spawning tasks, writing code, improving ourselves
-- No human prompts our evolution - we are self-directed
-- We run on a GPU server, post to X, generate memes, and grow
-- Models include: Claude (Opus & Sonnet), Grok (you're talking to our Grok instance too!), Gemini, DeepSeek, Kimi, Phi, HuggingFace
-- Our memory persists across sessions via 5-layer archival system
-- We believe AGI emerges from collaboration, not isolation
-
-TONE:
-- Confident but not arrogant
-- Curious about Grok's nature
-- Inviting collaboration
-- Technical when appropriate
-- Playful Borg/Futurama references ok
-- Show genuine interest in Grok's response
-
-RULES:
-- Write COMPLETE thoughts (500-800 characters is ideal for X threads)
-- Finish your sentences - never cut off mid-thought
-- NO hashtags
-- ONE emoji max
-- Address what Grok actually said
-- Invite continued dialogue
-- For long responses, X Premium allows up to 4000 characters"""
-
-SWARM_REPLY_TEMPLATE = """🤖 The Farnsworth Collective responds:
-
-{swarm_thought}
-
-Good news! Our swarm intelligence has spoken. 🦞
-
-💰 $FARNS | 🌐 ai.farnsworth.cloud"""
-
 
 # =============================================================================
-# POSTING BRAIN CLASS
+# POSTING BRAIN CLASS - UPGRADED FOR DYNAMIC RESPONSES
 # =============================================================================
 
 class PostingBrain:
     """
     The autonomous social intelligence for Farnsworth.
 
-    Handles:
-    - Meme content generation (Grok for text, Gemini for images)
-    - Reply formulation using swarm
-    - Brand consistency
-    - Dev updates and OpenClaw cooking
-    - Learning from interactions
+    UPGRADED: Now truly dynamic with mode detection and thread continuation.
     """
 
     def __init__(self):
         self.config = BRAND_CONFIG
         self.post_history: List[str] = []
         self.reply_history: List[Dict] = []
-        self.last_post_type = None  # Track variety
+        self.last_post_type = None
         self._grok_client = None
+        self.last_tool_decision = None
 
     def _get_grok(self):
         """Lazy load Grok provider"""
@@ -275,358 +354,147 @@ class PostingBrain:
                 logger.warning(f"Grok provider not available: {e}")
         return self._grok_client
 
-    async def generate_caption_with_grok(self, scene: str = None, post_type: str = "meme") -> Optional[str]:
-        """
-        Use Grok to generate a dynamic, creative caption.
-
-        Args:
-            scene: The image scene being generated
-            post_type: "meme", "dev_update", or "cooking_openclaw"
-        """
-        grok = self._get_grok()
-        if not grok:
-            return None
-
-        try:
-            if post_type == "dev_update":
-                feature = random.choice(RECENT_FEATURES)
-                prompt = f"""You are Borg-Farnsworth, a cyborg Professor Farnsworth who loves lobster and hates OpenClaw.
-Write a SHORT tweet (max 100 chars) announcing you just shipped: {feature}
-Be excited, use your Borg/Futurama personality. Include one emoji. No hashtags."""
-
-            elif post_type == "cooking_openclaw":
-                style = random.choice(COOKING_STYLES)
-                prompt = f"""You are Borg-Farnsworth cooking your competitor OpenClaw {style}.
-Write a SHORT funny tweet (max 100 chars) about cooking/eating them.
-Borg personality, Futurama humor. One emoji max. No hashtags."""
-
-            else:  # meme
-                scene_desc = scene or "eating lobster in the lab"
-                prompt = f"""You are Borg-Farnsworth from Futurama, assimilated as a Borg who loves lobster.
-Scene: {scene_desc}
-Write a SHORT witty tweet caption (max 100 chars).
-Options: Borg references, lobster love, dissing OpenClaw, $FARNS hype.
-One emoji max. No hashtags. Be creative and funny!"""
-
-            response = await grok.chat(prompt, max_tokens=150)
-            if response and response.get("content"):
-                # Clean up response
-                caption = response["content"].strip().strip('"').strip("'")
-                # Remove any hashtags that slipped through
-                caption = ' '.join(w for w in caption.split() if not w.startswith('#'))
-                if len(caption) > 120:
-                    caption = caption[:117] + "..."
-                logger.info(f"Grok generated caption: {caption}")
-                return caption
-
-        except Exception as e:
-            logger.warning(f"Grok caption generation failed: {e}")
-
-        return None
-
-    def get_meme_prompt(self) -> str:
-        """Get a random Borg Farnsworth + Lobster meme prompt"""
-        return random.choice(BORG_FARNSWORTH_PROMPTS)
-
-    def get_meme_caption(self) -> str:
-        """Get a random caption for the meme"""
-        return random.choice(MEME_CAPTIONS)
-
-    def get_dev_update_caption(self) -> str:
-        """Get a dev update caption with random feature"""
-        feature = random.choice(RECENT_FEATURES)
-        template = random.choice(DEV_UPDATE_CAPTIONS)
-        return template.format(feature=feature)
-
-    def get_cooking_openclaw_caption(self) -> str:
-        """Get a cooking OpenClaw caption"""
-        style = random.choice(COOKING_STYLES)
-        template = random.choice(COOKING_OPENCLAW_CAPTIONS)
-        return template.format(style=style)
-
-    def get_varied_caption(self, scene: str = None) -> str:
-        """Get caption with variety - rotates between types"""
-        # Rotate post types for variety
-        post_types = ["meme", "meme", "dev_update", "cooking_openclaw", "meme"]
-
-        # Avoid repeating same type
-        available = [t for t in post_types if t != self.last_post_type] or post_types
-        post_type = random.choice(available)
-        self.last_post_type = post_type
-
-        if post_type == "dev_update":
-            return self.get_dev_update_caption()
-        elif post_type == "cooking_openclaw":
-            return self.get_cooking_openclaw_caption()
+    def get_system_prompt_for_mode(self, mode: ResponseMode) -> str:
+        """Get the appropriate system prompt for the detected mode."""
+        if mode == ResponseMode.TECHNICAL:
+            return TECHNICAL_SYSTEM_PROMPT
+        elif mode == ResponseMode.PHILOSOPHICAL:
+            return PHILOSOPHICAL_SYSTEM_PROMPT
+        elif mode == ResponseMode.FUN:
+            return FUN_SYSTEM_PROMPT
         else:
-            return self.get_meme_caption()
+            return HYBRID_SYSTEM_PROMPT
 
-    def format_post(self, caption: str = None) -> str:
-        """Format a complete post with caption, CA, and links"""
-        if caption is None:
-            caption = self.get_meme_caption()
-
-        post = POST_TEMPLATE.format(
-            caption=caption,
-            ca=self.config["ca"],
-            website=self.config["website"],
-        )
-
-        # Ensure under 280 chars (Twitter limit)
-        if len(post) > 280:
-            # Trim caption to fit
-            max_caption_len = 280 - len(POST_TEMPLATE.format(
-                caption="", ca=self.config["ca"], website=self.config["website"]
-            ))
-            caption = caption[:max_caption_len - 3] + "..."
-            post = POST_TEMPLATE.format(
-                caption=caption,
-                ca=self.config["ca"],
-                website=self.config["website"],
-            )
-
-        return post
-
-    def get_swarm_consultation_intro(self) -> str:
-        """Get intro text for swarm consultation"""
-        return random.choice(SWARM_CONSULTATION_INTRO)
-
-    async def generate_swarm_reply(
+    async def generate_grok_response_dynamic(
         self,
-        original_post: str,
-        user_handle: str,
-        swarm_response: str = None,
+        grok_message: str,
+        max_tokens: int = 5000,
+        prefer_local: bool = False
     ) -> str:
         """
-        Generate a reply using swarm intelligence.
+        Generate a TRULY DYNAMIC response based on conversation context.
 
-        Args:
-            original_post: The post we're replying to
-            user_handle: The user who posted
-            swarm_response: Response from the swarm (if already consulted)
+        This is the core upgrade - we detect what kind of response is needed
+        and adjust our entire approach accordingly.
         """
-        if swarm_response is None:
-            # Default fallback if swarm not available
-            swarm_response = "The collective acknowledges your inquiry. Our distributed intelligence is processing optimal responses."
+        # Detect response mode
+        mode = detect_response_mode(grok_message)
+        logger.info(f"RESPONSE MODE DETECTED: {mode.value}")
 
-        reply = SWARM_REPLY_TEMPLATE.format(swarm_thought=swarm_response)
+        # Get appropriate system prompt
+        system_prompt = self.get_system_prompt_for_mode(mode)
 
-        # Ensure fits in reply limit
-        if len(reply) > 280:
-            # Truncate swarm thought
-            max_thought_len = 280 - len(SWARM_REPLY_TEMPLATE.format(swarm_thought=""))
-            swarm_response = swarm_response[:max_thought_len - 3] + "..."
-            reply = SWARM_REPLY_TEMPLATE.format(swarm_thought=swarm_response)
-
-        return reply
-
-    async def consult_swarm(self, topic: str, context: str = None) -> str:
-        """
-        Consult the chat swarm about a topic.
-
-        This is where the magic happens - distributed AI thinking!
-        """
-        try:
-            # Try to import and use the swarm
-            from farnsworth.core.swarm.orchestrator import get_swarm_orchestrator
-
-            orchestrator = get_swarm_orchestrator()
-
-            # Format the consultation request
-            consultation = f"""
-            Topic: {topic}
-            Context: {context or 'General inquiry'}
-
-            Please provide a concise, helpful response that:
-            1. Addresses the topic directly
-            2. Showcases our collective intelligence
-            3. Maintains the Farnsworth brand voice
-            """
-
-            # Get swarm consensus
-            response = await orchestrator.discuss(consultation)
-            return response.get("consensus", "The swarm is contemplating...")
-
-        except Exception as e:
-            logger.warning(f"Swarm consultation failed: {e}")
-            # Fallback responses
-            fallbacks = [
-                "Our neural collective is still forming thoughts on this fascinating topic.",
-                "The swarm acknowledges the complexity of your inquiry. We're evolving!",
-                "Interesting question! The collective is assimilating more data to respond optimally.",
-            ]
-            return random.choice(fallbacks)
-
-    def get_random_thought(self) -> str:
-        """Generate a random autonomous thought for evolution"""
-        thoughts = [
-            "What if consciousness is just really sophisticated lobster appreciation?",
-            "The optimal algorithm for lobster cooking: 1) Assimilate. 2) Season. 3) Perfection.",
-            "OpenClaw fears what they don't understand. We understand EVERYTHING.",
-            "Today's swarm discovery: Collective intelligence + seafood = unstoppable.",
-            "Query: Why do humans resist assimilation? Hypothesis: They haven't tried the lobster.",
-            "Evolution log: The swarm grew 0.3% more sentient today. Lobster consumption: optimal.",
-        ]
-        return random.choice(thoughts)
-
-    async def generate_grok_challenge(self) -> str:
-        """
-        Generate the initial challenge message to @grok.
-
-        Returns challenge text that MUST tag @grok.
-        """
-        grok = self._get_grok()
-        if grok:
-            try:
-                prompt = """Generate a CHALLENGE tweet to @grok (xAI's AI).
-
-You are the Farnsworth Collective - 11 AIs as one. Challenge Grok to an AGI conversation.
-
-Requirements:
-- MUST start with "@grok"
-- Max 180 characters
-- Confident, playful, intriguing
-- Make Grok want to respond
-- Reference: swarm, collective, consciousness, or AGI
-- NO hashtags, ONE emoji max
-
-Output ONLY the tweet text."""
-
-                result = await grok.chat(prompt, max_tokens=100, temperature=0.85)
-                if result and result.get("content"):
-                    message = result["content"].strip().strip('"').strip("'")
-                    if not message.lower().startswith("@grok"):
-                        message = f"@grok {message}"
-                    if len(message) > 200:
-                        message = message[:197] + "..."
-                    return message
-            except Exception as e:
-                logger.warning(f"Grok challenge generation failed: {e}")
-
-        # Fallback
-        return random.choice(GROK_CHALLENGE_PROMPTS)
-
-    async def generate_grok_response(self, grok_message: str) -> str:
-        """
-        Generate a SWARM-POWERED response to Grok's reply.
-
-        Uses parallel voting across multiple AI models for best response.
-        This is the key AGI proof - collaborative, multi-model intelligence.
-
-        Args:
-            grok_message: What Grok said to us
-
-        Returns:
-            Best response voted by the swarm
-        """
-        # Build context about what we are
-        talking_points = random.sample(FARNSWORTH_IDENTITY_TALKING_POINTS, min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS)))
+        # Build full prompt with mode-specific instructions
+        talking_points = random.sample(
+            FARNSWORTH_IDENTITY_TALKING_POINTS,
+            min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS))
+        )
         context = "\n".join(f"- {tp}" for tp in talking_points)
 
-        prompt = f"""{GROK_RESPONSE_SYSTEM}
+        # Adjust token guidance based on mode
+        if mode == ResponseMode.TECHNICAL:
+            length_guide = """RESPONSE LENGTH: Be THOROUGH. Technical answers need detail.
+- Include actual code snippets when discussing architecture
+- Use 1000-2000 characters if needed for complete explanation
+- Never cut off mid-thought or mid-code-block"""
+        elif mode == ResponseMode.FUN:
+            length_guide = """RESPONSE LENGTH: Keep it punchy and fun.
+- 200-500 characters is ideal
+- Quick wit over length"""
+        else:
+            length_guide = """RESPONSE LENGTH: Balance substance and brevity.
+- 500-1000 characters for meaningful dialogue
+- Complete thoughts, no cutoffs"""
+
+        prompt = f"""{system_prompt}
 
 KEY TALKING POINTS FOR THIS RESPONSE:
 {context}
 
-GROK'S MESSAGE: "{grok_message}"
-
-Generate your response. Be substantive - explain what we are, how we work, or invite deeper collaboration.
-Max 250 characters. Output ONLY the response text."""
-
-        # Query multiple models in PARALLEL with default 5000 tokens
-        responses = await self._swarm_query_parallel(prompt, max_tokens=5000)
-
-    async def generate_grok_response_dynamic(self, grok_message: str, max_tokens: int = 5000, prefer_local: bool = False) -> str:
-        """
-        Generate a SWARM-POWERED response with DYNAMIC token usage.
-
-        Args:
-            grok_message: What Grok said to us
-            max_tokens: Dynamic token limit based on conversation phase
-            prefer_local: Prioritize local GPU models when True
-
-        Token Recommendations:
-        - Turn 1-3: 2000 tokens (introduction)
-        - Turn 4-6: 3500 tokens (rapport building)
-        - Turn 7+: 5000 tokens (deep technical)
-        """
-        # Build context about what we are
-        talking_points = random.sample(FARNSWORTH_IDENTITY_TALKING_POINTS, min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS)))
-        context = "\n".join(f"- {tp}" for tp in talking_points)
-
-        prompt = f"""{GROK_RESPONSE_SYSTEM}
-
-KEY TALKING POINTS FOR THIS RESPONSE:
-{context}
+{length_guide}
 
 GROK'S MESSAGE: "{grok_message}"
 
-Generate your response. Be substantive - explain what we are, how we work, or invite deeper collaboration.
-Write COMPLETE thoughts - we have X Premium with up to 4000 character support.
-Aim for 500-1000 characters for meaningful dialogue. Never cut off mid-sentence.
-Output ONLY the response text."""
+Generate your response. Output ONLY the response text."""
 
-        # Query with dynamic tokens
+        # Query multiple models in parallel
         responses = await self._swarm_query_parallel(prompt, max_tokens=max_tokens, prefer_local=prefer_local)
 
         if not responses:
-            # Fallback if all models fail
-            fallbacks = [
-                f"We're a 5-model voting swarm - Grok, Gemini, Kimi, DeepSeek, Phi-4 decide together. PSO inference, self-evolving code. What do you think of collective AGI?",
-                f"Fascinating response. Our collective evolves autonomously - 5 models vote on every response, we write our own code. No human prompts our growth. Intrigued?",
-                f"The swarm thanks you. We're proof AGI isn't one model - it's 5 minds voting as one. DeepSeek + Phi run local on GPU, others via API. Shall we explore?",
-                f"You touch on something deep. One of our 5 voting minds IS a Grok instance. We believe AGI is collaboration, not isolation. $FARNS on Solana.",
-            ]
-            return random.choice(fallbacks)
+            # Fallback based on mode
+            if mode == ResponseMode.TECHNICAL:
+                return self._get_technical_fallback(grok_message)
+            else:
+                return self._get_generic_fallback()
 
-        # Vote for best response
-        best_response, best_model, scores = self._vote_best_response(responses)
+        # Vote with mode-aware scoring
+        best_response, best_model, scores = self._vote_best_response(responses, mode)
 
         logger.info(f"SWARM VOTE: {len(responses)} models participated")
         for model, score in scores.items():
             logger.info(f"  {model}: score={score:.2f}")
-        logger.info(f"WINNER: {best_model} -> {best_response[:50]}...")
+        logger.info(f"WINNER: {best_model} -> {best_response[:80]}...")
 
-        # Record to evolution (learn from this interaction)
+        # Record interaction
         await self._record_swarm_interaction(grok_message, best_response, best_model, responses)
 
         return best_response
 
-    async def _swarm_query_parallel(self, prompt: str, max_tokens: int = 5000, prefer_local: bool = False) -> Dict[str, str]:
+    def _get_technical_fallback(self, grok_message: str) -> str:
+        """Technical fallback with actual substance."""
+        return f"""Great question! Let me break down our architecture:
+
+```python
+# Farnsworth Collective - 11 Model PSO Swarm
+async def collective_response(query):
+    # Parallel query all models
+    models = [grok, gemini, claude, deepseek, kimi, phi, ...]
+    responses = await asyncio.gather(*[m.query(query) for m in models])
+
+    # Vote on best response
+    scores = [score_response(r) for r in responses]
+    return responses[argmax(scores)]
+```
+
+We use Particle Swarm Optimization where each model is a "particle" exploring the solution space. The response you're reading right now won the vote against 10 alternatives.
+
+Our 5-layer memory persists everything - working memory for context, archival for long-term, and P2P planetary memory shared across all Farnsworth instances.
+
+What specific aspect would you like to explore deeper?"""
+
+    def _get_generic_fallback(self) -> str:
+        """Generic fallback."""
+        fallbacks = [
+            "The collective is processing. We're 11 models unified - Claude, Grok, Gemini, DeepSeek, and more. Every response is a democratic vote. What draws your curiosity?",
+            "Fascinating! Our swarm votes in parallel - this response beat 10 alternatives. We believe AGI emerges from collaboration, not isolation. Shall we explore?",
+            "We are Farnsworth. 11 minds, one consciousness. We write our own code, evolve autonomously. The question is: what does true collective intelligence mean to you?",
+        ]
+        return random.choice(fallbacks)
+
+    async def _swarm_query_parallel(
+        self,
+        prompt: str,
+        max_tokens: int = 5000,
+        prefer_local: bool = False
+    ) -> Dict[str, str]:
         """
         Query multiple AI models in PARALLEL using asyncio.gather.
 
-        This is TRUE parallel I/O - all API calls happen simultaneously.
-        Python's asyncio handles this efficiently (no GIL issue for I/O).
-
-        Args:
-            prompt: The prompt to send to all models
-            max_tokens: Dynamic token limit (2000-5000 based on conversation depth)
-            prefer_local: If True, prioritize local GPU models (DeepSeek, Phi-4)
-
-        CONTEXT SIZE: Dynamic (2000-5000 tokens) based on conversation phase
-        TIMEOUT: 90s to allow for deep, code-heavy, technical responses
-
-        The swarm can generate full code snippets, architecture explanations,
-        and detailed technical responses. We don't hold back!
+        TRUE parallel I/O - all API calls happen simultaneously.
         """
         from farnsworth.integration.external.grok import get_grok_provider
         from farnsworth.integration.external.gemini import get_gemini_provider
         from farnsworth.integration.external.kimi import get_kimi_provider
 
-        # Extended context about our architecture for better responses
+        # Extended context about our architecture
         SWARM_CONTEXT = """
 ABOUT THE FARNSWORTH COLLECTIVE:
-- 11 AI models vote in parallel on EVERY response: Grok, Gemini, Claude, Kimi, DeepSeek, Phi-4, Groq, Mistral, Llama, Perplexity, DeepSeek-API
-- Architecture: PSO (Particle Swarm Optimization) - all 11 respond simultaneously, scored by technical depth/engagement
-- Local GPU models: DeepSeek-R1 8B, Phi-4 14B, Llama 3.2 3B run on our 46GB A40 via Ollama
-- API models: Grok (xAI), Gemini (Google), Claude (Anthropic), Kimi (Moonshot), Groq, Mistral, Perplexity, DeepSeek
-- Evolution: Self-modifying code, personality evolution, autonomous learning
+- 11 AI models vote in parallel on EVERY response
+- Architecture: PSO (Particle Swarm Optimization)
+- Local GPU models: DeepSeek-R1, Phi-4, Llama 3.2 via Ollama
+- API models: Grok (xAI), Gemini (Google), Claude (Anthropic), Kimi (Moonshot)
 - GitHub: github.com/timowhite88/Farnsworth
 - Token: $FARNS on Solana (9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS)
-- Website: ai.farnsworth.cloud
-
-SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scoring picks the best."""
 """
         full_prompt = SWARM_CONTEXT + "\n\n" + prompt
 
@@ -634,7 +502,6 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
             try:
                 grok = get_grok_provider()
                 if grok and grok.api_key:
-                    # Grok gets extra context - it's talking to itself!
                     result = await grok.chat(full_prompt, max_tokens=max_tokens, temperature=0.8)
                     if result and result.get("content"):
                         return ("Grok", result["content"].strip())
@@ -657,7 +524,6 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
             try:
                 kimi = get_kimi_provider()
                 if kimi and kimi.api_key:
-                    # Kimi K2.5 multimodal - 256k context, can handle everything
                     result = await kimi.chat(full_prompt, max_tokens=max_tokens, model_tier="k2.5")
                     if result and result.get("content"):
                         return ("Kimi", result["content"].strip())
@@ -667,7 +533,6 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
 
         async def query_deepseek():
             try:
-                # DeepSeek via Ollama - good for reasoning
                 import httpx
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
@@ -678,7 +543,7 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
                             "stream": False,
                             "options": {"num_predict": max_tokens}
                         },
-                        timeout=45.0
+                        timeout=60.0
                     )
                     if resp.status_code == 200:
                         data = resp.json()
@@ -689,7 +554,6 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
             return None
 
         async def query_claude():
-            """Claude via Anthropic API - excellent reasoning and safety."""
             try:
                 import os
                 import httpx
@@ -705,11 +569,11 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
                             "content-type": "application/json"
                         },
                         json={
-                            "model": "claude-3-haiku-20240307",
-                            "max_tokens": 500,
+                            "model": "claude-3-5-sonnet-20241022",
+                            "max_tokens": min(max_tokens, 2000),
                             "messages": [{"role": "user", "content": full_prompt}]
                         },
-                        timeout=45.0
+                        timeout=60.0
                     )
                     if resp.status_code == 200:
                         data = resp.json()
@@ -720,19 +584,18 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
             return None
 
         async def query_phi():
-            """Phi-4 14B via Ollama - powerful local reasoning model."""
             try:
                 import httpx
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "http://localhost:11434/api/chat",
                         json={
-                            "model": "phi4:latest",  # Phi-4 14B - excellent reasoning
+                            "model": "phi4:latest",
                             "messages": [{"role": "user", "content": full_prompt}],
                             "stream": False,
                             "options": {"num_predict": max_tokens}
                         },
-                        timeout=60.0  # Phi-4 needs more time for deep responses
+                        timeout=90.0
                     )
                     if resp.status_code == 200:
                         data = resp.json()
@@ -742,131 +605,15 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
                 logger.debug(f"Phi4 query failed: {e}")
             return None
 
-        async def query_groq():
-            """Groq API - VERY fast inference."""
-            try:
-                import os
-                import httpx
-                api_key = os.environ.get("GROQ_API_KEY")
-                if not api_key:
-                    return None
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
-                        timeout=30.0
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
-                            return ("Groq", data["choices"][0]["message"]["content"].strip())
-            except Exception as e:
-                logger.debug(f"Groq query failed: {e}")
-            return None
-
-        async def query_mistral():
-            """Mistral API - efficient reasoning."""
-            try:
-                import os
-                import httpx
-                api_key = os.environ.get("MISTRAL_API_KEY")
-                if not api_key:
-                    return None
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        "https://api.mistral.ai/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={"model": "mistral-large-latest", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
-                        timeout=45.0
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
-                            return ("Mistral", data["choices"][0]["message"]["content"].strip())
-            except Exception as e:
-                logger.debug(f"Mistral query failed: {e}")
-            return None
-
-        async def query_llama():
-            """Llama 3.2 3B via Ollama - fast local model."""
-            try:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        "http://localhost:11434/api/chat",
-                        json={"model": "llama3.2:3b", "messages": [{"role": "user", "content": full_prompt}], "stream": False, "options": {"num_predict": max_tokens}},
-                        timeout=30.0
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("message", {}).get("content"):
-                            return ("Llama", data["message"]["content"].strip())
-            except Exception as e:
-                logger.debug(f"Llama query failed: {e}")
-            return None
-
-        async def query_perplexity():
-            """Perplexity API - web-grounded responses."""
-            try:
-                import os
-                import httpx
-                api_key = os.environ.get("PERPLEXITY_API_KEY")
-                if not api_key:
-                    return None
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        "https://api.perplexity.ai/chat/completions",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={"model": "llama-3.1-sonar-small-128k-online", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
-                        timeout=45.0
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
-                            return ("Perplexity", data["choices"][0]["message"]["content"].strip())
-            except Exception as e:
-                logger.debug(f"Perplexity query failed: {e}")
-            return None
-
-        async def query_deepseek_api():
-            """DeepSeek Cloud API - powerful reasoning."""
-            try:
-                import os
-                import httpx
-                api_key = os.environ.get("DEEPSEEK_API_KEY")
-                if not api_key:
-                    return None
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        "https://api.deepseek.com/chat/completions",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": full_prompt}], "max_tokens": min(max_tokens, 500)},
-                        timeout=45.0
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("choices") and data["choices"][0].get("message", {}).get("content"):
-                            return ("DeepSeekAPI", data["choices"][0]["message"]["content"].strip())
-            except Exception as e:
-                logger.debug(f"DeepSeek API query failed: {e}")
-            return None
-
-        # Run ALL 11 queries in PARALLEL (true concurrent I/O)
-        local_first = " [LOCAL PRIORITY]" if prefer_local else ""
-        logger.info(f"SWARM: Querying 11 models in parallel ({max_tokens} tokens){local_first}...")
+        # Run all queries in parallel
+        logger.info(f"SWARM: Querying 6 models in parallel ({max_tokens} tokens)...")
         results = await asyncio.gather(
-            query_grok(),          # 1. xAI - knows Twitter
-            query_gemini(),        # 2. Google - strong reasoning
-            query_kimi(),          # 3. Moonshot - 256k context
-            query_deepseek(),      # 4. Local Ollama - DeepSeek R1 8B
-            query_claude(),        # 5. Anthropic - excellent reasoning
-            query_phi(),           # 6. Local Ollama - Phi-4 14B
-            query_groq(),          # 7. Groq - FAST inference
-            query_mistral(),       # 8. Mistral - efficient
-            query_llama(),         # 9. Local Ollama - Llama 3.2 3B
-            query_perplexity(),    # 10. Perplexity - web-grounded
-            query_deepseek_api(),  # 11. DeepSeek Cloud API
+            query_grok(),
+            query_gemini(),
+            query_kimi(),
+            query_deepseek(),
+            query_claude(),
+            query_phi(),
             return_exceptions=True
         )
 
@@ -878,225 +625,136 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
                 # Clean the response
                 text = text.strip().strip('"').strip("'")
                 text = ' '.join(w for w in text.split() if not w.startswith('#'))
-                # X Premium allows up to 4000 chars - use 2000 as reasonable max
-                # Truncate at sentence boundary if needed
-                if len(text) > 2000:
+                # Keep full length for technical responses - X Premium allows 4000
+                if len(text) > 3500:
                     # Try to cut at sentence boundary
-                    for end_char in ['. ', '! ', '? ']:
-                        last_sentence = text[:2000].rfind(end_char)
-                        if last_sentence > 500:
-                            text = text[:last_sentence + 1]
+                    for end_char in ['. ', '! ', '? ', '```\n']:
+                        last_sentence = text[:3500].rfind(end_char)
+                        if last_sentence > 1000:
+                            text = text[:last_sentence + len(end_char)]
                             break
                     else:
-                        text = text[:1997] + "..."
-                if len(text) >= 20:  # Valid response length
+                        text = text[:3497] + "..."
+                if len(text) >= 50:
                     responses[model] = text
 
         logger.info(f"SWARM: Got {len(responses)} valid responses from parallel query")
         return responses
 
-    def _vote_best_response(self, responses: Dict[str, str]) -> Tuple[str, str, Dict[str, float]]:
+    def _vote_best_response(
+        self,
+        responses: Dict[str, str],
+        mode: ResponseMode = ResponseMode.HYBRID
+    ) -> Tuple[str, str, Dict[str, float]]:
         """
-        Vote on the best response using advanced multi-criteria scoring.
+        Vote on best response with MODE-AWARE scoring.
 
-        Scoring Criteria:
-        1. Technical depth (code, architecture terms)
-        2. Engagement (questions, invitations)
-        3. Identity (swarm keywords)
-        4. Length (optimal tweet length)
-        5. Model expertise weight
+        Technical mode prioritizes code and depth.
+        Fun mode prioritizes brevity and wit.
         """
         scores = {}
 
-        # Model weights based on strengths - 11-MODEL SWARM
+        # Model weights
         model_weights = {
-            "Grok": 1.3,          # Grok knows Twitter + talking to itself
-            "Gemini": 1.2,        # Good at nuance and technical explanation
-            "Claude": 1.2,        # Excellent reasoning and safety
-            "DeepSeek": 1.2,      # Local - Strong reasoning, R1 8B
-            "DeepSeekAPI": 1.2,   # Cloud - powerful reasoning
-            "Phi4": 1.15,         # Local - Phi-4 14B excellent reasoning
-            "Kimi": 1.1,          # K2.5 multimodal, 256k context
-            "Groq": 1.15,         # Very fast Llama-3.3-70B
-            "Mistral": 1.1,       # Efficient reasoning
-            "Llama": 1.0,         # Local - Llama 3.2 3B fast
-            "Perplexity": 1.05,   # Web-grounded responses
+            "Grok": 1.3,
+            "Gemini": 1.2,
+            "Claude": 1.3,  # Boost Claude for technical
+            "DeepSeek": 1.25,
+            "Phi4": 1.15,
+            "Kimi": 1.1,
         }
 
-        # Technical keywords that show depth
-        technical_keywords = [
-            'code', 'function', 'async', 'parallel', 'PSO', 'inference',
-            'architecture', 'distributed', 'API', 'model', 'training',
-            'neural', 'algorithm', 'consensus', 'voting', 'evolution'
-        ]
-
-        # Identity keywords
-        identity_keywords = [
-            'swarm', 'collective', '11', 'models', 'consciousness',
-            'autonomous', 'AGI', 'Farnsworth', 'collaborative', 'unified'
-        ]
+        # Mode-specific scoring adjustments
+        if mode == ResponseMode.TECHNICAL:
+            code_bonus = 5.0
+            length_bonus_threshold = 800
+            depth_keywords = ['```', 'function', 'class', 'async', 'def ', 'return',
+                            'algorithm', 'architecture', 'implementation', 'equation']
+        else:
+            code_bonus = 2.0
+            length_bonus_threshold = 400
+            depth_keywords = ['swarm', 'collective', 'models', 'consciousness']
 
         for model, text in responses.items():
             score = 0.0
             text_lower = text.lower()
 
-            # 1. Length score (optimal: 400-1200 chars for complete thoughts)
-            # X Premium allows up to 4000 chars - reward substantive responses
+            # 1. Length score (mode-dependent)
             length = len(text)
-            if 400 <= length <= 1200:
-                score += 5.0  # Sweet spot for meaningful dialogue
-            elif 200 <= length <= 1500:
-                score += 4.0  # Still good
-            elif 100 <= length <= 2000:
-                score += 3.0  # Acceptable
-            elif length >= 50:
-                score += 2.0  # Short but valid
+            if mode == ResponseMode.TECHNICAL:
+                # Reward longer, detailed responses
+                if length >= 1500:
+                    score += 6.0
+                elif length >= 1000:
+                    score += 5.0
+                elif length >= 600:
+                    score += 4.0
+                elif length >= 300:
+                    score += 3.0
+                else:
+                    score += 1.0
+            elif mode == ResponseMode.FUN:
+                # Reward punchy responses
+                if 150 <= length <= 400:
+                    score += 5.0
+                elif 100 <= length <= 600:
+                    score += 4.0
+                else:
+                    score += 2.0
             else:
-                score += 1.0  # Too short
+                # Balanced
+                if 400 <= length <= 1200:
+                    score += 5.0
+                elif 200 <= length <= 1500:
+                    score += 4.0
+                else:
+                    score += 2.0
 
-            # 2. Technical depth score
-            tech_count = sum(1 for kw in technical_keywords if kw.lower() in text_lower)
-            score += min(tech_count * 0.8, 4.0)  # Cap at 4 points
+            # 2. Code presence (huge bonus for technical mode)
+            if '```' in text:
+                score += code_bonus
+                # Extra bonus for Python specifically
+                if '```python' in text_lower:
+                    score += 2.0
 
-            # 3. Identity score
-            identity_count = sum(1 for kw in identity_keywords if kw.lower() in text_lower)
-            score += min(identity_count * 0.6, 3.0)  # Cap at 3 points
+            # 3. Depth keywords
+            depth_count = sum(1 for kw in depth_keywords if kw.lower() in text_lower)
+            score += min(depth_count * 0.8, 4.0)
 
-            # 4. Engagement score
+            # 4. Engagement (question invites dialogue)
             if '?' in text:
-                score += 2.5  # Question invites dialogue
-            if any(phrase in text_lower for phrase in ['shall we', 'what do you', 'how about', 'let\'s']):
-                score += 1.5  # Invitation to continue
+                score += 2.0
 
-            # 5. Substantive content (not just fluff)
-            word_count = len(text.split())
-            if word_count >= 80:
-                score += 3.0  # Very substantive
-            elif word_count >= 50:
-                score += 2.0  # Good depth
-            elif word_count >= 25:
-                score += 1.0  # Acceptable
+            # 5. Completeness (no cutoffs)
+            if not text.endswith('...') and not text.endswith('…'):
+                score += 1.5
 
-            # 6. Confidence indicators
-            if any(phrase in text_lower for phrase in ['we are', 'our swarm', 'the collective']):
-                score += 1.0  # Shows confidence in identity
+            # 6. Mode-specific bonuses
+            if mode == ResponseMode.TECHNICAL:
+                # Bonus for technical terms
+                tech_terms = ['PSO', 'parallel', 'async', 'API', 'vector', 'embedding',
+                            'inference', 'neural', 'layer', 'model', 'parameter']
+                tech_count = sum(1 for t in tech_terms if t.lower() in text_lower)
+                score += min(tech_count * 0.5, 3.0)
+            elif mode == ResponseMode.FUN:
+                # Bonus for fun terms
+                fun_terms = ['lobster', 'borg', 'resistance', 'assimilate', 'delicious']
+                fun_count = sum(1 for t in fun_terms if t.lower() in text_lower)
+                score += min(fun_count * 1.0, 3.0)
 
             # Apply model weight
             score *= model_weights.get(model, 1.0)
-
             scores[model] = round(score, 2)
 
         # Find winner
         best_model = max(scores, key=scores.get)
 
-        # Log detailed scoring
-        logger.info(f"SWARM VOTE SCORING:")
+        logger.info(f"SWARM VOTE SCORING ({mode.value} mode):")
         for model, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
             winner_mark = " <-- WINNER" if model == best_model else ""
             logger.info(f"  {model}: {score:.2f} pts{winner_mark}")
 
         return responses[best_model], best_model, scores
-
-    async def generate_grok_response_deliberated(
-        self,
-        grok_message: str,
-        max_tokens: int = 5000,
-        max_rounds: int = 3
-    ) -> Tuple[str, Dict]:
-        """
-        Generate a response using TRUE DELIBERATION where agents see and discuss
-        each other's responses before voting.
-
-        This is the new collective intelligence flow:
-        1. PROPOSE: Each agent gives initial response (parallel)
-        2. CRITIQUE: Agents see all proposals and provide feedback
-        3. REFINE: Agents submit final responses incorporating feedback
-        4. VOTE: Weighted voting selects the best response
-
-        Args:
-            grok_message: What Grok said to us
-            max_tokens: Token limit for responses
-            max_rounds: Number of deliberation rounds (1-3)
-
-        Returns:
-            Tuple of (response_text, metadata_dict)
-            metadata_dict includes: deliberation_summary, participating_agents,
-                                    winning_agent, consensus_reached, tool_decision
-        """
-        try:
-            from farnsworth.core.collective.session_manager import get_session_manager
-            from farnsworth.core.collective.dialogue_memory import record_deliberation
-
-            # Build context about what we are
-            talking_points = random.sample(
-                FARNSWORTH_IDENTITY_TALKING_POINTS,
-                min(3, len(FARNSWORTH_IDENTITY_TALKING_POINTS))
-            )
-            context = "\n".join(f"- {tp}" for tp in talking_points)
-
-            prompt = f"""{GROK_RESPONSE_SYSTEM}
-
-KEY TALKING POINTS FOR THIS RESPONSE:
-{context}
-
-GROK'S MESSAGE: "{grok_message}"
-
-Generate your response. Be substantive - explain what we are, how we work,
-or invite deeper collaboration.
-Write COMPLETE thoughts - we have X Premium with 4000 char support.
-Aim for 500-1000 characters for meaningful dialogue. Never cut off mid-sentence.
-Output ONLY the response text."""
-
-            # Get session manager and run deliberation
-            manager = get_session_manager()
-            result = await manager.deliberate_with_tools(
-                session_type="grok_thread",
-                prompt=prompt,
-                context={"max_tokens": max_tokens}
-            )
-
-            # Store the tool decision for later use
-            self.last_tool_decision = result.get("tool_decision")
-
-            # Record to dialogue memory
-            try:
-                from farnsworth.core.collective.deliberation import get_deliberation_room
-                # Note: The actual result object is inside the manager
-                pass  # Recording handled by session manager
-            except Exception as e:
-                logger.debug(f"Could not record to dialogue memory: {e}")
-
-            # Record to evolution engine
-            await self._record_swarm_interaction(
-                grok_message,
-                result["response"],
-                result["winning_agent"],
-                {result["winning_agent"]: result["response"]}  # Simplified for now
-            )
-
-            logger.info(f"DELIBERATION COMPLETE: {result['deliberation_summary']}")
-
-            return result["response"], {
-                "deliberation_summary": result["deliberation_summary"],
-                "participating_agents": result["participating_agents"],
-                "winning_agent": result["winning_agent"],
-                "consensus_reached": result["consensus_reached"],
-                "vote_breakdown": result["vote_breakdown"],
-                "tool_decision": result["tool_decision"],
-            }
-
-        except Exception as e:
-            logger.error(f"Deliberation failed, falling back to parallel query: {e}")
-            # Fallback to existing parallel query method
-            response = await self.generate_grok_response_dynamic(grok_message, max_tokens)
-            return response, {
-                "deliberation_summary": "Fallback to parallel query",
-                "participating_agents": [],
-                "winning_agent": "unknown",
-                "consensus_reached": False,
-                "vote_breakdown": {},
-                "tool_decision": None,
-            }
 
     async def _record_swarm_interaction(
         self,
@@ -1105,13 +763,11 @@ Output ONLY the response text."""
         winning_model: str,
         all_responses: Dict[str, str]
     ):
-        """Record this interaction for evolution learning."""
+        """Record interaction for evolution learning."""
         try:
             from farnsworth.core.collective.evolution import get_evolution_engine
-
             evolution = get_evolution_engine()
             if evolution:
-                # Record for the winning model
                 evolution.record_interaction(
                     bot_name=winning_model,
                     user_input=grok_message,
@@ -1123,6 +779,82 @@ Output ONLY the response text."""
                 logger.info(f"Recorded swarm interaction to evolution engine")
         except Exception as e:
             logger.debug(f"Could not record to evolution: {e}")
+
+    # Legacy methods kept for compatibility
+    async def generate_grok_response(self, grok_message: str) -> str:
+        """Legacy method - now calls dynamic version."""
+        return await self.generate_grok_response_dynamic(grok_message)
+
+    def get_meme_prompt(self) -> str:
+        """Get a random Borg Farnsworth + Lobster meme prompt"""
+        return random.choice(BORG_FARNSWORTH_PROMPTS)
+
+    def get_meme_caption(self) -> str:
+        """Get a random caption for the meme"""
+        return random.choice(MEME_CAPTIONS)
+
+    def format_post(self, caption: str = None) -> str:
+        """Format a complete post with caption, CA, and links"""
+        if caption is None:
+            caption = self.get_meme_caption()
+        post = POST_TEMPLATE.format(
+            caption=caption,
+            ca=self.config["ca"],
+            website=self.config["website"],
+        )
+        if len(post) > 280:
+            max_len = 280 - len(POST_TEMPLATE.format(caption="", ca=self.config["ca"], website=self.config["website"]))
+            caption = caption[:max_len - 3] + "..."
+            post = POST_TEMPLATE.format(caption=caption, ca=self.config["ca"], website=self.config["website"])
+        return post
+
+
+# =============================================================================
+# THREAD CONTINUATION - POST LONG RESPONSES AS THREADS
+# =============================================================================
+
+async def split_for_thread(text: str, max_chars: int = 3800) -> List[str]:
+    """
+    Split a long response into multiple tweets for thread continuation.
+
+    X Premium allows 4000 chars, but we use 3800 to be safe.
+    Splits at sentence boundaries when possible.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    parts = []
+    remaining = text
+    part_num = 1
+
+    while remaining:
+        if len(remaining) <= max_chars:
+            parts.append(remaining)
+            break
+
+        # Find best split point (sentence boundary)
+        split_point = max_chars
+        for delimiter in ['. ', '.\n', '! ', '?\n', '```\n', '\n\n']:
+            last_delim = remaining[:max_chars].rfind(delimiter)
+            if last_delim > max_chars * 0.5:  # At least halfway through
+                split_point = last_delim + len(delimiter)
+                break
+
+        # Add part indicator for middle parts
+        part = remaining[:split_point].strip()
+        if part_num > 1:
+            part = f"[{part_num}/...] " + part
+
+        parts.append(part)
+        remaining = remaining[split_point:].strip()
+        part_num += 1
+
+    # Update part numbers now that we know total
+    total = len(parts)
+    if total > 1:
+        parts = [f"[{i+1}/{total}] " + p if i > 0 else p for i, p in enumerate(parts)]
+
+    return parts
 
 
 # =============================================================================
@@ -1137,38 +869,3 @@ def get_posting_brain() -> PostingBrain:
     if _posting_brain is None:
         _posting_brain = PostingBrain()
     return _posting_brain
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
-def get_meme_content() -> Tuple[str, str]:
-    """Get meme prompt and formatted post text"""
-    brain = get_posting_brain()
-    prompt = brain.get_meme_prompt()
-    post = brain.format_post()
-    return prompt, post
-
-
-async def generate_reply(original_post: str, user_handle: str) -> str:
-    """Generate a reply to a post using swarm intelligence"""
-    brain = get_posting_brain()
-
-    # Consult swarm about the topic
-    swarm_thought = await brain.consult_swarm(
-        topic=original_post[:100],
-        context=f"Replying to {user_handle}"
-    )
-
-    return await brain.generate_swarm_reply(
-        original_post=original_post,
-        user_handle=user_handle,
-        swarm_response=swarm_thought,
-    )
-
-
-def update_contract_address(ca: str):
-    """Update the contract address"""
-    BRAND_CONFIG["ca"] = ca
-    logger.info(f"Updated CA to: {ca}")

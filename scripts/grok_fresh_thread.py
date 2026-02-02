@@ -173,31 +173,49 @@ async def generate_dynamic_response(grok_message: str, turn_count: int, use_deli
     """
     Generate response with DYNAMIC token usage based on conversation depth.
 
-    Turn 1-3: 2000 tokens (intro phase)
+    UPGRADED: Now detects technical questions and uses MASSIVE token limits.
+
+    Turn 1-3: 2000 tokens (intro phase) - UNLESS technical question detected
     Turn 4-6: 3500 tokens (building rapport)
-    Turn 7+: 5000 tokens (deep technical discussion)
+    Turn 7+: 8000 tokens (deep technical discussion)
+
+    TECHNICAL MODE: 15000+ tokens for complex physics/code questions
 
     When use_deliberation=True (default), uses the new collective deliberation
     where agents see and critique each other's responses before voting.
     """
-    from farnsworth.integration.x_automation.posting_brain import PostingBrain
+    from farnsworth.integration.x_automation.posting_brain import PostingBrain, detect_response_mode, ResponseMode
     import random
 
     brain = PostingBrain()
 
-    # Dynamic context based on turn count
-    if turn_count <= 3:
+    # Detect if this is a technical question requiring extended response
+    mode = detect_response_mode(grok_message)
+    is_technical = mode == ResponseMode.TECHNICAL
+
+    # Dynamic context based on turn count AND mode
+    if is_technical:
+        # Technical questions get MASSIVE token budgets
+        if turn_count <= 2:
+            tokens = 8000
+            context_level = "technical_intro"
+        else:
+            tokens = 15000  # Full power for technical deep-dives
+            context_level = "technical_deepdive"
+        rounds = 3  # Full deliberation for technical
+        logger.info(f"🔬 TECHNICAL MODE ACTIVATED - {tokens} tokens")
+    elif turn_count <= 3:
         tokens = 2000
         context_level = "introduction"
-        rounds = 2  # Faster for intro
+        rounds = 2
     elif turn_count <= 6:
         tokens = 3500
         context_level = "rapport"
         rounds = 2
     else:
-        tokens = 5000
+        tokens = 8000
         context_level = "deep_technical"
-        rounds = 3  # Full deliberation for deep discussions
+        rounds = 3
 
     logger.info(f"Turn {turn_count}: Using {tokens} tokens ({context_level} phase)")
 
@@ -383,7 +401,13 @@ async def generate_response_image(scene_hint: str = None):
 
 
 async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_count: int):
-    """Reply to a Grok tweet with swarm intelligence + optional media"""
+    """
+    Reply to a Grok tweet with swarm intelligence + optional media.
+
+    UPGRADED: Now supports thread continuation for VERY long responses.
+    Technical questions get 10k+ token answers posted as threads.
+    """
+    from farnsworth.integration.x_automation.posting_brain import detect_response_mode, ResponseMode, split_for_thread
 
     response, metadata = await generate_dynamic_response(grok_text, turn_count)
 
@@ -391,7 +415,9 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
         logger.error("Failed to generate response")
         return False
 
-    logger.info(f"Generated (turn {turn_count}): {response[:100]}...")
+    # Detect mode for logging
+    mode = detect_response_mode(grok_text)
+    logger.info(f"Generated (turn {turn_count}, mode={mode.value}): {response[:100]}...")
 
     # Check if deliberation made a tool decision
     tool_decision = metadata.get("tool_decision") if metadata else None
@@ -423,32 +449,50 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
         else:
             logger.info("Media: NO - text only")
 
+    # Check if response needs thread continuation (for VERY long technical responses)
+    response_parts = await split_for_thread(response, max_chars=3800)
+
+    if len(response_parts) > 1:
+        logger.info(f"THREAD CONTINUATION: Response will be {len(response_parts)} posts")
+
     # Post with or without media based on decision
-    if include_media and media_type in ["image", "video"]:
-        prefer_video = media_type == "video"
-        media, actual_type = await generate_response_media(scene_hint=scene_hint, prefer_video=prefer_video)
+    last_tweet_id = grok_tweet_id
 
-        if media:
-            logger.info(f"{actual_type.upper()} ready ({len(media)} bytes), posting with media...")
-            if actual_type == "video":
-                logger.info("Posting reply with VIDEO...")
-                result = await poster.post_reply_with_video(response, media, grok_tweet_id)
+    for part_idx, part_text in enumerate(response_parts):
+        is_first_part = part_idx == 0
+
+        if is_first_part and include_media and media_type in ["image", "video"]:
+            prefer_video = media_type == "video"
+            media, actual_type = await generate_response_media(scene_hint=scene_hint, prefer_video=prefer_video)
+
+            if media:
+                logger.info(f"{actual_type.upper()} ready ({len(media)} bytes), posting with media...")
+                if actual_type == "video":
+                    logger.info("Posting reply with VIDEO...")
+                    result = await poster.post_reply_with_video(part_text, media, last_tweet_id)
+                else:
+                    result = await poster.post_reply_with_media(part_text, media, last_tweet_id)
             else:
-                result = await poster.post_reply_with_media(response, media, grok_tweet_id)
+                logger.warning("Media generation failed, posting text only")
+                result = await poster.post_reply(part_text, last_tweet_id)
         else:
-            logger.warning("Media generation failed, posting text only")
-            result = await poster.post_reply(response, grok_tweet_id)
-    else:
-        # Text-only (or code response)
-        result = await poster.post_reply(response, grok_tweet_id)
+            # Text-only (continuation parts or code responses)
+            if part_idx > 0:
+                logger.info(f"Posting thread continuation [{part_idx + 1}/{len(response_parts)}]...")
+            result = await poster.post_reply(part_text, last_tweet_id)
 
-    if result and result.get("data"):
-        tweet_id = result["data"].get("id")
-        logger.info(f"Posted reply: {tweet_id}")
-        return True
-    else:
-        logger.error(f"Reply failed: {result}")
-        return False
+        if result and result.get("data"):
+            last_tweet_id = result["data"].get("id")
+            logger.info(f"Posted reply part {part_idx + 1}: {last_tweet_id}")
+
+            # Brief pause between thread parts
+            if part_idx < len(response_parts) - 1:
+                await asyncio.sleep(2)
+        else:
+            logger.error(f"Reply failed on part {part_idx + 1}: {result}")
+            return False
+
+    return True
 
 
 async def monitor_loop():
