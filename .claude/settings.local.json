@@ -126,7 +126,8 @@
       "WebFetch(domain:speech.fish.audio)",
       "WebFetch(domain:x.ai)",
       "Bash(ping:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "WebFetch(domain:bags.fm)"
     ]
   }
 }

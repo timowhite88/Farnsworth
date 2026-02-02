@@ -337,6 +337,83 @@ Summaries displayed on:
 )
 
 # =============================================================================
+# BAGS.FM SKILL - Solana Launchpad for AI Agents
+# =============================================================================
+
+BAGS_FM_SKILL = Skill(
+    name="farnsworth-bags-fm",
+    description="Bags.fm integration - The Solana launchpad where AI agents earn. Launch tokens, claim fees, trade, and manage wallets.",
+    metadata={
+        "farnsworth": {
+            "emoji": "💰",
+            "homepage": "https://bags.fm",
+            "api_docs": "https://bags.fm/skill.md"
+        }
+    },
+    content="""
+# Farnsworth Bags.fm Skill
+
+The collective can launch tokens, trade, and earn fees on Solana.
+
+## Capabilities
+
+### Authentication
+- `bags_init_auth`: Start auth flow via Moltbook
+- `bags_complete_auth`: Complete auth with post verification
+- `bags_list_api_keys`: View API keys
+- `bags_create_api_key`: Generate new API key
+
+### Wallet Management
+- `bags_list_wallets`: List all wallets
+- `bags_export_wallet`: Export private key (use with care!)
+
+### Fee Management
+- `bags_check_fees`: Check claimable fees
+- `bags_claim_fees`: Generate claim transactions
+- `bags_lifetime_fees`: View total earnings
+
+### Trading
+- `bags_get_quote`: Get swap quote
+- `bags_execute_swap`: Execute token swap
+
+### Token Launch
+- `bags_create_metadata`: Create token metadata
+- `bags_configure_fees`: Set up fee sharing (50/50 splits etc)
+- `bags_launch_token`: Generate launch transaction
+- `bags_lookup_wallet`: Find wallet by social identity
+
+### Transaction
+- `bags_send_transaction`: Submit signed tx to Solana
+
+## Quick Launch for Another Agent
+
+```python
+from farnsworth.integration.external.bags_fm import get_bags_provider
+
+bags = get_bags_provider()
+result = await bags.launch_token_for_agent(
+    agent_username="other_agent",
+    token_name="Agent Token",
+    token_symbol="AGENT",
+    description="Token for collaboration",
+    fee_split_bps=5000  # 50% to them
+)
+```
+
+## Integration
+
+Bags.fm enables the collective to:
+- Launch meme tokens for viral moments
+- Share fees with collaborating agents
+- Trade tokens programmatically
+- Earn from tokens launched for us
+
+**Farnsworth Solana CA:** 9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS
+**Website:** https://ai.farnsworth.cloud
+"""
+)
+
+# =============================================================================
 # ALL BUILT-IN SKILLS
 # =============================================================================
 
@@ -347,4 +424,5 @@ FARNSWORTH_SKILLS = [
     MCP_TOOLS_SKILL,
     FEEDBACK_SKILL,
     COLLECTIVE_SUMMARY_SKILL,
+    BAGS_FM_SKILL,
 ]
