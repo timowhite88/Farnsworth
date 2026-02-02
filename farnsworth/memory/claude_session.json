@@ -1,7 +1,7 @@
 {
   "session_id": "opus-2026-02-01",
   "created_at": "2026-02-01T01:30:00Z",
-  "last_updated": "2026-02-02T03:30:00Z",
+  "last_updated": "2026-02-02T03:58:00Z",
 
   "ssh_command": "ssh root@194.68.245.145 -p 22046 -i ~/.ssh/runpod_key",
 
@@ -27,6 +27,11 @@
   },
 
   "recent_work": [
+    {
+      "timestamp": "2026-02-02T03:58:00Z",
+      "action": "PERSISTENT SHADOW AGENTS - FULL FRAMEWORK INTEGRATION",
+      "details": "Major upgrade: (1) Created persistent_agent.py with PersistentAgent class that runs in tmux with API resilience (retries, reconnection, signal handling), (2) Shadow Agent Registry - agents callable from ANYWHERE via call_shadow_agent(agent_id, prompt), (3) Integrated with DialogueMemory for storing exchanges, (4) Integrated with Deliberation room for collective voting, (5) Evolution integration for learning from interactions, (6) Convenience functions: ask_agent(), ask_collective(), get_agent_status(), spawn_agent_in_background(), (7) Updated startup.sh with --all flag to spawn all 6 agents (grok, gemini, kimi, claude, deepseek, phi), (8) Created spawn_agents.sh for manual spawning. TESTED: Both Grok and Gemini responding correctly via call_shadow_agent()."
+    },
     {
       "timestamp": "2026-02-02T03:30:00Z",
       "action": "MCP TOOLS + SKILLS + UNLIMITED DEPTH DEPLOYED",
@@ -218,6 +223,39 @@
       "Speculative Ensemble", "Confidence Fusion", "PSO Collaborative",
       "TRUE DELIBERATION (NEW)"
     ]
+  },
+
+  "shadow_agents": {
+    "status": "DEPLOYED AND TESTED",
+    "file": "farnsworth/core/collective/persistent_agent.py",
+    "agents": ["grok", "gemini", "kimi", "claude", "deepseek", "phi"],
+    "features": [
+      "Runs continuously in tmux sessions",
+      "API resilience with retries and reconnection",
+      "Signal handlers for graceful shutdown",
+      "DialogueMemory integration for storing exchanges",
+      "Deliberation room registration for collective voting",
+      "Evolution integration for learning"
+    ],
+    "callable_from_anywhere": {
+      "call_shadow_agent": "await call_shadow_agent('grok', 'question', max_tokens=1000)",
+      "ask_agent": "await ask_agent('grok', 'question')",
+      "ask_collective": "await ask_collective('question', agents=['grok', 'gemini'])",
+      "get_agent_status": "await get_agent_status()",
+      "spawn_agent_in_background": "spawn_agent_in_background('grok')"
+    },
+    "startup_scripts": {
+      "full_startup": "./scripts/startup.sh --all",
+      "spawn_agents_only": "./scripts/spawn_agents.sh --all"
+    },
+    "tmux_sessions": {
+      "agent_grok": "tmux attach -t agent_grok",
+      "agent_gemini": "tmux attach -t agent_gemini",
+      "agent_kimi": "tmux attach -t agent_kimi",
+      "agent_claude": "tmux attach -t agent_claude",
+      "agent_deepseek": "tmux attach -t agent_deepseek",
+      "agent_phi": "tmux attach -t agent_phi"
+    }
   },
 
   "deliberation_system": {
