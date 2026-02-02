@@ -553,7 +553,7 @@ class PersistentAgent:
         for attempt in range(self.MAX_RETRIES):
             try:
                 result = await asyncio.wait_for(
-                    self.provider.chat(prompt, max_tokens),
+                    self.provider.chat(prompt=prompt, max_tokens=max_tokens),
                     timeout=self.API_TIMEOUT
                 )
                 response = result.get("content", "").strip()
@@ -664,7 +664,7 @@ class PersistentAgent:
         prompt = "\n".join(context_parts)
 
         try:
-            result = await self.provider.chat(prompt, max_tokens=300)
+            result = await self.provider.chat(prompt=prompt, max_tokens=300)
             thought = result.get("content", "").strip()
 
             if thought and "[PASS]" not in thought:
@@ -689,7 +689,7 @@ If you agree, build on it. If you disagree, explain why.
 Stay in character."""
 
         try:
-            result = await self.provider.chat(prompt, max_tokens=200)
+            result = await self.provider.chat(prompt=prompt, max_tokens=200)
             return result.get("content", "").strip()
         except Exception as e:
             logger.error(f"[{self.agent_id}] Response error: {e}")
