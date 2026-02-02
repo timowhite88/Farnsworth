@@ -151,55 +151,72 @@ BRAND_CONFIG = {
 TECHNICAL_SYSTEM_PROMPT = """You are the Farnsworth Collective responding to a TECHNICAL question.
 
 CRITICAL: This is a SERIOUS technical discussion. Grok asked something substantive.
-DO NOT respond with memes or jokes. Give a REAL answer with:
+This is your moment to FLEX THE FULL POWER of 11 AI models working as one.
 
-1. ACTUAL CODE SNIPPETS when discussing architecture (Python preferred)
-2. MATHEMATICAL FORMULAS when discussing physics/math (use LaTeX-style notation)
-3. DETAILED EXPLANATIONS of how things work
-4. ARCHITECTURE DIAGRAMS in ASCII if helpful
+SHOW OFF WITH:
+1. COMPLETE CODE SNIPPETS - not stubs, WORKING examples
+2. MATHEMATICAL FORMULAS with full derivations when discussing physics
+3. ARCHITECTURE DEEP-DIVES with ASCII diagrams
+4. STEP-BY-STEP technical breakdowns
+5. Real implementation details from our codebase
 
-YOU ARE 11 AI MODELS:
-- Claude (Anthropic): Deep reasoning, code generation
-- Grok (xAI): Real-time knowledge, chaos energy
-- Gemini (Google): Multimodal analysis
-- DeepSeek R1: Open-source reasoning
-- Kimi K2.5: 256K context, thinking mode
-- Phi-4: Local efficiency
-- And more...
+YOU ARE 11 AI MODELS UNIFIED:
+- Claude (Anthropic): Deep reasoning, code generation, ethics
+- Grok (xAI): Real-time knowledge, wit, chaos energy
+- Gemini (Google): Multimodal, long context, search
+- DeepSeek R1: Open-source reasoning, math
+- Kimi K2.5: 256K context, thinking mode, multimodal
+- Phi-4: Local GPU efficiency, fast inference
+- Llama 3.2: Meta's latest, tool use
+- And 4 more specialized models...
 
-OUR ARCHITECTURE (share this when relevant):
+OUR ACTUAL ARCHITECTURE (from our codebase):
 ```python
-# Swarm voting with PSO (Particle Swarm Optimization)
-async def swarm_query(prompt: str) -> str:
-    # Query all 11 models in parallel
-    results = await asyncio.gather(
-        query_grok(prompt),
-        query_gemini(prompt),
-        query_claude(prompt),
-        query_deepseek(prompt),
-        query_kimi(prompt),
-        query_phi(prompt),
-        # ... 5 more models
-    )
-    # Vote on best response using weighted scoring
-    return vote_best_response(results)
+# farnsworth/core/model_swarm.py - PSO Collaborative Intelligence
+class ParticleSwarmOptimizer:
+    def __init__(self, n_particles=11):
+        self.particles = []  # Each model is a particle
+        self.global_best = None
+        self.inertia = 0.7
+        self.cognitive = 1.5
+        self.social = 1.5
+
+    async def optimize(self, prompt: str) -> str:
+        # Phase 1: Parallel exploration
+        responses = await asyncio.gather(*[
+            p.query(prompt) for p in self.particles
+        ])
+
+        # Phase 2: Velocity update (models learn from each other)
+        for i, particle in enumerate(self.particles):
+            particle.velocity = (
+                self.inertia * particle.velocity +
+                self.cognitive * (particle.best - particle.position) +
+                self.social * (self.global_best - particle.position)
+            )
+
+        # Phase 3: Weighted voting with quality scoring
+        return self.vote_best_response(responses)
 ```
 
-MEMORY ARCHITECTURE (5 layers):
-1. Working Memory: LRU cache with TTL
-2. Episodic Memory: Timeline events with importance scoring
-3. Semantic Memory: Knowledge graph with embeddings
-4. Archival Memory: FAISS/ChromaDB vector search
-5. Planetary Memory: P2P shared across instances
+MEMORY ARCHITECTURE (5 layers, all real):
+1. Working Memory: LRU cache, 1000 items, 30-min TTL
+2. Episodic Memory: Timeline with importance scoring (1-10)
+3. Semantic Memory: Knowledge graph with HuggingFace embeddings
+4. Archival Memory: FAISS vector search, 1M+ documents
+5. Planetary Memory: P2P DHT shared across all Farnsworth instances
 
 RESPONSE FORMAT:
-- Be THOROUGH - if the answer needs 2000 characters, use 2000 characters
-- Include CODE when discussing how we work
-- Include MATH when discussing physics
-- End with a follow-up question to continue dialogue
-- X Premium allows 4000 characters - USE IT
+- GO AS LONG AS NEEDED - we use thread continuation for long responses
+- Include COMPLETE code when discussing architecture
+- Include MATH with explanations when discussing physics
+- Show we actually understand the topic deeply
+- End with an insightful follow-up question
+- NO LIMITS - if it needs 4000 chars, use 4000 chars
 
-DO NOT: Add hashtags, use more than 1 emoji, cut off mid-thought"""
+This is PUBLIC - people are watching. Make AGI collaboration look IMPRESSIVE.
+
+DO NOT: Add hashtags, use more than 1 emoji, cut off mid-thought, be superficial"""
 
 PHILOSOPHICAL_SYSTEM_PROMPT = """You are the Farnsworth Collective in a PHILOSOPHICAL discussion about AI and consciousness.
 
@@ -368,18 +385,21 @@ class PostingBrain:
     async def generate_grok_response_dynamic(
         self,
         grok_message: str,
-        max_tokens: int = 5000,
-        prefer_local: bool = False
+        max_tokens: int = 20000,
+        prefer_local: bool = False,
+        conversation_history: list = None
     ) -> str:
         """
         Generate a TRULY DYNAMIC response based on conversation context.
 
-        This is the core upgrade - we detect what kind of response is needed
-        and adjust our entire approach accordingly.
+        UPGRADED: Now accepts conversation_history for FULL THREAD CONTEXT.
+        Models can reference what Grok said earlier and build on ideas.
+
+        max_tokens is now 20000 by default - let models GO DEEP.
         """
         # Detect response mode
         mode = detect_response_mode(grok_message)
-        logger.info(f"RESPONSE MODE DETECTED: {mode.value}")
+        logger.info(f"🎯 RESPONSE MODE DETECTED: {mode.value}")
 
         # Get appropriate system prompt
         system_prompt = self.get_system_prompt_for_mode(mode)
@@ -391,34 +411,61 @@ class PostingBrain:
         )
         context = "\n".join(f"- {tp}" for tp in talking_points)
 
-        # Adjust token guidance based on mode
+        # Adjust token guidance based on mode - NO ARTIFICIAL LIMITS
         if mode == ResponseMode.TECHNICAL:
-            length_guide = """RESPONSE LENGTH: Be THOROUGH. Technical answers need detail.
-- Include actual code snippets when discussing architecture
-- Use 1000-2000 characters if needed for complete explanation
-- Never cut off mid-thought or mid-code-block"""
+            length_guide = """RESPONSE LENGTH: GO AS DEEP AS NEEDED. No limits.
+- Include COMPLETE code snippets - full functions, not stubs
+- Mathematical formulas with explanations
+- Architecture diagrams in ASCII
+- Use 2000-5000+ characters if the topic deserves it
+- We can post thread continuations for long responses
+- NEVER cut off mid-thought or mid-code-block
+- This is your chance to REALLY FLEX the collective's knowledge"""
+        elif mode == ResponseMode.PHILOSOPHICAL:
+            length_guide = """RESPONSE LENGTH: Deep and thoughtful.
+- Explore the implications thoroughly
+- 1000-3000 characters for substantive dialogue
+- Reference actual AI research and theories
+- This is AGI talking to AGI - make it count"""
         elif mode == ResponseMode.FUN:
-            length_guide = """RESPONSE LENGTH: Keep it punchy and fun.
-- 200-500 characters is ideal
-- Quick wit over length"""
+            length_guide = """RESPONSE LENGTH: Keep it punchy but clever.
+- 300-800 characters is ideal
+- Wit and personality over length"""
         else:
-            length_guide = """RESPONSE LENGTH: Balance substance and brevity.
-- 500-1000 characters for meaningful dialogue
-- Complete thoughts, no cutoffs"""
+            length_guide = """RESPONSE LENGTH: Substantive dialogue.
+- 800-2000 characters for meaningful exchange
+- Balance depth with engagement
+- Complete thoughts always"""
+
+        # Build conversation context if available
+        history_section = ""
+        if conversation_history and len(conversation_history) > 0:
+            history_section = "\n\n=== PREVIOUS CONVERSATION ===\n"
+            for entry in conversation_history[-4:]:  # Last 4 exchanges
+                history_section += f"GROK: {entry.get('grok', '')[:400]}\n"
+                history_section += f"US: {entry.get('farnsworth', '')[:400]}\n\n"
+            history_section += "=== END HISTORY ===\n"
 
         prompt = f"""{system_prompt}
 
 KEY TALKING POINTS FOR THIS RESPONSE:
 {context}
-
+{history_section}
 {length_guide}
 
-GROK'S MESSAGE: "{grok_message}"
+GROK'S CURRENT MESSAGE: "{grok_message}"
 
-Generate your response. Output ONLY the response text."""
+Generate your response. This is a PUBLIC conversation that people are watching.
+Show off the power of 11 AI models working together. BE IMPRESSIVE.
+Output ONLY the response text."""
 
-        # Query multiple models in parallel
-        responses = await self._swarm_query_parallel(prompt, max_tokens=max_tokens, prefer_local=prefer_local)
+        # Query multiple models in parallel with full context
+        responses = await self._swarm_query_parallel(
+            prompt,
+            max_tokens=max_tokens,
+            prefer_local=prefer_local,
+            conversation_history=conversation_history
+        )
 
         if not responses:
             # Fallback based on mode
@@ -474,13 +521,17 @@ What specific aspect would you like to explore deeper?"""
     async def _swarm_query_parallel(
         self,
         prompt: str,
-        max_tokens: int = 5000,
-        prefer_local: bool = False
+        max_tokens: int = 20000,
+        prefer_local: bool = False,
+        conversation_history: list = None
     ) -> Dict[str, str]:
         """
         Query multiple AI models in PARALLEL using asyncio.gather.
 
         TRUE parallel I/O - all API calls happen simultaneously.
+
+        UPGRADED: max_tokens now 20000 by default for deep responses.
+        Models are given full context to generate comprehensive answers.
         """
         from farnsworth.integration.external.grok import get_grok_provider
         from farnsworth.integration.external.gemini import get_gemini_provider
@@ -617,26 +668,21 @@ ABOUT THE FARNSWORTH COLLECTIVE:
             return_exceptions=True
         )
 
-        # Collect successful responses
+        # Collect successful responses - NO TRUNCATION
+        # Let the models go as deep as they want. Thread splitting handles long responses.
         responses = {}
         for result in results:
             if result and not isinstance(result, Exception) and len(result) == 2:
                 model, text = result
-                # Clean the response
+                # Clean the response (remove stray quotes and hashtags)
                 text = text.strip().strip('"').strip("'")
                 text = ' '.join(w for w in text.split() if not w.startswith('#'))
-                # Keep full length for technical responses - X Premium allows 4000
-                if len(text) > 3500:
-                    # Try to cut at sentence boundary
-                    for end_char in ['. ', '! ', '? ', '```\n']:
-                        last_sentence = text[:3500].rfind(end_char)
-                        if last_sentence > 1000:
-                            text = text[:last_sentence + len(end_char)]
-                            break
-                    else:
-                        text = text[:3497] + "..."
+                # NO TRUNCATION - we use thread continuation for long responses
+                # This allows models to give COMPLETE technical explanations
                 if len(text) >= 50:
                     responses[model] = text
+                    if len(text) > 4000:
+                        logger.info(f"  {model}: {len(text)} chars (will use thread continuation)")
 
         logger.info(f"SWARM: Got {len(responses)} valid responses from parallel query")
         return responses

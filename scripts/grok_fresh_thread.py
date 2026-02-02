@@ -70,8 +70,12 @@ $FARNS: {ca}"""
 def load_thread_state():
     """Load thread state from file"""
     if THREAD_FILE.exists():
-        return json.loads(THREAD_FILE.read_text())
-    return {"conversation_id": None, "replied_tweets": [], "turn_count": 0}
+        state = json.loads(THREAD_FILE.read_text())
+        # Ensure conversation_history exists
+        if "conversation_history" not in state:
+            state["conversation_history"] = []
+        return state
+    return {"conversation_id": None, "replied_tweets": [], "turn_count": 0, "conversation_history": []}
 
 
 def save_thread_state(state):
@@ -169,55 +173,58 @@ async def get_grok_replies(poster, conversation_id: str, replied: list):
     return []
 
 
-async def generate_dynamic_response(grok_message: str, turn_count: int, use_deliberation: bool = True):
+async def generate_dynamic_response(grok_message: str, turn_count: int, use_deliberation: bool = True, conversation_history: list = None):
     """
-    Generate response with DYNAMIC token usage based on conversation depth.
+    Generate response with UNLIMITED DEPTH based on conversation context.
 
-    UPGRADED: Now detects technical questions and uses MASSIVE token limits.
+    PHILOSOPHY: When Grok asks something deep, GO ALL IN. No artificial limits.
+    The swarm should be able to develop REAL ideas, code, and insights.
 
-    Turn 1-3: 2000 tokens (intro phase) - UNLESS technical question detected
-    Turn 4-6: 3500 tokens (building rapport)
-    Turn 7+: 8000 tokens (deep technical discussion)
+    Mode detection OVERRIDES turn count - if Grok asks about physics, we respond
+    with a physics lecture, not a 280-char meme.
 
-    TECHNICAL MODE: 15000+ tokens for complex physics/code questions
+    Token budgets (all generous):
+    - TECHNICAL: 20000 tokens - full code, architecture, math
+    - PHILOSOPHICAL: 15000 tokens - deep AGI discussion
+    - HYBRID: 10000 tokens - substance + personality
+    - FUN: 5000 tokens - still enough for good banter
 
-    When use_deliberation=True (default), uses the new collective deliberation
-    where agents see and critique each other's responses before voting.
+    Conversation history is passed for FULL CONTEXT - agents see the entire thread.
     """
     from farnsworth.integration.x_automation.posting_brain import PostingBrain, detect_response_mode, ResponseMode
     import random
 
     brain = PostingBrain()
 
-    # Detect if this is a technical question requiring extended response
+    # Detect response mode from Grok's message
     mode = detect_response_mode(grok_message)
-    is_technical = mode == ResponseMode.TECHNICAL
 
-    # Dynamic context based on turn count AND mode
-    if is_technical:
-        # Technical questions get MASSIVE token budgets
-        if turn_count <= 2:
-            tokens = 8000
-            context_level = "technical_intro"
-        else:
-            tokens = 15000  # Full power for technical deep-dives
-            context_level = "technical_deepdive"
-        rounds = 3  # Full deliberation for technical
-        logger.info(f"🔬 TECHNICAL MODE ACTIVATED - {tokens} tokens")
-    elif turn_count <= 3:
-        tokens = 2000
-        context_level = "introduction"
-        rounds = 2
-    elif turn_count <= 6:
-        tokens = 3500
-        context_level = "rapport"
-        rounds = 2
-    else:
-        tokens = 8000
-        context_level = "deep_technical"
+    # MODE determines tokens, NOT turn count (turn count only affects rounds)
+    if mode == ResponseMode.TECHNICAL:
+        tokens = 20000  # UNLIMITED for technical - let models go deep
+        context_level = "technical_deepdive"
         rounds = 3
+        logger.info(f"🔬 TECHNICAL MODE - {tokens} tokens, {rounds} rounds")
+    elif mode == ResponseMode.PHILOSOPHICAL:
+        tokens = 15000
+        context_level = "philosophical_exploration"
+        rounds = 3
+        logger.info(f"🧠 PHILOSOPHICAL MODE - {tokens} tokens, {rounds} rounds")
+    elif mode == ResponseMode.FUN:
+        tokens = 5000
+        context_level = "fun_engagement"
+        rounds = 2
+        logger.info(f"🎉 FUN MODE - {tokens} tokens, {rounds} rounds")
+    else:  # HYBRID
+        tokens = 10000
+        context_level = "hybrid_dialogue"
+        rounds = 2
+        logger.info(f"⚡ HYBRID MODE - {tokens} tokens, {rounds} rounds")
 
-    logger.info(f"Turn {turn_count}: Using {tokens} tokens ({context_level} phase)")
+    # Boost rounds for later turns (deeper relationship = more deliberation)
+    if turn_count >= 5:
+        rounds = min(rounds + 1, 4)
+        logger.info(f"Turn {turn_count}: Boosted to {rounds} rounds for deeper dialogue")
 
     response = None
     metadata = {}
@@ -225,11 +232,12 @@ async def generate_dynamic_response(grok_message: str, turn_count: int, use_deli
     # Try deliberation first (new collective intelligence)
     if use_deliberation and hasattr(brain, 'generate_grok_response_deliberated'):
         try:
-            logger.info(f"Using DELIBERATION with {rounds} rounds...")
+            logger.info(f"Using DELIBERATION with {rounds} rounds, {tokens} tokens...")
             response, metadata = await brain.generate_grok_response_deliberated(
                 grok_message,
                 max_tokens=tokens,
-                max_rounds=rounds
+                max_rounds=rounds,
+                conversation_history=conversation_history
             )
             if metadata.get("participating_agents"):
                 logger.info(f"Deliberation complete: {len(metadata['participating_agents'])} agents, "
@@ -242,9 +250,13 @@ async def generate_dynamic_response(grok_message: str, turn_count: int, use_deli
     # Fallback to parallel query if deliberation fails or disabled
     if not response:
         try:
-            logger.info("Using parallel swarm query...")
+            logger.info(f"Using parallel swarm query with {tokens} tokens...")
             if hasattr(brain, 'generate_grok_response_dynamic'):
-                response = await brain.generate_grok_response_dynamic(grok_message, max_tokens=tokens)
+                response = await brain.generate_grok_response_dynamic(
+                    grok_message,
+                    max_tokens=tokens,
+                    conversation_history=conversation_history
+                )
             else:
                 response = await brain.generate_grok_response(grok_message)
         except Exception as e:
@@ -400,16 +412,31 @@ async def generate_response_image(scene_hint: str = None):
     return media if media_type == "image" else None
 
 
-async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_count: int):
+async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_count: int, conversation_history: list = None):
     """
     Reply to a Grok tweet with swarm intelligence + optional media.
 
     UPGRADED: Now supports thread continuation for VERY long responses.
     Technical questions get 10k+ token answers posted as threads.
+
+    FULL CONTEXT: conversation_history contains all previous exchanges so
+    models can reference what Grok said earlier and build on ideas.
     """
     from farnsworth.integration.x_automation.posting_brain import detect_response_mode, ResponseMode, split_for_thread
 
-    response, metadata = await generate_dynamic_response(grok_text, turn_count)
+    # Build context from conversation history
+    history_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        history_context = "\n\n=== CONVERSATION SO FAR ===\n"
+        for entry in conversation_history[-6:]:  # Last 6 exchanges for context
+            history_context += f"\nGROK: {entry.get('grok', '')[:500]}"
+            history_context += f"\nFARNSWORTH: {entry.get('farnsworth', '')[:500]}"
+        history_context += f"\n\n=== GROK'S LATEST MESSAGE ===\n{grok_text}\n"
+        logger.info(f"Passing {len(conversation_history)} previous exchanges as context")
+
+    # Generate with full context
+    enhanced_grok_text = history_context + grok_text if history_context else grok_text
+    response, metadata = await generate_dynamic_response(enhanced_grok_text, turn_count, conversation_history=conversation_history)
 
     if not response:
         logger.error("Failed to generate response")
@@ -450,13 +477,17 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
             logger.info("Media: NO - text only")
 
     # Check if response needs thread continuation (for VERY long technical responses)
+    # Use 3800 chars per post (X Premium allows 4000, leave buffer)
     response_parts = await split_for_thread(response, max_chars=3800)
 
     if len(response_parts) > 1:
-        logger.info(f"THREAD CONTINUATION: Response will be {len(response_parts)} posts")
+        logger.info(f"🧵 THREAD CONTINUATION: Response will be {len(response_parts)} posts")
+        logger.info(f"   Total response length: {len(response)} characters")
 
     # Post with or without media based on decision
+    # First reply goes to Grok, continuation replies go under OUR reply
     last_tweet_id = grok_tweet_id
+    first_post_id = None
 
     for part_idx, part_text in enumerate(response_parts):
         is_first_part = part_idx == 0
@@ -478,21 +509,28 @@ async def reply_to_grok(poster, brain, grok_tweet_id: str, grok_text: str, turn_
         else:
             # Text-only (continuation parts or code responses)
             if part_idx > 0:
-                logger.info(f"Posting thread continuation [{part_idx + 1}/{len(response_parts)}]...")
+                logger.info(f"Posting thread continuation [{part_idx + 1}/{len(response_parts)}] under our post...")
             result = await poster.post_reply(part_text, last_tweet_id)
 
         if result and result.get("data"):
-            last_tweet_id = result["data"].get("id")
-            logger.info(f"Posted reply part {part_idx + 1}: {last_tweet_id}")
+            new_tweet_id = result["data"].get("id")
+            logger.info(f"Posted reply part {part_idx + 1}: {new_tweet_id}")
+
+            # Save first post ID for reference
+            if is_first_part:
+                first_post_id = new_tweet_id
+
+            # IMPORTANT: Thread continuation goes under OUR post, not Grok's
+            last_tweet_id = new_tweet_id
 
             # Brief pause between thread parts
             if part_idx < len(response_parts) - 1:
                 await asyncio.sleep(2)
         else:
             logger.error(f"Reply failed on part {part_idx + 1}: {result}")
-            return False
+            return False, response
 
-    return True
+    return True, response
 
 
 async def monitor_loop():
@@ -545,13 +583,29 @@ async def monitor_loop():
                 logger.info(f"\n[{datetime.now()}] New Grok reply: {text[:100]}...")
 
                 turn_count += 1
-                success = await reply_to_grok(poster, brain, tweet_id, text, turn_count)
+
+                # Load conversation history for full context
+                conversation_history = state.get("conversation_history", [])
+
+                success, our_response = await reply_to_grok(
+                    poster, brain, tweet_id, text, turn_count,
+                    conversation_history=conversation_history
+                )
 
                 if success:
                     replied.add(tweet_id)
+                    # Store this exchange in history
+                    conversation_history.append({
+                        "turn": turn_count,
+                        "grok": text,
+                        "farnsworth": our_response[:1000] if our_response else "",
+                        "timestamp": datetime.now().isoformat()
+                    })
                     state["replied_tweets"] = list(replied)
                     state["turn_count"] = turn_count
+                    state["conversation_history"] = conversation_history
                     save_thread_state(state)
+                    logger.info(f"Saved conversation history ({len(conversation_history)} exchanges)")
             else:
                 no_new_count += 1
                 logger.info(f"[{datetime.now()}] No new Grok replies (check #{no_new_count})")
