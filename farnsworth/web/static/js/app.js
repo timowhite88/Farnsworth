@@ -566,16 +566,18 @@ function stopVoiceInput() {
 // Current audio element for TTS playback
 let currentAudio = null;
 let audioQueue = [];
-let serverAudioQueue = [];
+let serverAudioQueue = [];  // {audioUrl, botName}
 let isPlayingAudio = false;
+let lastSpeaker = null;
+const SPEAKER_DELAY_MS = 800;  // Pause between different speakers for natural conversation
 
 // Play pre-generated audio from server URL (with queue)
-async function playServerAudio(audioUrl) {
+async function playServerAudio(audioUrl, botName = 'Unknown') {
     if (!state.voiceEnabled) return;
 
-    // Add to queue and process
-    serverAudioQueue.push(audioUrl);
-    console.log('[Audio] Queued server audio, queue size:', serverAudioQueue.length);
+    // Add to queue with bot name for tracking
+    serverAudioQueue.push({ audioUrl, botName });
+    console.log(`[Audio] Queued ${botName} audio, queue size:`, serverAudioQueue.length);
     processServerAudioQueue();
 }
 
@@ -583,12 +585,17 @@ async function processServerAudioQueue() {
     if (isPlayingAudio || serverAudioQueue.length === 0) return;
 
     isPlayingAudio = true;
-    const audioUrl = serverAudioQueue.shift();
+    const { audioUrl, botName } = serverAudioQueue.shift();
 
     // Stop any current audio
     if (currentAudio) {
         currentAudio.pause();
         currentAudio = null;
+    }
+
+    // Add delay between different speakers for natural pacing
+    if (lastSpeaker && lastSpeaker !== botName) {
+        await new Promise(resolve => setTimeout(resolve, SPEAKER_DELAY_MS));
     }
 
     try {
@@ -603,37 +610,38 @@ async function processServerAudioQueue() {
                 URL.revokeObjectURL(blobUrl);
                 currentAudio = null;
                 isPlayingAudio = false;
-                console.log('[Audio] Farnsworth finished speaking');
+                lastSpeaker = botName;
+                console.log(`[Audio] ${botName} finished speaking`);
 
                 // Signal server that audio finished
                 if (state.swarmWs && state.swarmWs.readyState === WebSocket.OPEN) {
                     state.swarmWs.send(JSON.stringify({
                         type: 'audio_complete',
-                        bot_name: 'Farnsworth'
+                        bot_name: botName
                     }));
                 }
 
-                // Process next in queue
-                processServerAudioQueue();
+                // Process next in queue with small delay
+                setTimeout(() => processServerAudioQueue(), 300);
             };
 
             currentAudio.onerror = (e) => {
-                console.error('[Audio] Error playing server audio:', e);
+                console.error(`[Audio] Error playing ${botName} audio:`, e);
                 isPlayingAudio = false;
-                processServerAudioQueue();
+                setTimeout(() => processServerAudioQueue(), 300);
             };
 
-            console.log('[Audio] Playing Farnsworth voice, remaining in queue:', serverAudioQueue.length);
+            console.log(`[Audio] Playing ${botName} voice, remaining in queue:`, serverAudioQueue.length);
             await currentAudio.play();
         } else {
-            console.warn('[Audio] Server audio not ready yet');
+            console.warn(`[Audio] Server audio not ready for ${botName}`);
             isPlayingAudio = false;
-            processServerAudioQueue();
+            setTimeout(() => processServerAudioQueue(), 300);
         }
     } catch (error) {
-        console.error('[Audio] Failed to fetch server audio:', error);
+        console.error(`[Audio] Failed to fetch ${botName} audio:`, error);
         isPlayingAudio = false;
-        processServerAudioQueue();
+        setTimeout(() => processServerAudioQueue(), 300);
     }
 }
 
@@ -2133,12 +2141,12 @@ function renderSwarmMessage(data, animate = true) {
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-    // Voice for Farnsworth and Kimi (TTS-enabled bots)
-    const voiceEnabledBots = ['Farnsworth', 'Kimi'];
+    // Voice for ALL swarm bots
+    const voiceEnabledBots = ['Farnsworth', 'Kimi', 'DeepSeek', 'Phi', 'Grok', 'Gemini', 'Claude', 'ClaudeOpus', 'OpenCode', 'HuggingFace', 'Swarm-Mind'];
     if (data.type === 'swarm_bot' && state.voiceEnabled && voiceEnabledBots.includes(data.bot_name)) {
         // Use pre-generated audio URL if available (server-side TTS)
         if (data.audio_url) {
-            playServerAudio(data.audio_url);
+            playServerAudio(data.audio_url, data.bot_name);
         } else {
             speakText(content, data.bot_name);
         }

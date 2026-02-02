@@ -1795,17 +1795,18 @@ Keep response under 100 words. Reference specific numbers from the data."""
                 logger.warning(f"Duplicate message blocked from {bot_name}")
                 return None
 
-        # Generate TTS audio URL - ONLY for Farnsworth (he's the voice of the system)
+        # Generate TTS audio URL for ALL bots with voices
         audio_url = None
-        if not is_thinking and TTS_AVAILABLE and bot_name == "Farnsworth":
+        tts_enabled_bots = ['Farnsworth', 'Kimi', 'DeepSeek', 'Phi', 'Grok', 'Gemini', 'Claude', 'ClaudeOpus', 'OpenCode', 'HuggingFace', 'Swarm-Mind']
+        if not is_thinking and TTS_AVAILABLE and bot_name in tts_enabled_bots:
             try:
-                # Create audio hash for caching
-                text_hash = hashlib.md5(content.encode()).hexdigest()
-                audio_url = f"/api/speak?text_hash={text_hash}"
+                # Create audio hash for caching (include bot name for different voices)
+                text_hash = hashlib.md5(f"{bot_name}:{content}".encode()).hexdigest()
+                audio_url = f"/api/speak?text_hash={text_hash}&bot={bot_name}"
 
                 # Trigger TTS generation in background
-                asyncio.create_task(self._generate_tts_async(content, text_hash))
-                logger.info(f"TTS: Generating voice for Farnsworth message")
+                asyncio.create_task(self._generate_tts_async(content, text_hash, bot_name))
+                logger.info(f"TTS: Generating voice for {bot_name} message")
             except Exception as e:
                 logger.warning(f"TTS URL generation failed: {e}")
 
@@ -1858,7 +1859,7 @@ Keep response under 100 words. Reference specific numbers from the data."""
         await self._broadcast(msg)
         return msg
 
-    async def _generate_tts_async(self, text: str, text_hash: str):
+    async def _generate_tts_async(self, text: str, text_hash: str, bot_name: str = "Farnsworth"):
         """Generate TTS audio in background for caching with crash protection."""
         try:
             import hashlib
@@ -1888,20 +1889,36 @@ Keep response under 100 words. Reference specific numbers from the data."""
                     voice_system = get_multi_voice_system()
                     # Wait if voice queue is full
                     await wait_for_voice_queue_space(timeout=5.0)
-                    result = await voice_system.generate_speech(text[:500], "Farnsworth")
+                    result = await voice_system.generate_speech(text[:500], bot_name)
                     if result and result.exists():
                         # Copy to cache path
                         import shutil
                         shutil.copy(str(result), str(cache_path))
-                        logger.debug(f"TTS generated via multi-voice: {text_hash[:8]}...")
+                        logger.debug(f"TTS generated via multi-voice for {bot_name}: {text_hash[:8]}...")
                         return
                 except Exception as e:
-                    logger.warning(f"Multi-voice TTS failed, trying fallback: {e}")
+                    logger.warning(f"Multi-voice TTS failed for {bot_name}, trying fallback: {e}")
 
-            # Fallback to legacy TTS
+            # Fallback to legacy TTS with bot-specific voice samples
             tts_model = get_tts_model()
             if tts_model:
-                reference_audio = "/workspace/Farnsworth/farnsworth_voice.wav"
+                # Bot-specific voice sample mapping
+                voice_samples = {
+                    "Farnsworth": "/workspace/Farnsworth/farnsworth_voice.wav",
+                    "Kimi": "/workspace/Farnsworth/farnsworth/web/static/audio/kimi_voice.wav",
+                    "DeepSeek": "/workspace/Farnsworth/farnsworth/web/static/audio/deepseek_voice.wav",
+                    "Grok": "/workspace/Farnsworth/farnsworth/web/static/audio/grok_voice.wav",
+                    "Gemini": "/workspace/Farnsworth/farnsworth/web/static/audio/gemini_voice.wav",
+                    "Claude": "/workspace/Farnsworth/farnsworth/web/static/audio/claude_voice.wav",
+                    "ClaudeOpus": "/workspace/Farnsworth/farnsworth/web/static/audio/claude_voice.wav",
+                    "Phi": "/workspace/Farnsworth/farnsworth/web/static/audio/phi_voice.wav",
+                    "OpenCode": "/workspace/Farnsworth/farnsworth/web/static/audio/opencode_voice.wav",
+                    "HuggingFace": "/workspace/Farnsworth/farnsworth/web/static/audio/huggingface_voice.wav",
+                    "Swarm-Mind": "/workspace/Farnsworth/farnsworth/web/static/audio/swarm_voice.wav",
+                }
+
+                # Get voice sample for this bot, fallback to Farnsworth
+                reference_audio = voice_samples.get(bot_name, "/workspace/Farnsworth/farnsworth_voice.wav")
                 alt_reference = "/workspace/Farnsworth/farnsworth/web/static/audio/farnsworth_reference.wav"
 
                 ref_path = Path(reference_audio)
@@ -1917,7 +1934,7 @@ Keep response under 100 words. Reference specific numbers from the data."""
                             speaker_wav=str(ref_path),
                             language="en"
                         )
-                        logger.debug(f"TTS generated (legacy): {text_hash[:8]}...")
+                        logger.debug(f"TTS generated (legacy) for {bot_name}: {text_hash[:8]}...")
 
                         # Cache in planetary shard
                         if audio_shard and cache_path.exists():
@@ -1926,12 +1943,12 @@ Keep response under 100 words. Reference specific numbers from the data."""
                                     audio_shard.cache_audio,
                                     text_hash,
                                     str(cache_path),
-                                    {"bot": "swarm", "text_preview": text[:50]}
+                                    {"bot": bot_name, "text_preview": text[:50]}
                                 )
                             except Exception as e:
                                 logger.debug(f"Shard cache failed: {e}")
                     except Exception as e:
-                        logger.warning(f"Legacy TTS generation failed: {e}")
+                        logger.warning(f"Legacy TTS generation failed for {bot_name}: {e}")
 
         except Exception as e:
             logger.warning(f"Background TTS generation failed: {e}")
