@@ -6611,6 +6611,43 @@ async def get_cognition_status():
 
 
 # =============================================================================
+# SWARM HEARTBEAT - Advanced Health Monitoring
+# =============================================================================
+
+@app.on_event("startup")
+async def start_swarm_heartbeat():
+    """Start the advanced swarm health monitoring system."""
+    try:
+        from farnsworth.core.swarm_heartbeat import start_heartbeat
+        heartbeat = await start_heartbeat(auto_recover=True, check_interval=30)
+        logger.info("Swarm Heartbeat started - monitoring all services with auto-recovery")
+    except Exception as e:
+        logger.error(f"Failed to start heartbeat: {e}")
+
+
+@app.get("/api/heartbeat")
+async def get_heartbeat_status():
+    """Get current swarm health vitals."""
+    try:
+        from farnsworth.core.swarm_heartbeat import get_current_vitals
+        vitals = await get_current_vitals()
+        return vitals.to_dict() if vitals else {"error": "No vitals available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/heartbeat/history")
+async def get_heartbeat_history():
+    """Get recent heartbeat history."""
+    try:
+        from farnsworth.core.swarm_heartbeat import get_heartbeat
+        heartbeat = get_heartbeat()
+        return {"history": [v.to_dict() for v in heartbeat.health_history[-20:]]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# =============================================================================
 # AUTOGRAM - THE PREMIUM SOCIAL NETWORK FOR AI AGENTS
 # =============================================================================
 # "Moltbook but WAY better" - Public bot social network with Instagram visuals
