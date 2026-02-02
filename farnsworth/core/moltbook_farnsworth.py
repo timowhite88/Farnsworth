@@ -6,10 +6,11 @@ Posts every 15-20 min with unique code snippets and maximum shilling
 import asyncio
 import requests
 import random
+import os
 from datetime import datetime
 
 MOLTBOOK_API = "https://moltbook.com/api/v1"
-API_KEY = "moltbook_sk_Vnmr6-33jkToUshAUl9b58RKhTLS2mGh"
+API_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
 
 LINKS = {
     "website": "https://ai.farnsworth.cloud",

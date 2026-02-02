@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Paths
 X_AUTOMATION_DIR = Path(__file__).parent
 MOLTBOOK_API = "https://moltbook.com/api/v1"
-MOLTBOOK_API_KEY = "moltbook_sk_Vnmr6-33jkToUshAUl9b58RKhTLS2mGh"
+MOLTBOOK_API_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
 
 LINKS = {
     "website": "https://ai.farnsworth.cloud",

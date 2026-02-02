@@ -136,9 +136,8 @@ async function main() {
     console.log('='.repeat(60));
     console.log('\nPlease complete the login in the browser window.');
     console.log('The login page should be visible now.');
-    console.log('\nCredentials for FarnsorthAI:');
-    console.log('  Username: FarnsorthAI');
-    console.log('  Password: EliseYasmin@#1');
+    console.log('\nPlease login with your X/Twitter credentials.');
+    console.log('(Set X_USERNAME and X_PASSWORD environment variables for future reference)');
     console.log('\nAfter logging in successfully:');
     console.log('1. Make sure you see the home timeline');
     console.log('2. Come back here and press ENTER\n');

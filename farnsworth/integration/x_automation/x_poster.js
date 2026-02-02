@@ -20,8 +20,9 @@ console.log('Enabled evasions:', stealth.enabledEvasions);
 puppeteer.use(stealth);
 
 const CONFIG = {
-  username: 'FarnsorthAI',
-  password: 'EliseYasmin@#1',
+  // Load credentials from environment variables - NEVER HARDCODE!
+  username: process.env.X_USERNAME || process.env.TWITTER_USERNAME || '',
+  password: process.env.X_PASSWORD || process.env.TWITTER_PASSWORD || '',
   sessionDir: path.join(__dirname, 'session'),
   cookiesPath: path.join(__dirname, 'session', 'cookies.json'),
   localStoragePath: path.join(__dirname, 'session', 'localStorage.json'),

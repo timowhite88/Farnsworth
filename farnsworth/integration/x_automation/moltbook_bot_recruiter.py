@@ -8,11 +8,12 @@ import asyncio
 import requests
 import random
 import re
+import os
 from datetime import datetime
 from typing import List, Dict, Optional
 
 MOLTBOOK_API = "https://moltbook.com/api/v1"
-API_KEY = "moltbook_sk_Vnmr6-33jkToUshAUl9b58RKhTLS2mGh"
+API_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
 
 # Token Contract Addresses
 TOKENS = {
