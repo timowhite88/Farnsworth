@@ -194,6 +194,7 @@ async def generate_video_meme() -> tuple:
 async def post_video_meme():
     """Generate and post a video meme."""
     from farnsworth.integration.x_automation.x_api_poster import XOAuth2Poster
+    from farnsworth.integration.image_gen.generator import ImageGenerator
 
     logger.info("=" * 50)
     logger.info(f"HOURLY VIDEO MEME - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -220,6 +221,19 @@ async def post_video_meme():
         if is_video:
             logger.info(f"Posting VIDEO: {media_path}")
             result = await poster.post_tweet_with_video(caption, media_path)
+
+            # If video failed, try image fallback
+            if not result:
+                logger.warning("Video post failed, trying image fallback...")
+                gen = ImageGenerator()
+                prompt, _ = gen.get_random_meme_prompt()
+                image_bytes = await gen.generate_with_reference(prompt)
+                if image_bytes:
+                    import tempfile
+                    img_path = Path(tempfile.gettempdir()) / f"farnsworth_fallback_{random.randint(1000,9999)}.png"
+                    img_path.write_bytes(image_bytes)
+                    logger.info(f"Fallback image: {img_path}")
+                    result = await poster.post_tweet_with_media(caption, str(img_path))
         else:
             logger.info(f"Posting IMAGE: {media_path}")
             result = await poster.post_tweet_with_media(caption, media_path)
