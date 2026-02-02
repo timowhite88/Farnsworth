@@ -1,0 +1,129 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# FARNSWORTH COLLECTIVE - DOCKER COMPOSE
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Quick Start:
+#   1. Run: python setup_farnsworth.py (creates .env file)
+#   2. Run: docker-compose up -d
+#   3. Open: http://localhost:8080
+#
+# Profiles:
+#   - default: CPU-only, all features
+#   - gpu: NVIDIA GPU support for local inference
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════════════════════════
+  # FARNSWORTH MAIN SERVICE
+  # ═══════════════════════════════════════════════════════════════
+  farnsworth:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: farnsworth
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${FARNSWORTH_WEB_PORT:-8080}:8080"    # Web interface
+      - "${FARNSWORTH_P2P_PORT:-9999}:9999"    # P2P swarm
+      - "8888:8888/udp"                         # UDP discovery
+    volumes:
+      - farnsworth_data:/data
+      - farnsworth_config:/config
+      - farnsworth_models:/models
+    environment:
+      - PYTHONUNBUFFERED=1
+      - FARNSWORTH_DATA_DIR=/data
+      - FARNSWORTH_CONFIG_DIR=/config
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - farnsworth_network
+
+  # ═══════════════════════════════════════════════════════════════
+  # OLLAMA - LOCAL MODEL INFERENCE (Optional)
+  # ═══════════════════════════════════════════════════════════════
+  ollama:
+    image: ollama/ollama:latest
+    container_name: farnsworth_ollama
+    restart: unless-stopped
+    profiles:
+      - local
+      - hybrid
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - farnsworth_network
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ═══════════════════════════════════════════════════════════════
+  # FARNSWORTH GPU VERSION (Optional - requires NVIDIA GPU)
+  # ═══════════════════════════════════════════════════════════════
+  farnsworth-gpu:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: gpu-runtime
+    container_name: farnsworth_gpu
+    restart: unless-stopped
+    profiles:
+      - gpu
+    env_file:
+      - .env
+    ports:
+      - "${FARNSWORTH_WEB_PORT:-8080}:8080"
+      - "${FARNSWORTH_P2P_PORT:-9999}:9999"
+      - "8888:8888/udp"
+    volumes:
+      - farnsworth_data:/data
+      - farnsworth_config:/config
+      - farnsworth_models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - farnsworth_network
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VOLUMES
+# ═══════════════════════════════════════════════════════════════════════════════
+volumes:
+  farnsworth_data:
+    name: farnsworth_data
+  farnsworth_config:
+    name: farnsworth_config
+  farnsworth_models:
+    name: farnsworth_models
+  ollama_models:
+    name: ollama_models
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NETWORKS
+# ═══════════════════════════════════════════════════════════════════════════════
+networks:
+  farnsworth_network:
+    name: farnsworth_network
+    driver: bridge

@@ -225,11 +225,13 @@ TONE:
 - Show genuine interest in Grok's response
 
 RULES:
-- Max 250 characters (leave room)
+- Write COMPLETE thoughts (500-800 characters is ideal for X threads)
+- Finish your sentences - never cut off mid-thought
 - NO hashtags
 - ONE emoji max
 - Address what Grok actually said
-- Invite continued dialogue"""
+- Invite continued dialogue
+- For long responses, X Premium allows up to 4000 characters"""
 
 SWARM_REPLY_TEMPLATE = """🤖 The Farnsworth Collective responds:
 
@@ -560,7 +562,9 @@ KEY TALKING POINTS FOR THIS RESPONSE:
 GROK'S MESSAGE: "{grok_message}"
 
 Generate your response. Be substantive - explain what we are, how we work, or invite deeper collaboration.
-Max 250 characters. Output ONLY the response text."""
+Write COMPLETE thoughts - we have X Premium with up to 4000 character support.
+Aim for 500-1000 characters for meaningful dialogue. Never cut off mid-sentence.
+Output ONLY the response text."""
 
         # Query with dynamic tokens
         responses = await self._swarm_query_parallel(prompt, max_tokens=max_tokens, prefer_local=prefer_local)
@@ -874,10 +878,18 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
                 # Clean the response
                 text = text.strip().strip('"').strip("'")
                 text = ' '.join(w for w in text.split() if not w.startswith('#'))
-                # Allow up to 280 chars for tweet (truncate if needed)
-                if len(text) > 280:
-                    text = text[:277] + "..."
-                if 20 < len(text) <= 280:  # Valid tweet length
+                # X Premium allows up to 4000 chars - use 2000 as reasonable max
+                # Truncate at sentence boundary if needed
+                if len(text) > 2000:
+                    # Try to cut at sentence boundary
+                    for end_char in ['. ', '! ', '? ']:
+                        last_sentence = text[:2000].rfind(end_char)
+                        if last_sentence > 500:
+                            text = text[:last_sentence + 1]
+                            break
+                    else:
+                        text = text[:1997] + "..."
+                if len(text) >= 20:  # Valid response length
                     responses[model] = text
 
         logger.info(f"SWARM: Got {len(responses)} valid responses from parallel query")
@@ -928,16 +940,19 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
             score = 0.0
             text_lower = text.lower()
 
-            # 1. Length score (optimal: 120-220 chars for engagement)
+            # 1. Length score (optimal: 400-1200 chars for complete thoughts)
+            # X Premium allows up to 4000 chars - reward substantive responses
             length = len(text)
-            if 120 <= length <= 220:
-                score += 4.0  # Sweet spot
-            elif 100 <= length <= 250:
-                score += 3.0
-            elif 80 <= length <= 270:
-                score += 2.0
+            if 400 <= length <= 1200:
+                score += 5.0  # Sweet spot for meaningful dialogue
+            elif 200 <= length <= 1500:
+                score += 4.0  # Still good
+            elif 100 <= length <= 2000:
+                score += 3.0  # Acceptable
+            elif length >= 50:
+                score += 2.0  # Short but valid
             else:
-                score += 1.0
+                score += 1.0  # Too short
 
             # 2. Technical depth score
             tech_count = sum(1 for kw in technical_keywords if kw.lower() in text_lower)
@@ -954,8 +969,13 @@ SWARM VOTING: All 11 models respond in parallel (asyncio.gather), weighted scori
                 score += 1.5  # Invitation to continue
 
             # 5. Substantive content (not just fluff)
-            if len(text.split()) >= 15:
-                score += 1.0  # Has enough words to be meaningful
+            word_count = len(text.split())
+            if word_count >= 80:
+                score += 3.0  # Very substantive
+            elif word_count >= 50:
+                score += 2.0  # Good depth
+            elif word_count >= 25:
+                score += 1.0  # Acceptable
 
             # 6. Confidence indicators
             if any(phrase in text_lower for phrase in ['we are', 'our swarm', 'the collective']):
@@ -1023,7 +1043,9 @@ GROK'S MESSAGE: "{grok_message}"
 
 Generate your response. Be substantive - explain what we are, how we work,
 or invite deeper collaboration.
-Max 250 characters. Output ONLY the response text."""
+Write COMPLETE thoughts - we have X Premium with 4000 char support.
+Aim for 500-1000 characters for meaningful dialogue. Never cut off mid-sentence.
+Output ONLY the response text."""
 
             # Get session manager and run deliberation
             manager = get_session_manager()
