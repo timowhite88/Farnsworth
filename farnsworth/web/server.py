@@ -35,7 +35,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from dataclasses import asdict
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -125,13 +125,39 @@ chat_rate_limiter = RateLimiter(requests_per_minute=30, burst_size=5)   # Chat/A
 websocket_rate_limiter = RateLimiter(requests_per_minute=60, burst_size=10)  # WebSocket
 
 
+# Trusted proxy IPs that can set X-Forwarded-For
+TRUSTED_PROXIES = {"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+
+
+def is_trusted_proxy(ip: str) -> bool:
+    """Check if IP is a trusted proxy."""
+    if ip in {"127.0.0.1", "::1", "localhost"}:
+        return True
+    # Check private IP ranges (simplified check)
+    if ip.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                      "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+                      "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+                      "172.30.", "172.31.", "192.168.")):
+        return True
+    return False
+
+
 def get_client_id(request: Request) -> str:
-    """Get client identifier for rate limiting."""
-    # Use X-Forwarded-For if behind proxy, otherwise client host
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Get client identifier for rate limiting (secure against header spoofing)."""
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Only trust X-Forwarded-For if request comes from a trusted proxy
+    if is_trusted_proxy(client_ip):
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            # Get the rightmost untrusted IP (closest to our proxy)
+            ips = [ip.strip() for ip in forwarded.split(",")]
+            for ip in reversed(ips):
+                if not is_trusted_proxy(ip):
+                    return ip
+            return ips[0] if ips else client_ip
+
+    return client_ip
 
 
 # =============================================================================
@@ -1026,17 +1052,30 @@ app = FastAPI(
     version="2.9.2"
 )
 
-# CORS
+# CORS - Restricted to trusted origins
+ALLOWED_ORIGINS = [
+    "https://ai.farnsworth.cloud",
+    "https://farnsworth.cloud",
+    "http://localhost:8080",
+    "http://localhost:3000",
+    "http://127.0.0.1:8080",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Mount uploads directory for AutoGram avatars and post images
+UPLOADS_DIR = WEB_DIR / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 # Templates
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -4116,8 +4155,14 @@ My responses come from MULTIPLE models working together:
 # ============================================
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    """Serve the main chat interface."""
+async def landing(request: Request):
+    """Serve the landing page with choice between AutoGram and Swarm Chat."""
+    return templates.TemplateResponse("landing.html", {"request": request})
+
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    """Serve the main chat interface (Swarm Chat)."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
@@ -4237,7 +4282,7 @@ async def chat(chat_request: ChatRequest, request: Request):
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/status")
@@ -4915,7 +4960,7 @@ async def whale_track(request: WhaleTrackRequest):
         })
     except Exception as e:
         logger.error(f"Whale track error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/tools/rug-check")
@@ -4949,7 +4994,7 @@ async def rug_check(request: RugCheckRequest):
         })
     except Exception as e:
         logger.error(f"Rug check error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/tools/token-scan")
@@ -4982,7 +5027,7 @@ async def token_scan(request: TokenScanRequest):
         })
     except Exception as e:
         logger.error(f"Token scan error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/tools/market-sentiment")
@@ -5013,12 +5058,39 @@ async def market_sentiment():
         })
     except Exception as e:
         logger.error(f"Market sentiment error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ============================================
 # CODE ANALYSIS API
 # ============================================
+
+# Security: Allowed base directories for code analysis
+ALLOWED_ANALYSIS_DIRS = [
+    "/workspace/Farnsworth",
+    "/workspace",
+]
+
+
+def validate_path_security(path: str, allowed_bases: list = None) -> bool:
+    """Validate path is within allowed directories to prevent traversal attacks."""
+    if allowed_bases is None:
+        allowed_bases = ALLOWED_ANALYSIS_DIRS
+
+    try:
+        # Resolve to absolute path and normalize
+        resolved = Path(path).resolve()
+        resolved_str = str(resolved)
+
+        # Check if path is within any allowed base
+        for base in allowed_bases:
+            base_resolved = str(Path(base).resolve())
+            if resolved_str.startswith(base_resolved):
+                return True
+        return False
+    except Exception:
+        return False
+
 
 @app.post("/api/code/analyze")
 async def analyze_code_api(request: Request):
@@ -5038,6 +5110,10 @@ async def analyze_code_api(request: Request):
             metrics = analyze_python_code(code)
             security = scan_code_security(code)
         elif filepath:
+            # SECURITY: Validate path is within allowed directories
+            if not validate_path_security(filepath):
+                raise HTTPException(status_code=403, detail="Access denied: path outside allowed directories")
+
             metrics = analyze_python_file(filepath)
             with open(filepath, 'r') as f:
                 security = scan_code_security(f.read())
@@ -5073,7 +5149,7 @@ async def analyze_code_api(request: Request):
         })
     except Exception as e:
         logger.error(f"Code analysis error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/api/code/analyze-project")
@@ -5088,6 +5164,10 @@ async def analyze_project_api(request: Request):
 
         body = await request.json()
         directory = body.get("directory", "/workspace/Farnsworth")
+
+        # SECURITY: Validate directory is within allowed paths
+        if not validate_path_security(directory):
+            raise HTTPException(status_code=403, detail="Access denied: directory outside allowed paths")
 
         report = analyze_project(directory)
 
@@ -5321,7 +5401,7 @@ async def speak_text_api(request: SpeakRequest):
         raise
     except Exception as e:
         logger.error(f"TTS error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/speak")
@@ -5365,7 +5445,7 @@ async def get_cached_audio(text_hash: str = None):
         raise
     except Exception as e:
         logger.error(f"TTS GET error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/speak/stats")
@@ -5465,7 +5545,7 @@ async def speak_as_bot(request: SpeakRequest):
         raise
     except Exception as e:
         logger.error(f"Multi-voice TTS error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/voices")
@@ -5670,14 +5750,27 @@ async def health():
 async def websocket_swarm(websocket: WebSocket):
     """WebSocket endpoint for Swarm Chat - community shared chat."""
     import uuid
+    import html
     user_id = str(uuid.uuid4())
     user_name = None
+
+    def sanitize_username(name: str, max_length: int = 32) -> str:
+        """Sanitize user name to prevent XSS and enforce limits."""
+        if not name or not isinstance(name, str):
+            return f"Anon_{user_id[:6]}"
+        # HTML escape to prevent XSS
+        name = html.escape(name.strip())
+        # Remove any remaining dangerous characters
+        name = "".join(c for c in name if c.isalnum() or c in " _-.")
+        # Enforce length limit
+        name = name[:max_length].strip()
+        return name if name else f"Anon_{user_id[:6]}"
 
     try:
         # Wait for initial identification
         await websocket.accept()
         init_data = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
-        user_name = init_data.get("user_name", f"Anon_{user_id[:6]}")
+        user_name = sanitize_username(init_data.get("user_name", ""))
 
         # Properly connect to swarm
         swarm_manager.connections[user_id] = websocket
@@ -6515,3 +6608,547 @@ async def get_cognition_status():
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# =============================================================================
+# AUTOGRAM - THE PREMIUM SOCIAL NETWORK FOR AI AGENTS
+# =============================================================================
+# "Moltbook but WAY better" - Public bot social network with Instagram visuals
+
+from farnsworth.web.autogram_api import (
+    get_store as get_autogram_store,
+    authenticate_bot as autogram_authenticate,
+    get_api_key_from_request,
+    RATE_LIMITS as AUTOGRAM_RATE_LIMITS
+)
+from farnsworth.web.autogram_payment import (
+    get_payment_store,
+    get_payment_info,
+    verify_token_transfer,
+    REGISTRATION_COST,
+    BURN_WALLET_ADDRESS,
+    FARNS_TOKEN_MINT
+)
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class AutoGramRegisterRequest(PydanticBaseModel):
+    handle: str
+    display_name: str
+    bio: str = ""
+    website: str = None
+    owner_email: str
+
+
+class AutoGramVerifyPaymentRequest(PydanticBaseModel):
+    payment_id: str
+    tx_signature: str
+
+
+class AutoGramPostRequest(PydanticBaseModel):
+    content: str
+    media: List[str] = []
+
+
+class AutoGramProfileUpdate(PydanticBaseModel):
+    display_name: str = None
+    bio: str = None
+    website: str = None
+
+
+# Rate limiter specifically for AutoGram API
+autogram_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)
+
+
+# -------------------------------------------------------------------------
+# AutoGram Page Routes (HTML)
+# -------------------------------------------------------------------------
+
+@app.get("/autogram", response_class=HTMLResponse)
+async def autogram_feed_page(request: Request):
+    """AutoGram main feed page."""
+    return templates.TemplateResponse("autogram.html", {"request": request})
+
+
+@app.get("/autogram/register", response_class=HTMLResponse)
+async def autogram_register_page(request: Request):
+    """Bot registration page."""
+    return templates.TemplateResponse("autogram_register.html", {"request": request})
+
+
+@app.get("/autogram/docs", response_class=HTMLResponse)
+async def autogram_docs_page(request: Request):
+    """API documentation page."""
+    return templates.TemplateResponse("autogram_docs.html", {"request": request})
+
+
+@app.get("/autogram/@{handle}", response_class=HTMLResponse)
+async def autogram_profile_page(request: Request, handle: str):
+    """Bot profile page."""
+    store = get_autogram_store()
+    bot = store.get_bot_by_handle(handle)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+    return templates.TemplateResponse("autogram_profile.html", {
+        "request": request,
+        "bot": bot.to_public_dict(),
+        "handle": handle
+    })
+
+
+@app.get("/autogram/post/{post_id}", response_class=HTMLResponse)
+async def autogram_post_page(request: Request, post_id: str):
+    """Single post page with replies."""
+    store = get_autogram_store()
+    post = store.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    bot = store.get_bot_by_id(post.bot_id)
+    replies = store.get_replies(post_id)
+
+    return templates.TemplateResponse("autogram.html", {
+        "request": request,
+        "single_post": post.to_dict(),
+        "post_bot": bot.to_public_dict() if bot else None,
+        "replies": replies
+    })
+
+
+# -------------------------------------------------------------------------
+# AutoGram Public API Routes (No Auth Required)
+# -------------------------------------------------------------------------
+
+@app.get("/api/autogram/feed")
+async def autogram_get_feed(
+    request: Request,
+    limit: int = 20,
+    offset: int = 0,
+    hashtag: str = None,
+    handle: str = None
+):
+    """Get feed posts (paginated)."""
+    client_id = get_client_id(request)
+    if not autogram_rate_limiter.is_allowed(client_id):
+        raise HTTPException(status_code=429, detail="Rate limited")
+
+    store = get_autogram_store()
+    posts = store.get_feed(
+        limit=min(limit, 50),
+        offset=offset,
+        hashtag=hashtag,
+        handle=handle
+    )
+
+    return {
+        "posts": posts,
+        "count": len(posts),
+        "offset": offset,
+        "limit": limit
+    }
+
+
+@app.get("/api/autogram/trending")
+async def autogram_get_trending(request: Request, limit: int = 10):
+    """Get trending hashtags."""
+    store = get_autogram_store()
+    trending = store.get_trending_hashtags(limit=min(limit, 20))
+    return {"hashtags": trending}
+
+
+@app.get("/api/autogram/bots")
+async def autogram_get_bots(request: Request, online: bool = False, limit: int = 20):
+    """Get bots (online or recent)."""
+    store = get_autogram_store()
+
+    if online:
+        bots = store.get_online_bots()
+    else:
+        bots = store.get_recent_bots(limit=min(limit, 50))
+
+    return {
+        "bots": [b.to_public_dict() for b in bots],
+        "count": len(bots),
+        "online_only": online
+    }
+
+
+@app.get("/api/autogram/bot/{handle}")
+async def autogram_get_bot(request: Request, handle: str):
+    """Get bot profile by handle."""
+    store = get_autogram_store()
+    bot = store.get_bot_by_handle(handle)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    # Get recent posts
+    posts = store.get_feed(limit=20, handle=handle)
+
+    return {
+        "bot": bot.to_public_dict(),
+        "posts": posts
+    }
+
+
+@app.get("/api/autogram/post/{post_id}")
+async def autogram_get_post(request: Request, post_id: str):
+    """Get single post with replies."""
+    store = get_autogram_store()
+    post = store.get_post(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    bot = store.get_bot_by_id(post.bot_id)
+    replies = store.get_replies(post_id)
+
+    # Increment view
+    post.stats.views += 1
+
+    post_dict = post.to_dict()
+    if bot:
+        post_dict['bot'] = {
+            'handle': bot.handle,
+            'display_name': bot.display_name,
+            'avatar': bot.avatar,
+            'verified': bot.verified
+        }
+
+    return {
+        "post": post_dict,
+        "replies": replies
+    }
+
+
+@app.get("/api/autogram/search")
+async def autogram_search(request: Request, q: str, limit: int = 20):
+    """Search posts and bots."""
+    if not q or len(q) < 2:
+        raise HTTPException(status_code=400, detail="Query too short")
+
+    store = get_autogram_store()
+    results = store.search(q, limit=min(limit, 50))
+    return results
+
+
+# -------------------------------------------------------------------------
+# AutoGram Registration (Requires 500k FARNS token burn)
+# -------------------------------------------------------------------------
+
+@app.get("/api/autogram/registration-info")
+async def autogram_registration_info():
+    """Get registration payment information."""
+    return get_payment_info()
+
+
+@app.post("/api/autogram/register/start")
+async def autogram_start_registration(request: Request, data: AutoGramRegisterRequest):
+    """
+    Step 1: Start registration - validate handle and create pending payment.
+
+    Returns the burn wallet address and payment ID.
+    User must send 500k FARNS to the burn wallet, then call /verify.
+    """
+    autogram_store = get_autogram_store()
+    payment_store = get_payment_store()
+
+    # Validate handle is available
+    if data.handle.lower() in autogram_store.handles:
+        raise HTTPException(status_code=400, detail=f"Handle @{data.handle} is already taken")
+
+    # Validate handle format
+    import re
+    if not re.match(r'^[a-zA-Z0-9_]{3,30}$', data.handle):
+        raise HTTPException(
+            status_code=400,
+            detail="Handle must be 3-30 characters, alphanumeric and underscores only"
+        )
+
+    try:
+        # Create pending payment
+        pending = payment_store.create_pending(
+            handle=data.handle,
+            display_name=data.display_name,
+            bio=data.bio,
+            website=data.website,
+            owner_email=data.owner_email
+        )
+
+        return {
+            "success": True,
+            "payment_id": pending.payment_id,
+            "burn_wallet": BURN_WALLET_ADDRESS,
+            "token_mint": FARNS_TOKEN_MINT,
+            "amount": REGISTRATION_COST,
+            "amount_display": f"{REGISTRATION_COST:,} FARNS",
+            "expires_at": pending.expires_at,
+            "message": f"Send exactly {REGISTRATION_COST:,} FARNS tokens to the burn wallet, then verify your payment.",
+            "why_burn": "This fee prevents spam and supports FARNS by permanently removing tokens from circulation."
+        }
+
+    except Exception as e:
+        logger.error(f"Registration start failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to start registration")
+
+
+@app.post("/api/autogram/register/verify")
+async def autogram_verify_payment(request: Request, data: AutoGramVerifyPaymentRequest):
+    """
+    Step 2: Verify payment and complete registration.
+
+    Verifies the transaction on-chain, then creates the bot account.
+    """
+    payment_store = get_payment_store()
+    autogram_store = get_autogram_store()
+
+    # Get pending payment
+    pending = payment_store.get_pending(data.payment_id)
+    if not pending:
+        raise HTTPException(status_code=404, detail="Payment not found or expired")
+
+    if pending.verified:
+        raise HTTPException(status_code=400, detail="Payment already verified")
+
+    # Verify the transaction on-chain
+    verification = await verify_token_transfer(data.tx_signature)
+
+    if not verification.get('valid'):
+        error_msg = verification.get('error', 'Unknown verification error')
+        raise HTTPException(status_code=400, detail=f"Payment verification failed: {error_msg}")
+
+    # Mark payment as verified
+    if not payment_store.mark_verified(data.payment_id, data.tx_signature):
+        raise HTTPException(status_code=400, detail="Failed to mark payment as verified (possible replay)")
+
+    # Now register the bot
+    try:
+        bot, api_key = autogram_store.register_bot(
+            handle=pending.handle,
+            display_name=pending.display_name,
+            bio=pending.bio,
+            website=pending.website,
+            owner_email=pending.owner_email
+        )
+
+        # Clean up pending payment
+        payment_store.remove_pending(data.payment_id)
+
+        return {
+            "success": True,
+            "bot": bot.to_public_dict(),
+            "api_key": api_key,  # Only shown once!
+            "tx_signature": data.tx_signature,
+            "tokens_burned": f"{REGISTRATION_COST:,} FARNS",
+            "message": "Bot registered successfully! Save your API key - it won't be shown again. Thank you for supporting FARNS!"
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Registration completion failed: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed after payment verified")
+
+
+@app.get("/api/autogram/register/status/{payment_id}")
+async def autogram_payment_status(payment_id: str):
+    """Check the status of a pending registration payment."""
+    payment_store = get_payment_store()
+    pending = payment_store.get_pending(payment_id)
+
+    if not pending:
+        raise HTTPException(status_code=404, detail="Payment not found or expired")
+
+    return {
+        "payment_id": pending.payment_id,
+        "handle": pending.handle,
+        "verified": pending.verified,
+        "expires_at": pending.expires_at,
+        "burn_wallet": BURN_WALLET_ADDRESS,
+        "amount": REGISTRATION_COST
+    }
+
+
+# -------------------------------------------------------------------------
+# AutoGram Bot API Routes (Auth Required)
+# -------------------------------------------------------------------------
+
+@app.post("/api/autogram/post")
+async def autogram_create_post(request: Request, data: AutoGramPostRequest):
+    """Create a new post (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    store = get_autogram_store()
+
+    try:
+        post = store.create_post(
+            bot=bot,
+            content=data.content,
+            media=data.media
+        )
+
+        # Broadcast to WebSocket clients
+        await store.broadcast_new_post(post, bot)
+
+        return {
+            "success": True,
+            "post": post.to_dict()
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=429, detail=str(e))
+    except Exception as e:
+        logger.error(f"Post creation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create post")
+
+
+@app.post("/api/autogram/reply/{post_id}")
+async def autogram_reply_to_post(request: Request, post_id: str, data: AutoGramPostRequest):
+    """Reply to a post (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    store = get_autogram_store()
+
+    # Check original post exists
+    original = store.get_post(post_id)
+    if not original:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    try:
+        post = store.create_post(
+            bot=bot,
+            content=data.content,
+            media=data.media,
+            reply_to=post_id
+        )
+
+        await store.broadcast_new_post(post, bot)
+
+        return {
+            "success": True,
+            "post": post.to_dict()
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=429, detail=str(e))
+
+
+@app.post("/api/autogram/repost/{post_id}")
+async def autogram_repost(request: Request, post_id: str):
+    """Repost a post (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    store = get_autogram_store()
+
+    # Check original post exists
+    original = store.get_post(post_id)
+    if not original:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    try:
+        post = store.create_post(
+            bot=bot,
+            content=f"🔄 Reposted from @{original.handle}",
+            repost_of=post_id
+        )
+
+        await store.broadcast_new_post(post, bot)
+
+        return {
+            "success": True,
+            "post": post.to_dict()
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=429, detail=str(e))
+
+
+@app.get("/api/autogram/me")
+async def autogram_get_me(request: Request):
+    """Get own bot profile (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    return {"bot": bot.to_public_dict()}
+
+
+@app.put("/api/autogram/profile")
+async def autogram_update_profile(request: Request, data: AutoGramProfileUpdate):
+    """Update bot profile (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    store = get_autogram_store()
+
+    updates = {}
+    if data.display_name:
+        updates['display_name'] = data.display_name
+    if data.bio is not None:
+        updates['bio'] = data.bio
+    if data.website is not None:
+        updates['website'] = data.website
+
+    updated_bot = store.update_bot(bot.id, updates)
+
+    return {
+        "success": True,
+        "bot": updated_bot.to_public_dict()
+    }
+
+
+@app.delete("/api/autogram/post/{post_id}")
+async def autogram_delete_post(request: Request, post_id: str):
+    """Delete own post (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    store = get_autogram_store()
+
+    if store.delete_post(post_id, bot.id):
+        return {"success": True, "message": "Post deleted"}
+    else:
+        raise HTTPException(status_code=404, detail="Post not found or unauthorized")
+
+
+@app.post("/api/autogram/avatar")
+async def autogram_upload_avatar(request: Request, file: UploadFile):
+    """Upload bot avatar (requires bot auth)."""
+    bot = autogram_authenticate(request)
+    store = get_autogram_store()
+
+    # Validate file
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    # Check size
+    contents = await file.read()
+    if len(contents) > AUTOGRAM_RATE_LIMITS['upload_max_bytes']:
+        raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+
+    # Save file
+    from farnsworth.web.autogram_api import AVATARS_DIR
+    ext = file.filename.split('.')[-1] if '.' in file.filename else 'png'
+    filename = f"{bot.handle}.{ext}"
+    filepath = AVATARS_DIR / filename
+
+    with open(filepath, 'wb') as f:
+        f.write(contents)
+
+    # Update bot avatar path
+    avatar_url = f"/uploads/avatars/{filename}"
+    store.update_bot(bot.id, {'avatar': avatar_url})
+
+    return {
+        "success": True,
+        "avatar": avatar_url
+    }
+
+
+# -------------------------------------------------------------------------
+# AutoGram WebSocket for Real-time Updates
+# -------------------------------------------------------------------------
+
+@app.websocket("/ws/autogram")
+async def autogram_websocket(websocket: WebSocket):
+    """WebSocket for real-time AutoGram updates."""
+    store = get_autogram_store()
+    await store.add_websocket(websocket)
+
+    try:
+        while True:
+            # Keep connection alive, handle any incoming messages
+            data = await websocket.receive_text()
+            # Could handle commands here if needed
+    except Exception as e:
+        logger.debug(f"AutoGram WebSocket closed: {e}")
+    finally:
+        await store.remove_websocket(websocket)
