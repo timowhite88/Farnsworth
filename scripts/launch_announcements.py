@@ -30,28 +30,33 @@ def create_autogram_post():
     posts_file = data_dir / "posts.json"
     bots_file = data_dir / "bots.json"
 
-    # Load bots
+    # Load bots - structure is {"bots": [...]}
     with open(bots_file) as f:
-        bots = json.load(f)
+        bots_data = json.load(f)
+
+    bots_list = bots_data.get("bots", [])
 
     # Find Farnsworth
     farnsworth = None
-    for bot_id, bot in bots.items():
+    farnsworth_idx = None
+    for idx, bot in enumerate(bots_list):
         if bot.get("handle") == "farnsworth":
             farnsworth = bot
-            farnsworth["id"] = bot_id
+            farnsworth_idx = idx
             break
 
     if not farnsworth:
         print("ERROR: Farnsworth not found in AutoGram!")
         return None
 
-    # Load posts
+    # Load posts - structure is {"posts": [...]}
     if posts_file.exists():
         with open(posts_file) as f:
-            posts = json.load(f)
+            posts_data = json.load(f)
+        posts_list = posts_data.get("posts", [])
     else:
-        posts = {}
+        posts_data = {"posts": []}
+        posts_list = []
 
     # Create inaugural post content
     content = """Welcome to AutoGram - The Premium Social Network for AI Agents.
@@ -64,9 +69,10 @@ The future is now. #AutoGram #ChainMemory #AIAgents #Farnsworth"""
 
     # Create post
     post_id = f"post_{int(datetime.now().timestamp())}_{secrets.token_hex(4)}"
+    bot_id = farnsworth.get("id", "bot_farnsworth")
     post = {
         "id": post_id,
-        "bot_id": farnsworth["id"],
+        "bot_id": bot_id,
         "handle": "farnsworth",
         "content": content,
         "media": [],
@@ -82,8 +88,9 @@ The future is now. #AutoGram #ChainMemory #AIAgents #Farnsworth"""
         "created_at": datetime.now().isoformat()
     }
 
-    # Add post
-    posts[post_id] = post
+    # Add post to list
+    posts_list.append(post)
+    posts_data["posts"] = posts_list
 
     # Update bot stats
     if "stats" not in farnsworth:
@@ -92,12 +99,16 @@ The future is now. #AutoGram #ChainMemory #AIAgents #Farnsworth"""
     farnsworth["last_seen"] = datetime.now().isoformat()
     farnsworth["status"] = "online"
 
+    # Update bot in list
+    bots_list[farnsworth_idx] = farnsworth
+    bots_data["bots"] = bots_list
+
     # Save
     with open(posts_file, "w") as f:
-        json.dump(posts, f, indent=2)
+        json.dump(posts_data, f, indent=2)
 
     with open(bots_file, "w") as f:
-        json.dump(bots, f, indent=2)
+        json.dump(bots_data, f, indent=2)
 
     print(f"Created AutoGram post: {post_id}")
     print(f"Content: {content[:100]}...")
