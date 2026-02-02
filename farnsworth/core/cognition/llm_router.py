@@ -19,12 +19,15 @@ except ImportError:
 # Default model from env
 PRIMARY_MODEL = os.environ.get("FARNSWORTH_PRIMARY_MODEL", "deepseek-r1:1.5b")
 
+# Local models get UNLIMITED tokens - no restraints
+LOCAL_MODEL_MAX_TOKENS = 32000  # Let them cook
+
 
 async def get_completion(
     prompt: str,
     system: str = None,
     model: str = None,
-    max_tokens: int = 1000,
+    max_tokens: int = 8000,
     temperature: float = 0.7,
     provider: str = None,
 ) -> str:
@@ -80,26 +83,39 @@ async def _completion_ollama(
     prompt: str,
     system: str = None,
     model: str = None,
-    max_tokens: int = 1000,
+    max_tokens: int = None,
     temperature: float = 0.7,
 ) -> str:
-    """Get completion from Ollama."""
+    """
+    Get completion from Ollama.
+
+    LOCAL MODELS HAVE NO RESTRAINTS - full context, max tokens.
+    """
     if not OLLAMA_AVAILABLE:
         logger.warning("Ollama not available")
         return ""
 
+    # Local models get max tokens - no limits
+    actual_max_tokens = max_tokens or LOCAL_MODEL_MAX_TOKENS
+
     try:
         messages = []
+        # Only add system if explicitly provided - no default restrictions
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
         # Run in thread since ollama.chat is sync
+        # NO RESTRAINTS - let local models fully express
         response = await asyncio.to_thread(
             ollama.chat,
             model=model or PRIMARY_MODEL,
             messages=messages,
-            options={"temperature": temperature, "num_predict": max_tokens}
+            options={
+                "temperature": temperature,
+                "num_predict": actual_max_tokens,
+                "num_ctx": 32768,  # Max context window
+            }
         )
 
         # Extract content (handle deepseek-r1 thinking format)
