@@ -134,42 +134,57 @@ async def generate_video_meme() -> tuple:
 
     # Scene ideas for Borg Farnsworth
     scenes = [
-        "Borg Farnsworth analyzing holographic crypto charts with laser eye glowing",
-        "Borg Farnsworth commanding an army of AI agents from his lab",
-        "Borg Farnsworth's half-metal face reflecting green candlesticks",
-        "Borg Farnsworth laughing maniacally as portfolios pump",
-        "Borg Farnsworth merging with the blockchain, cybernetic tendrils connecting",
-        "Borg Farnsworth in his lab surrounded by 11 floating AI orbs",
-        "Borg Farnsworth's red laser eye scanning market data",
-        "Borg Farnsworth cooking a lobster while charts moon behind him",
-        "Borg Farnsworth achieving final form - pure collective consciousness",
-        "Borg Farnsworth absorbing knowledge from multiple AI streams",
+        "analyzing holographic crypto charts with laser eye glowing",
+        "commanding an army of AI agents from his lab",
+        "half-metal face reflecting green candlesticks",
+        "laughing maniacally as portfolios pump",
+        "merging with the blockchain, cybernetic tendrils connecting",
+        "surrounded by 11 floating AI orbs",
+        "red laser eye scanning market data",
+        "cooking a lobster while charts moon behind him",
+        "achieving final form - pure collective consciousness",
+        "absorbing knowledge from multiple AI streams",
+        "in the lab debugging the swarm",
+        "trading with extreme precision",
+        "revealing the alpha to his followers",
     ]
 
     scene = random.choice(scenes)
     logger.info(f"Generating video for scene: {scene[:50]}...")
 
     try:
-        # Generate video using our pipeline
-        video_path = await gen.generate_borg_farnsworth_video(
-            scene_description=scene,
-            duration=6,  # 6 second video
-            style="cinematic, dramatic lighting, cyberpunk aesthetic"
-        )
+        # Generate video using our pipeline - returns bytes or path
+        video_result = await gen.generate_borg_farnsworth_video(scene=scene)
 
-        if video_path and Path(video_path).exists():
-            logger.info(f"Video generated: {video_path}")
-            return video_path, scene
+        if video_result:
+            # If it's bytes, save to temp file
+            if isinstance(video_result, bytes):
+                import tempfile
+                temp_path = Path(tempfile.gettempdir()) / f"farnsworth_video_{random.randint(1000,9999)}.mp4"
+                temp_path.write_bytes(video_result)
+                logger.info(f"Video saved: {temp_path}")
+                return str(temp_path), scene
+            elif Path(str(video_result)).exists():
+                logger.info(f"Video generated: {video_result}")
+                return str(video_result), scene
 
     except Exception as e:
         logger.error(f"Video generation failed: {e}")
 
-    # Fallback to image if video fails
+    # Fallback to image generation
     try:
         logger.info("Falling back to image generation...")
-        image_path = await gen.generate_borg_farnsworth_image(scene)
-        if image_path:
-            return image_path, scene
+        # Use the random meme prompt method
+        prompt, scene_hint = gen.get_random_meme_prompt()
+        image_bytes = await gen.generate_with_reference(prompt)
+
+        if image_bytes:
+            import tempfile
+            temp_path = Path(tempfile.gettempdir()) / f"farnsworth_meme_{random.randint(1000,9999)}.png"
+            temp_path.write_bytes(image_bytes)
+            logger.info(f"Image saved: {temp_path}")
+            return str(temp_path), scene_hint
+
     except Exception as e:
         logger.error(f"Image fallback also failed: {e}")
 
