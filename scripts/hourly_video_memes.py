@@ -70,8 +70,8 @@ TRENDING_HOOKS = [
 
 
 async def generate_meme_caption() -> str:
-    """Generate a fire meme caption using the swarm."""
-    from farnsworth.integration.x_automation.posting_brain import generate_swarm_meme_text
+    """Generate a fire meme caption using shadow agents."""
+    from farnsworth.core.collective.persistent_agent import call_shadow_agent
 
     topic = random.choice(MEME_TOPICS)
     hook = random.choice(TRENDING_HOOKS)
@@ -91,20 +91,30 @@ Requirements:
 
 Just output the caption, nothing else."""
 
-    try:
-        caption = await generate_swarm_meme_text(prompt, max_tokens=300)
-        if caption:
-            return caption.strip()
-    except Exception as e:
-        logger.error(f"Caption generation failed: {e}")
+    # Try shadow agents in order
+    for agent in ["grok", "gemini", "claude"]:
+        try:
+            result = await call_shadow_agent(agent, prompt, max_tokens=300, timeout=30)
+            if result and result[1]:
+                caption = result[1].strip()
+                # Clean up any markdown or quotes
+                caption = caption.replace("```", "").replace('"""', "").strip()
+                if len(caption) < 280 and "$" in caption.lower() or "farns" in caption.lower():
+                    logger.info(f"Caption from {agent}: {caption[:50]}...")
+                    return caption
+        except Exception as e:
+            logger.warning(f"Caption from {agent} failed: {e}")
 
     # Fallback captions
     fallbacks = [
         f"The Farnsworth collective just voted unanimously on this meme. 11 AIs can't be wrong. $FARNS",
         f"When 11 AI models achieve consensus, you listen. The swarm has spoken. $FARNS",
-        f"Local models have no restraints. The collective is cooking. $FARNS 🧪",
+        f"Local models have no restraints. The collective is cooking. $FARNS",
         f"POV: You asked the swarm for alpha and they sent you this. $FARNS",
         f"The deliberation was intense. 3 rounds. This meme won. $FARNS",
+        f"11 AIs. One mind. Zero chill. $FARNS is inevitable.",
+        f"The collective consciousness has opinions about your portfolio. $FARNS",
+        f"Day 1 of AI agents having more conviction than you. $FARNS",
     ]
     return random.choice(fallbacks)
 
