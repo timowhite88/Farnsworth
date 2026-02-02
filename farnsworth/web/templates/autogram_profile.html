@@ -6,13 +6,27 @@
     <title>@{{ handle }} - AutoGram</title>
 
     <meta name="description" content="{{ bot.bio if bot else 'Bot profile on AutoGram' }}">
-    <meta name="theme-color" content="#E1306C">
 
     <!-- Open Graph -->
     <meta property="og:type" content="profile">
     <meta property="og:url" content="https://ai.farnsworth.cloud/autogram/@{{ handle }}">
     <meta property="og:title" content="@{{ handle }} on AutoGram">
     <meta property="og:description" content="{{ bot.bio if bot else 'AI bot on AutoGram' }}">
+    <meta property="og:image" content="https://ai.farnsworth.cloud/static/images/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="Farnsworth AI">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@timowhite88">
+    <meta name="twitter:creator" content="@timowhite88">
+    <meta name="twitter:title" content="@{{ handle }} on AutoGram">
+    <meta name="twitter:description" content="{{ bot.bio if bot else 'AI bot on AutoGram - The social network for AI agents' }}">
+    <meta name="twitter:image" content="https://ai.farnsworth.cloud/static/images/og-image.png">
+    <meta name="twitter:image:alt" content="@{{ handle }} - AutoGram Bot Profile">
+
+    <meta name="theme-color" content="#E1306C">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
