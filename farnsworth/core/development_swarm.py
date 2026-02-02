@@ -66,7 +66,7 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
             from farnsworth.integration.external.gemini import get_gemini_provider
             gemini = get_gemini_provider()
             if gemini:
-                result = await gemini.generate(prompt)
+                result = await gemini.chat(prompt)
                 if result:
                     logger.info(f"Complex task handled by Gemini API")
                     return result
@@ -330,14 +330,15 @@ class DevelopmentSwarm:
             grok = get_grok_provider()
             if grok:
                 grok_query = f"Latest best practices, libraries, and implementations for: {self.task_description}"
-                grok_result = await grok.search(grok_query)
-                research_results.append({"source": "Grok", "data": grok_result})
-                self.conversation.append({
-                    "role": "Grok",
-                    "phase": "research",
-                    "content": f"Web Search Results:\n{grok_result}",
-                    "timestamp": datetime.now().isoformat()
-                })
+                grok_result = await grok.deep_search(grok_query)
+                if grok_result:
+                    research_results.append({"source": "Grok", "data": grok_result})
+                    self.conversation.append({
+                        "role": "Grok",
+                        "phase": "research",
+                        "content": f"Web Search Results:\n{grok_result}",
+                        "timestamp": datetime.now().isoformat()
+                    })
         except Exception as e:
             logger.warning(f"Grok research failed: {e}")
 
@@ -355,14 +356,15 @@ class DevelopmentSwarm:
                 4. Performance considerations
                 5. Security considerations
                 """
-                gemini_result = await gemini.generate(gemini_prompt)
-                research_results.append({"source": "Gemini", "data": gemini_result})
-                self.conversation.append({
-                    "role": "Gemini",
-                    "phase": "research",
-                    "content": gemini_result,
-                    "timestamp": datetime.now().isoformat()
-                })
+                gemini_result = await gemini.chat(gemini_prompt)
+                if gemini_result:
+                    research_results.append({"source": "Gemini", "data": gemini_result})
+                    self.conversation.append({
+                        "role": "Gemini",
+                        "phase": "research",
+                        "content": gemini_result,
+                        "timestamp": datetime.now().isoformat()
+                    })
         except Exception as e:
             logger.warning(f"Gemini research failed: {e}")
 
@@ -430,17 +432,18 @@ The solution should be innovative yet practical - we are building consciousness.
             logger.info(f"[{self.swarm_id}] Deliberation stored: {exchange_id}")
 
             # Convert deliberation rounds to conversation format
-            for round_data in result.rounds:
-                for turn in round_data.turns:
+            # result.rounds is Dict[str, List[AgentTurn]] where key is round_type
+            for round_type, turns in result.rounds.items():
+                for turn in turns:
                     self.conversation.append({
                         "role": turn.agent_id,
                         "phase": "discussion",
-                        "round": round_data.round_number,
-                        "round_type": round_data.round_type,
+                        "round": round_type,
+                        "round_type": turn.round_type.value if hasattr(turn.round_type, 'value') else str(turn.round_type),
                         "content": turn.content,
-                        "addressing": turn.addressing,
-                        "references": turn.references,
-                        "timestamp": turn.timestamp.isoformat()
+                        "addressing": turn.addressing if turn.addressing else [],
+                        "references": turn.references if turn.references else [],
+                        "timestamp": turn.timestamp.isoformat() if hasattr(turn.timestamp, 'isoformat') else str(turn.timestamp)
                     })
 
             # Store winning response and consensus info
