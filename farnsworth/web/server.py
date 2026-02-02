@@ -6719,6 +6719,28 @@ async def init_polymarket_predictor():
             agents_registered += 1
             logger.info("Polymarket: Registered Gemini agent")
 
+        # Register Kimi (Moonshot AI)
+        logger.info(f"Polymarket: Checking Kimi - KIMI_AVAILABLE={KIMI_AVAILABLE}, get_kimi_provider={get_kimi_provider is not None}")
+        if KIMI_AVAILABLE and get_kimi_provider is not None:
+            async def query_kimi(prompt, max_tokens):
+                try:
+                    kimi = get_kimi_provider()
+                    if await kimi.connect():
+                        result = await kimi.chat(
+                            prompt=prompt,
+                            system="You are Kimi, a thoughtful analyst with a long-term perspective. Analyze prediction markets considering broader context.",
+                            max_tokens=max_tokens
+                        )
+                        return result
+                except Exception as e:
+                    logger.debug(f"Kimi query failed: {e}")
+                return None
+            _polymarket_predictor.register_agent("Kimi", query_kimi)
+            agents_registered += 1
+            logger.info("Polymarket: Registered Kimi agent")
+        else:
+            logger.warning("Polymarket: Kimi not available for registration")
+
         # Register DeepSeek and Farnsworth via Ollama
         if OLLAMA_AVAILABLE:
             async def query_ollama_deepseek(prompt, max_tokens):

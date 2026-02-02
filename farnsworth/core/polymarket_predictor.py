@@ -616,6 +616,22 @@ Reasoning analysis (200-300 words) then end with:
 MY PREDICTION: YES or NO
 CONFIDENCE: (1-10)""",
 
+            "Kimi": f"""As a thoughtful analyst with long-term perspective:
+Analyze this prediction market: "{market.question}"
+
+Current state:
+- Odds: {json.dumps(market.current_odds)}
+- Volume: ${market.volume_24h:,.0f} (24h) / ${market.total_volume:,.0f} total
+
+Consider:
+1. Long-term trends and historical context
+2. Geopolitical or systemic factors that could affect this
+3. What are the second-order effects people might be missing?
+
+Thoughtful analysis (200-300 words) then end with:
+MY PREDICTION: YES or NO
+CONFIDENCE: (1-10)""",
+
             "Farnsworth": f"""As the Swarm Mind orchestrator:
 Final synthesis on: "{market.question}"
 
