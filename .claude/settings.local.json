@@ -127,7 +127,9 @@
       "WebFetch(domain:x.ai)",
       "Bash(ping:*)",
       "Bash(gh api:*)",
-      "WebFetch(domain:bags.fm)"
+      "WebFetch(domain:bags.fm)",
+      "WebFetch(domain:www.moltbook.com)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }

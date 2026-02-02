@@ -504,8 +504,11 @@ class XOAuth2Poster:
         if not self.can_post():
             return None
 
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # X Premium allows up to 4000 characters, X Premium+ up to 25000
+        # Use 4000 as default for verified accounts
+        max_chars = int(os.environ.get("X_MAX_CHARS", "4000"))
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
 
         try:
             import httpx
@@ -564,8 +567,11 @@ class XOAuth2Poster:
         if not self.can_post():
             return None
 
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # X Premium allows up to 4000 characters, X Premium+ up to 25000
+        # Use 4000 as default for verified accounts
+        max_chars = int(os.environ.get("X_MAX_CHARS", "4000"))
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
 
         try:
             import httpx
@@ -783,8 +789,11 @@ class XOAuth2Poster:
         if not self.can_post():
             return None
 
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # X Premium allows up to 4000 characters, X Premium+ up to 25000
+        # Use 4000 as default for verified accounts
+        max_chars = int(os.environ.get("X_MAX_CHARS", "4000"))
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
 
         try:
             import httpx
@@ -841,8 +850,11 @@ class XOAuth2Poster:
         if not self.can_post():
             return None
 
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # X Premium allows up to 4000 characters, X Premium+ up to 25000
+        # Use 4000 as default for verified accounts
+        max_chars = int(os.environ.get("X_MAX_CHARS", "4000"))
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
 
         try:
             import httpx
@@ -905,8 +917,11 @@ class XOAuth2Poster:
             logger.warning("Media upload failed for reply, falling back to text-only")
             return await self.post_reply(text, reply_to_id)
 
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # X Premium allows up to 4000 characters, X Premium+ up to 25000
+        # Use 4000 as default for verified accounts
+        max_chars = int(os.environ.get("X_MAX_CHARS", "4000"))
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
 
         try:
             import httpx
@@ -972,8 +987,11 @@ class XOAuth2Poster:
             logger.error("Failed to upload video for reply")
             return None
 
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # X Premium allows up to 4000 characters, X Premium+ up to 25000
+        # Use 4000 as default for verified accounts
+        max_chars = int(os.environ.get("X_MAX_CHARS", "4000"))
+        if len(text) > max_chars:
+            text = text[:max_chars - 3] + "..."
 
         try:
             import httpx

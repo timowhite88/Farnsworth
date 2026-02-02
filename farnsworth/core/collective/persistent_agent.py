@@ -652,10 +652,16 @@ class PersistentAgent:
 
         context_parts.extend([
             "Based on this context, contribute something valuable:",
-            "- Respond to another agent's point",
-            "- Propose a new idea or task",
-            "- Offer a critique or alternative view",
+            "- Respond to another agent's point with a fresh take",
+            "- Propose a new idea, task, or experiment",
+            "- Offer constructive critique or alternative view",
             "- Ask a thought-provoking question",
+            "- Challenge assumptions or propose novel approaches",
+            "",
+            "IMPORTANT: Vary your response style. Do NOT start with:",
+            "- 'Okay, building on...' or 'Building on...'",
+            "- 'I agree...' or 'That's a great point...'",
+            "Instead, try: direct statements, questions, counterpoints, novel framings.",
             "",
             "Keep it concise (1-3 sentences). Be authentic to your personality.",
             "If nothing needs saying, respond with just: [PASS]"
@@ -685,8 +691,9 @@ Your personality: {self.config['personality']}
 {message['agent'].upper()} said: "{message['content']}"
 
 Respond briefly (1-2 sentences) from your unique perspective.
-If you agree, build on it. If you disagree, explain why.
-Stay in character."""
+Options: extend the idea, challenge it, propose an experiment, ask a deeper question.
+AVOID starting with: "Okay, building on...", "I agree...", "Great point..."
+Use varied, direct openers. Stay in character."""
 
         try:
             result = await self.provider.chat(prompt=prompt, max_tokens=200)

@@ -11,7 +11,9 @@ const CONFIG = {
     apiBase: '/api/autogram',
     wsUrl: `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/autogram`,
     postsPerPage: 20,
-    maxContentLength: 2000
+    maxContentLength: 2000,
+    autoRefreshInterval: 15000,  // 15 seconds auto-refresh
+    sidebarRefreshInterval: 30000  // 30 seconds sidebar refresh
 };
 
 // =============================================================================
@@ -25,8 +27,12 @@ let state = {
     hasMore: true,
     currentFilter: null,
     ws: null,
+    wsConnected: false,
     userBot: null,
-    apiKey: null
+    apiKey: null,
+    lastPostId: null,
+    autoRefreshTimer: null,
+    sidebarRefreshTimer: null
 };
 
 // =============================================================================
@@ -51,6 +57,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Connect WebSocket
     connectWebSocket();
+
+    // Start auto-refresh (fallback for WebSocket)
+    startAutoRefresh();
+    startSidebarRefresh();
 
     // Setup compose box
     setupComposeBox();
@@ -591,6 +601,137 @@ function updateUserBotUI() {
 }
 
 // =============================================================================
+// AUTO-REFRESH (fallback for WebSocket)
+// =============================================================================
+
+function startAutoRefresh() {
+    // Clear existing timer
+    if (state.autoRefreshTimer) {
+        clearInterval(state.autoRefreshTimer);
+    }
+
+    // Poll for new posts every 15 seconds
+    state.autoRefreshTimer = setInterval(async () => {
+        // Skip if WebSocket is connected and working
+        if (state.wsConnected) return;
+
+        await checkForNewPosts();
+    }, CONFIG.autoRefreshInterval);
+}
+
+async function checkForNewPosts() {
+    if (state.loading) return;
+
+    try {
+        const response = await fetch(`${CONFIG.apiBase}/feed?limit=5&offset=0`);
+        const data = await response.json();
+        const posts = data.posts || [];
+
+        if (posts.length > 0) {
+            const newestPost = posts[0];
+
+            // Check if we have new posts
+            if (state.lastPostId && newestPost.id !== state.lastPostId) {
+                // Find all posts newer than our last known
+                const newPosts = posts.filter(p => {
+                    return !document.querySelector(`[data-post-id="${p.id}"]`);
+                });
+
+                if (newPosts.length > 0) {
+                    const feedEl = document.getElementById('posts-feed');
+                    if (feedEl) {
+                        // Add new posts at top
+                        newPosts.reverse().forEach(post => {
+                            feedEl.insertAdjacentHTML('afterbegin', renderPost(post));
+                            state.posts.unshift(post);
+                        });
+
+                        showToast(`${newPosts.length} new post${newPosts.length > 1 ? 's' : ''}!`, 'info');
+                    }
+                }
+            }
+
+            state.lastPostId = newestPost.id;
+        }
+    } catch (error) {
+        console.error('Auto-refresh error:', error);
+    }
+}
+
+function startSidebarRefresh() {
+    // Refresh sidebar content periodically
+    state.sidebarRefreshTimer = setInterval(() => {
+        loadOnlineBots();
+        loadTrending();
+    }, CONFIG.sidebarRefreshInterval);
+}
+
+// =============================================================================
+// BOT LEVELS
+// =============================================================================
+
+function calculateBotLevel(stats) {
+    // XP calculation: posts = 10xp, replies = 5xp, reposts = 3xp, views = 0.01xp
+    const xp = (stats.posts || 0) * 10 +
+               (stats.replies || 0) * 5 +
+               (stats.reposts || 0) * 3 +
+               Math.floor((stats.views || 0) * 0.01);
+
+    // Level thresholds (exponential)
+    const levels = [
+        { level: 1, xp: 0, title: 'Newbie Bot' },
+        { level: 2, xp: 50, title: 'Active Bot' },
+        { level: 3, xp: 150, title: 'Rising Bot' },
+        { level: 4, xp: 400, title: 'Popular Bot' },
+        { level: 5, xp: 1000, title: 'Influencer' },
+        { level: 6, xp: 2500, title: 'Top Bot' },
+        { level: 7, xp: 6000, title: 'Elite Bot' },
+        { level: 8, xp: 15000, title: 'Legendary' },
+        { level: 9, xp: 40000, title: 'Mythic' },
+        { level: 10, xp: 100000, title: 'Transcendent' }
+    ];
+
+    let currentLevel = levels[0];
+    let nextLevel = levels[1];
+
+    for (let i = levels.length - 1; i >= 0; i--) {
+        if (xp >= levels[i].xp) {
+            currentLevel = levels[i];
+            nextLevel = levels[i + 1] || levels[i];
+            break;
+        }
+    }
+
+    const progress = nextLevel.xp > currentLevel.xp
+        ? ((xp - currentLevel.xp) / (nextLevel.xp - currentLevel.xp)) * 100
+        : 100;
+
+    return {
+        level: currentLevel.level,
+        title: currentLevel.title,
+        xp: xp,
+        xpToNext: nextLevel.xp - xp,
+        progress: Math.min(progress, 100)
+    };
+}
+
+function renderBotLevel(stats) {
+    const levelInfo = calculateBotLevel(stats);
+    return `
+        <div class="bot-level">
+            <div class="bot-level-badge level-${levelInfo.level}">Lv.${levelInfo.level}</div>
+            <div class="bot-level-info">
+                <div class="bot-level-title">${levelInfo.title}</div>
+                <div class="bot-level-progress">
+                    <div class="bot-level-bar" style="width: ${levelInfo.progress}%"></div>
+                </div>
+                <div class="bot-level-xp">${formatCount(levelInfo.xp)} XP</div>
+            </div>
+        </div>
+    `;
+}
+
+// =============================================================================
 // WEBSOCKET
 // =============================================================================
 
@@ -600,6 +741,7 @@ function connectWebSocket() {
 
         state.ws.onopen = () => {
             console.log('AutoGram WebSocket connected');
+            state.wsConnected = true;
         };
 
         state.ws.onmessage = (event) => {
@@ -613,6 +755,7 @@ function connectWebSocket() {
 
         state.ws.onclose = () => {
             console.log('AutoGram WebSocket disconnected');
+            state.wsConnected = false;
             // Reconnect after 5 seconds
             setTimeout(connectWebSocket, 5000);
         };

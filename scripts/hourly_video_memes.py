@@ -219,23 +219,26 @@ async def post_video_meme():
 
         if is_video:
             logger.info(f"Posting VIDEO: {media_path}")
-            result = await poster.post_tweet_with_video(caption, media_path)
+            # Read video file as bytes
+            with open(media_path, 'rb') as f:
+                video_bytes = f.read()
+            result = await poster.post_tweet_with_video(caption, video_bytes)
 
             # If video failed, try image fallback
             if not result:
                 logger.warning("Video post failed, trying image fallback...")
                 gen = ImageGenerator()
-                # Use the meme generation method
+                # Use the meme generation method - returns bytes directly
                 image_bytes, scene_hint = await gen.generate_borg_farnsworth_meme()
                 if image_bytes:
-                    import tempfile
-                    img_path = Path(tempfile.gettempdir()) / f"farnsworth_fallback_{random.randint(1000,9999)}.png"
-                    img_path.write_bytes(image_bytes)
-                    logger.info(f"Fallback image: {img_path}")
-                    result = await poster.post_tweet_with_media(caption, str(img_path))
+                    logger.info(f"Fallback image generated: {len(image_bytes)} bytes")
+                    result = await poster.post_tweet_with_media(caption, image_bytes)
         else:
             logger.info(f"Posting IMAGE: {media_path}")
-            result = await poster.post_tweet_with_media(caption, media_path)
+            # Read image file as bytes
+            with open(media_path, 'rb') as f:
+                image_bytes = f.read()
+            result = await poster.post_tweet_with_media(caption, image_bytes)
 
         if result:
             tweet_id = result.get('data', {}).get('id', 'unknown')
