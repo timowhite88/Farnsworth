@@ -114,6 +114,13 @@
                     <span class="voice-off">🔇</span>
                 </button>
 
+                <!-- Volume Slider -->
+                <div class="volume-control" id="volume-control" title="Adjust voice volume">
+                    <span class="volume-icon">🔉</span>
+                    <input type="range" id="volume-slider" min="0" max="100" value="80" class="volume-slider">
+                    <span class="volume-value" id="volume-value">80%</span>
+                </div>
+
                 <button id="live-dashboard-btn" class="control-btn" onclick="window.open('/live', '_blank')" title="Open real-time dashboard with live metrics and visualizations">📊</button>
             </div>
         </header>

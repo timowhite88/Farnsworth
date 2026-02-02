@@ -9,6 +9,7 @@
 
 const state = {
     voiceEnabled: true,
+    voiceVolume: parseFloat(localStorage.getItem('voiceVolume') || '0.8'),  // 0-1 range
     sidebarOpen: {
         left: window.innerWidth > 992,
         right: window.innerWidth > 992
@@ -237,6 +238,27 @@ function setupEventListeners() {
         voiceToggle.addEventListener('click', () => {
             state.voiceEnabled = !state.voiceEnabled;
             voiceToggle.classList.toggle('active', state.voiceEnabled);
+        });
+    }
+
+    // Volume slider
+    const volumeSlider = document.getElementById('volume-slider');
+    const volumeValue = document.getElementById('volume-value');
+    if (volumeSlider) {
+        // Set initial value from state
+        volumeSlider.value = Math.round(state.voiceVolume * 100);
+        if (volumeValue) volumeValue.textContent = `${volumeSlider.value}%`;
+
+        volumeSlider.addEventListener('input', (e) => {
+            const volume = parseInt(e.target.value) / 100;
+            state.voiceVolume = volume;
+            localStorage.setItem('voiceVolume', volume.toString());
+            if (volumeValue) volumeValue.textContent = `${e.target.value}%`;
+
+            // Apply to current audio if playing
+            if (currentAudio) {
+                currentAudio.volume = volume;
+            }
         });
     }
 
@@ -575,6 +597,7 @@ async function processServerAudioQueue() {
             const audioBlob = await response.blob();
             const blobUrl = URL.createObjectURL(audioBlob);
             currentAudio = new Audio(blobUrl);
+            currentAudio.volume = state.voiceVolume;
 
             currentAudio.onended = () => {
                 URL.revokeObjectURL(blobUrl);
@@ -686,6 +709,7 @@ async function processAudioQueue() {
             const audioBlob = await response.blob();
             const audioUrl = URL.createObjectURL(audioBlob);
             currentAudio = new Audio(audioUrl);
+            currentAudio.volume = state.voiceVolume;
 
             currentAudio.onended = () => {
                 URL.revokeObjectURL(audioUrl);
@@ -745,6 +769,7 @@ async function processAudioQueue() {
             const audioBlob = await response.blob();
             const audioUrl = URL.createObjectURL(audioBlob);
             currentAudio = new Audio(audioUrl);
+            currentAudio.volume = state.voiceVolume;
 
             currentAudio.onended = () => {
                 URL.revokeObjectURL(audioUrl);
@@ -776,6 +801,7 @@ async function processAudioQueue() {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 0.9;
         utterance.pitch = 0.8;
+        utterance.volume = state.voiceVolume;
         utterance.onend = () => {
             isPlayingAudio = false;
             currentSpeakingBot = null;
