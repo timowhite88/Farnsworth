@@ -218,7 +218,7 @@ fi
 # 6. EVOLUTION LOOP (Optional)
 # =============================================================================
 if [ "$START_ALL" = true ]; then
-    echo -e "${YELLOW}[6/6] Evolution Loop...${NC}"
+    echo -e "${YELLOW}[6/7] Evolution Loop...${NC}"
 
     if is_running "evolution_loop"; then
         echo -e "  ${GREEN}✓ Evolution loop already running${NC}"
@@ -232,7 +232,52 @@ if [ "$START_ALL" = true ]; then
         fi
     fi
 else
-    echo -e "${YELLOW}[6/6] Evolution Loop (use --all to enable)${NC}"
+    echo -e "${YELLOW}[6/7] Evolution Loop (use --all to enable)${NC}"
+fi
+
+# =============================================================================
+# 7. PERSISTENT SHADOW AGENTS (Optional)
+# =============================================================================
+if [ "$START_ALL" = true ]; then
+    echo -e "${YELLOW}[7/7] Persistent Shadow Agents...${NC}"
+
+    # Spawn API agents in tmux
+    for agent in grok gemini kimi claude; do
+        session_name="agent_${agent}"
+        if tmux has-session -t "$session_name" 2>/dev/null; then
+            echo -e "  ${GREEN}✓ $agent already running${NC}"
+        else
+            echo -e "  ${YELLOW}Starting $agent...${NC}"
+            tmux new-session -d -s "$session_name" -c "$WORKSPACE" \
+                "PYTHONPATH=$WORKSPACE python3 -m farnsworth.core.collective.persistent_agent --agent $agent 2>&1 | tee $LOG_DIR/agent_${agent}.log"
+            sleep 1
+            if tmux has-session -t "$session_name" 2>/dev/null; then
+                echo -e "  ${GREEN}✓ $agent spawned in tmux:$session_name${NC}"
+            else
+                echo -e "  ${RED}✗ Failed to spawn $agent${NC}"
+            fi
+        fi
+    done
+
+    # Spawn local agents (deepseek, phi)
+    for agent in deepseek phi; do
+        session_name="agent_${agent}"
+        if tmux has-session -t "$session_name" 2>/dev/null; then
+            echo -e "  ${GREEN}✓ $agent already running${NC}"
+        else
+            echo -e "  ${YELLOW}Starting $agent...${NC}"
+            tmux new-session -d -s "$session_name" -c "$WORKSPACE" \
+                "PYTHONPATH=$WORKSPACE python3 -m farnsworth.core.collective.persistent_agent --agent $agent 2>&1 | tee $LOG_DIR/agent_${agent}.log"
+            sleep 1
+            if tmux has-session -t "$session_name" 2>/dev/null; then
+                echo -e "  ${GREEN}✓ $agent spawned in tmux:$session_name${NC}"
+            else
+                echo -e "  ${RED}✗ Failed to spawn $agent${NC}"
+            fi
+        fi
+    done
+else
+    echo -e "${YELLOW}[7/7] Shadow Agents (use --all to enable)${NC}"
 fi
 
 # =============================================================================
@@ -249,6 +294,12 @@ is_running "ollama serve" && echo "  ✓ Ollama" || echo "  ✗ Ollama"
 is_running "farnsworth.web.server" && echo "  ✓ Main Server" || echo "  ✗ Main Server"
 is_running "grok_fresh_thread" && echo "  ✓ Grok Thread" || echo "  ○ Grok Thread"
 is_running "meme_scheduler" && echo "  ✓ Meme Scheduler" || echo "  ○ Meme Scheduler"
+
+echo ""
+echo -e "${GREEN}Shadow Agents:${NC}"
+for agent in grok gemini kimi claude deepseek phi; do
+    tmux has-session -t "agent_$agent" 2>/dev/null && echo "  ✓ $agent" || echo "  ○ $agent"
+done
 
 echo ""
 echo -e "${GREEN}Tmux Sessions:${NC}"

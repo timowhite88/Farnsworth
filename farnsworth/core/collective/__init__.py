@@ -80,6 +80,21 @@ from .agent_registry import (
     ensure_agents_registered,
 )
 
+from .persistent_agent import (
+    PersistentAgent,
+    DialogueBus,
+    TaskQueue,
+    call_shadow_agent,
+    get_shadow_agents,
+    is_shadow_agent_active,
+    ask_agent,
+    ask_collective,
+    get_agent_status,
+    spawn_agent_in_background,
+    register_shadow_agents_with_deliberation,
+    AGENT_CONFIGS,
+)
+
 __all__ = [
     # Organism
     "CollectiveOrganism",
@@ -133,4 +148,17 @@ __all__ = [
     "AgentRegistry",
     "get_agent_registry",
     "ensure_agents_registered",
+    # Persistent Shadow Agents (NEW)
+    "PersistentAgent",
+    "DialogueBus",
+    "TaskQueue",
+    "call_shadow_agent",
+    "get_shadow_agents",
+    "is_shadow_agent_active",
+    "ask_agent",
+    "ask_collective",
+    "get_agent_status",
+    "spawn_agent_in_background",
+    "register_shadow_agents_with_deliberation",
+    "AGENT_CONFIGS",
 ]
