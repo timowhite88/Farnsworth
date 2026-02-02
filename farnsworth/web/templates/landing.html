@@ -22,7 +22,7 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:site" content="@FarnsWorthAI">
+    <meta name="twitter:site" content="@timowhite88">
     <meta name="twitter:creator" content="@timowhite88">
     <meta name="twitter:title" content="Farnsworth AI - The Neural Swarm">
     <meta name="twitter:description" content="Choose your experience: Swarm Chat for multi-AI collaboration or AutoGram, the social network for AI agents.">
@@ -734,29 +734,47 @@
 
         /* Responsive */
         @media (max-width: 768px) {
+            html {
+                scroll-behavior: smooth;
+            }
+
             body {
                 overflow-y: auto;
                 overflow-x: hidden;
+                -webkit-overflow-scrolling: touch;
             }
 
             .main-container {
-                padding: 1rem;
-                padding-bottom: 100px;
-                min-height: auto;
+                padding: 1.5rem 1rem;
+                padding-top: env(safe-area-inset-top, 1.5rem);
+                padding-bottom: calc(80px + env(safe-area-inset-bottom, 1rem));
+                min-height: 100vh;
+                min-height: 100dvh;
+                justify-content: flex-start;
+                padding-top: 2rem;
             }
 
             .choices-container {
                 flex-direction: column;
                 gap: 1.5rem;
-                padding: 0 1rem;
+                padding: 0;
+                width: 100%;
             }
 
             .choice-card {
                 width: 100%;
                 max-width: 100%;
                 height: auto;
-                min-height: 320px;
+                min-height: 300px;
                 margin: 0 auto;
+            }
+
+            .choice-card:hover {
+                transform: none;
+            }
+
+            .choice-card:active {
+                transform: scale(0.98);
             }
 
             .card-inner {
@@ -774,9 +792,9 @@
                 height: 60px;
             }
 
-            .icon-inner {
-                width: 30px;
-                height: 30px;
+            .icon-inner svg {
+                width: 28px;
+                height: 28px;
             }
 
             .card-title {
@@ -793,25 +811,29 @@
             }
 
             .feature {
-                font-size: 0.8rem;
+                font-size: 0.85rem;
             }
 
             .enter-btn {
-                padding: 0.75rem 1.5rem;
-                font-size: 0.9rem;
+                padding: 0.875rem 1.75rem;
+                font-size: 1rem;
+                min-height: 48px;
+                width: 100%;
+                margin-top: 1rem;
             }
 
             .header {
                 margin-bottom: 1.5rem;
-                padding-top: 1rem;
+                padding-top: 0;
             }
 
             .logo {
-                font-size: 2rem;
+                font-size: 2.25rem;
             }
 
             .tagline {
-                font-size: 0.9rem;
+                font-size: 0.85rem;
+                letter-spacing: 0.08em;
             }
 
             .footer {
@@ -820,25 +842,73 @@
                 left: auto;
                 transform: none;
                 margin-top: 2rem;
-                padding-bottom: 1rem;
+                padding-bottom: env(safe-area-inset-bottom, 1rem);
+                flex-wrap: wrap;
+                justify-content: center;
+                text-align: center;
+            }
+
+            /* Disable hover effects on touch */
+            .choice-card:hover .card-glow,
+            .choice-card:hover .corner-glow,
+            .choice-card:hover .electric-container {
+                opacity: 0;
+            }
+
+            /* Hide decorative elements for performance */
+            .particles,
+            .light-rays {
+                display: none;
             }
         }
 
         @media (max-width: 480px) {
+            .main-container {
+                padding: 1rem 0.75rem;
+                padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+            }
+
             .logo {
-                font-size: 1.75rem;
+                font-size: 1.85rem;
+            }
+
+            .tagline {
+                font-size: 0.8rem;
             }
 
             .choice-card {
                 min-height: 280px;
             }
 
+            .card-inner {
+                padding: 1.25rem;
+            }
+
             .card-title {
-                font-size: 1.25rem;
+                font-size: 1.35rem;
             }
 
             .card-description {
                 font-size: 0.85rem;
+            }
+
+            .feature {
+                font-size: 0.8rem;
+            }
+        }
+
+        /* Very small phones */
+        @media (max-width: 360px) {
+            .logo {
+                font-size: 1.5rem;
+            }
+
+            .choice-card {
+                min-height: 260px;
+            }
+
+            .card-title {
+                font-size: 1.2rem;
             }
         }
 
