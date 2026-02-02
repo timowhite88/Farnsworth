@@ -6666,7 +6666,7 @@ _polymarket_task = None
 
 
 async def init_polymarket_predictor():
-    """Initialize and start the Polymarket predictor."""
+    """Initialize and start the Polymarket predictor with full agent collective."""
     global _polymarket_predictor, _polymarket_task
 
     if _polymarket_predictor is not None:
@@ -6677,30 +6677,96 @@ async def init_polymarket_predictor():
 
         _polymarket_predictor = get_predictor()
 
-        # Register agent query functions
-        try:
-            # Try to get the swarm's agent functions
-            from farnsworth.core.model_swarm import get_swarm
-            swarm = get_swarm()
+        # Register agent query functions using actual providers
+        agents_registered = 0
 
-            for agent_name in ['Grok', 'Gemini', 'Claude', 'DeepSeek', 'Farnsworth']:
-                if hasattr(swarm, 'query_agent'):
-                    async def make_query(prompt, max_tokens, agent=agent_name):
-                        try:
-                            result = await swarm.query_agent(agent, prompt, max_tokens)
-                            return (result, agent) if result else None
-                        except:
-                            return None
-                    _polymarket_predictor.register_agent(agent_name, make_query)
-        except Exception as e:
-            logger.debug(f"Could not register swarm agents: {e}")
+        # Register Grok (xAI)
+        if GROK_AVAILABLE:
+            async def query_grok(prompt, max_tokens):
+                try:
+                    grok = GrokProvider()
+                    if await grok.connect():
+                        result = await grok.chat(
+                            prompt=prompt,
+                            system="You are Grok, an AI analyst. Analyze prediction markets with your real-time knowledge.",
+                            model="grok-3-fast",
+                            max_tokens=max_tokens
+                        )
+                        return result
+                except Exception as e:
+                    logger.debug(f"Grok query failed: {e}")
+                return None
+            _polymarket_predictor.register_agent("Grok", query_grok)
+            agents_registered += 1
+            logger.info("Polymarket: Registered Grok agent")
+
+        # Register Gemini (Google)
+        if GEMINI_AVAILABLE:
+            async def query_gemini(prompt, max_tokens):
+                try:
+                    gemini = get_gemini_provider()
+                    if await gemini.connect():
+                        result = await gemini.chat(
+                            prompt=prompt,
+                            system="You are Gemini, a knowledgeable research analyst. Analyze prediction markets thoroughly.",
+                            max_tokens=max_tokens
+                        )
+                        return result
+                except Exception as e:
+                    logger.debug(f"Gemini query failed: {e}")
+                return None
+            _polymarket_predictor.register_agent("Gemini", query_gemini)
+            agents_registered += 1
+            logger.info("Polymarket: Registered Gemini agent")
+
+        # Register DeepSeek and Farnsworth via Ollama
+        if OLLAMA_AVAILABLE:
+            async def query_ollama_deepseek(prompt, max_tokens):
+                try:
+                    import ollama
+                    response = ollama.chat(
+                        model="deepseek-r1:14b",
+                        messages=[
+                            {"role": "system", "content": "You are DeepSeek, a logical reasoning specialist. Analyze prediction markets with careful reasoning."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        options={"num_predict": max_tokens}
+                    )
+                    return response['message']['content']
+                except Exception as e:
+                    logger.debug(f"DeepSeek query failed: {e}")
+                return None
+            _polymarket_predictor.register_agent("DeepSeek", query_ollama_deepseek)
+            agents_registered += 1
+            logger.info("Polymarket: Registered DeepSeek agent")
+
+            async def query_ollama_farnsworth(prompt, max_tokens):
+                try:
+                    import ollama
+                    response = ollama.chat(
+                        model="phi4:latest",
+                        messages=[
+                            {"role": "system", "content": "You are Farnsworth, the Swarm Mind coordinator. Synthesize information and make final judgments on prediction markets."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        options={"num_predict": max_tokens}
+                    )
+                    return response['message']['content']
+                except Exception as e:
+                    logger.debug(f"Farnsworth query failed: {e}")
+                return None
+            _polymarket_predictor.register_agent("Farnsworth", query_ollama_farnsworth)
+            agents_registered += 1
+            logger.info("Polymarket: Registered Farnsworth agent")
+
+        logger.info(f"Polymarket Predictor initialized with {agents_registered} agents")
 
         # Start the predictor in background
         _polymarket_task = asyncio.create_task(_polymarket_predictor.start(interval_minutes=5))
         logger.info("Polymarket Predictor started - generating predictions every 5 minutes")
 
     except Exception as e:
-        logger.error(f"Failed to start Polymarket predictor: {e}")
+        logger.error(f"Failed to start Polymarket predictor: {e}", exc_info=True)
 
 
 @app.get("/api/polymarket/predictions")

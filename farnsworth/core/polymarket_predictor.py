@@ -128,13 +128,33 @@ class Prediction:
         d = asdict(self)
         d['outcome'] = self.outcome.value
         d['signals'] = [asdict(s) for s in self.signals]
+        # Add direction for UI
+        d['direction'] = self.predicted_outcome
+        # Add current price for UI
+        d['current_price'] = self.current_odds
+        # Add top 3 signals for UI display
+        top_signals = sorted(self.signals, key=lambda s: s.confidence, reverse=True)[:3]
+        d['top_signals'] = [
+            {"name": s.name, "weight": s.confidence, "reasoning": s.reasoning}
+            for s in top_signals
+        ]
+        # Add timestamp
+        d['timestamp'] = self.created_at
         return d
 
     @classmethod
     def from_dict(cls, data: Dict) -> 'Prediction':
-        data['outcome'] = PredictionOutcome(data.get('outcome', 'pending'))
-        data['signals'] = [PredictiveSignal(**s) for s in data.get('signals', [])]
-        return cls(**data)
+        # Filter to only known fields
+        known_fields = {
+            'prediction_id', 'market_id', 'question', 'predicted_outcome',
+            'confidence', 'current_odds', 'signals', 'reasoning',
+            'agents_involved', 'created_at', 'expires_at', 'outcome',
+            'actual_result', 'resolved_at'
+        }
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        filtered['outcome'] = PredictionOutcome(filtered.get('outcome', 'pending'))
+        filtered['signals'] = [PredictiveSignal(**s) for s in filtered.get('signals', [])]
+        return cls(**filtered)
 
 
 @dataclass
@@ -528,83 +548,251 @@ class PolymarketPredictor:
         )
 
     async def _collective_deliberation(self, market: MarketSnapshot, signals: List[PredictiveSignal]) -> Tuple[PredictiveSignal, str]:
-        """Signal 8: Multi-agent deliberation and voting."""
+        """
+        Signal 8: AGI-level Multi-Agent Deliberation and Research
+
+        This is where the collective intelligence truly shines. Multiple agents:
+        1. Research the topic deeply from their unique perspectives
+        2. Share findings and challenge each other's reasoning
+        3. Vote with weighted confidence based on expertise
+        4. Synthesize into a final collective prediction
+
+        Takes 1-2 minutes for thorough analysis.
+        """
+        logger.info(f"🧠 Starting AGI-level collective deliberation on: {market.question[:50]}...")
+        logger.info(f"Available agents for deliberation: {list(self._agent_funcs.keys())}")
+
         agents_used = []
+        agent_analyses = {}
         votes = {"Yes": 0, "No": 0}
-        reasonings = []
+        vote_weights = {"Yes": 0.0, "No": 0.0}
+        full_reasoning = []
 
-        # Build context from other signals
-        signal_summary = "\n".join([
-            f"- {s.name}: {s.direction} ({s.confidence:.0%}) - {s.reasoning}"
-            for s in signals
-        ])
+        # Phase 1: Deep Research (parallel agent queries)
+        # Each agent researches from their specialized perspective
+        research_prompts = {
+            "Grok": f"""As a real-time information analyst with access to X/Twitter:
+Research this Polymarket question: "{market.question}"
 
-        prompt = f"""Polymarket Prediction Analysis:
+Current market odds: {json.dumps(market.current_odds)}
+24h Volume: ${market.volume_24h:,.0f}
 
-Question: {market.question}
-Current Odds: {json.dumps(market.current_odds)}
-Volume 24h: ${market.volume_24h:,.0f}
+Tasks:
+1. What is the current social media sentiment? Are people confident or uncertain?
+2. Any recent viral posts or influential voices commenting on this?
+3. What does crowd wisdom suggest?
 
-Signal Analysis:
-{signal_summary}
+Provide your analysis (200-300 words) then end with:
+MY PREDICTION: YES or NO
+CONFIDENCE: (1-10)""",
 
-Based on ALL available signals, what is your prediction?
-Answer with just: YES or NO, then a brief reason."""
+            "Gemini": f"""As a deep research analyst:
+Analyze this prediction market question: "{market.question}"
 
-        # Query available agents
-        for agent_id, query_func in list(self._agent_funcs.items())[:5]:  # Top 5 agents
-            try:
-                result = await asyncio.wait_for(
-                    query_func(prompt, 300),
-                    timeout=15.0
-                )
-                if result:
-                    response = result[0] if isinstance(result, tuple) else result
-                    if response:
-                        agents_used.append(agent_id)
-                        response_upper = response.upper()
+Current market odds: {json.dumps(market.current_odds)}
+24h Volume: ${market.volume_24h:,.0f}
 
-                        if 'YES' in response_upper[:20]:
-                            votes["Yes"] += 1
-                            reasonings.append(f"{agent_id}: YES")
-                        elif 'NO' in response_upper[:20]:
-                            votes["No"] += 1
-                            reasonings.append(f"{agent_id}: NO")
-            except Exception as e:
-                logger.debug(f"Agent {agent_id} deliberation failed: {e}")
+Tasks:
+1. What are the key facts and recent developments?
+2. What are the strongest arguments for each outcome?
+3. What information asymmetry might exist?
 
-        # Determine consensus
-        total_votes = votes["Yes"] + votes["No"]
-        if total_votes > 0:
-            yes_pct = votes["Yes"] / total_votes
+Provide detailed analysis (200-300 words) then end with:
+MY PREDICTION: YES or NO
+CONFIDENCE: (1-10)""",
 
-            if yes_pct > 0.6:
-                direction = "bullish"
-                confidence = 0.5 + (yes_pct - 0.5) * 0.6
-            elif yes_pct < 0.4:
-                direction = "bearish"
-                confidence = 0.5 + (0.5 - yes_pct) * 0.6
+            "DeepSeek": f"""As a logical reasoning specialist:
+Evaluate this prediction: "{market.question}"
+
+Current odds: {json.dumps(market.current_odds)}
+Market activity: ${market.volume_24h:,.0f} volume
+
+Analyze:
+1. Base rates - historically, how often do events like this resolve YES?
+2. Current odds reflect ${market.total_volume:,.0f} in total bets - are the crowds likely right?
+3. What would need to happen for the underdog outcome?
+
+Reasoning analysis (200-300 words) then end with:
+MY PREDICTION: YES or NO
+CONFIDENCE: (1-10)""",
+
+            "Farnsworth": f"""As the Swarm Mind orchestrator:
+Final synthesis on: "{market.question}"
+
+Market data:
+- Current odds: {json.dumps(market.current_odds)}
+- 24h Volume: ${market.volume_24h:,.0f}
+- Total Volume: ${market.total_volume:,.0f}
+- End Date: {market.end_date or 'Unknown'}
+
+Your signals:
+{chr(10).join([f"- {s.name}: {s.direction} ({s.confidence:.0%}) - {s.reasoning}" for s in signals])}
+
+As the swarm coordinator, weigh all evidence and provide:
+1. Key factors that will determine the outcome
+2. Where do you see edge vs market consensus?
+3. Risk factors that could invalidate the prediction
+
+Analysis (200-300 words) then end with:
+MY PREDICTION: YES or NO
+CONFIDENCE: (1-10)""",
+        }
+
+        # Execute research queries in parallel
+        logger.info("📚 Phase 1: Parallel deep research across agents...")
+        research_tasks = []
+
+        # Helper to avoid closure issue
+        def make_query_task(aid, p, query_func):
+            async def query_agent():
+                try:
+                    logger.debug(f"Querying agent {aid}...")
+                    result = await asyncio.wait_for(
+                        query_func(p, 800),  # More tokens for detailed analysis
+                        timeout=45.0  # Longer timeout for deep research
+                    )
+                    logger.debug(f"Agent {aid} returned result")
+                    return (aid, result[0] if isinstance(result, tuple) else result)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Agent {aid} timed out")
+                    return (aid, None)
+                except Exception as e:
+                    logger.debug(f"Research failed for {aid}: {e}")
+                    return (aid, None)
+            return query_agent()
+
+        for agent_id, prompt in research_prompts.items():
+            logger.debug(f"Checking agent {agent_id}: in funcs = {agent_id in self._agent_funcs}")
+            if agent_id in self._agent_funcs:
+                logger.info(f"Adding {agent_id} to research tasks")
+                research_tasks.append(make_query_task(agent_id, prompt, self._agent_funcs[agent_id]))
             else:
-                direction = "neutral"
-                confidence = 0.5
+                logger.warning(f"Agent {agent_id} not found in registered agents")
 
-            reasoning = f"Collective vote: {votes['Yes']} YES / {votes['No']} NO from {agents_used}"
+        # Gather all research results
+        results = await asyncio.gather(*research_tasks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, tuple) and result[1]:
+                agent_id, analysis = result
+                agent_analyses[agent_id] = analysis
+                agents_used.append(agent_id)
+                logger.info(f"✓ {agent_id} completed research")
+
+        # Phase 2: Parse votes and confidence from each analysis
+        logger.info("🗳️ Phase 2: Extracting votes and confidence...")
+
+        for agent_id, analysis in agent_analyses.items():
+            if not analysis:
+                continue
+
+            # Handle different response types
+            if isinstance(analysis, dict):
+                # If it's a dict, try to extract content
+                analysis = analysis.get('content', analysis.get('message', analysis.get('text', str(analysis))))
+            if not isinstance(analysis, str):
+                analysis = str(analysis)
+
+            analysis_upper = analysis.upper()
+
+            # Extract prediction
+            predicted_yes = False
+            if "MY PREDICTION: YES" in analysis_upper or "MY PREDICTION:YES" in analysis_upper:
+                predicted_yes = True
+            elif "MY PREDICTION: NO" in analysis_upper or "MY PREDICTION:NO" in analysis_upper:
+                predicted_yes = False
+            else:
+                # Fallback to first YES/NO mention
+                yes_pos = analysis_upper.find("YES")
+                no_pos = analysis_upper.find("NO")
+                if yes_pos != -1 and (no_pos == -1 or yes_pos < no_pos):
+                    predicted_yes = True
+
+            # Extract confidence (1-10)
+            confidence = 5  # Default
+            import re
+            conf_match = re.search(r'CONFIDENCE[:\s]*(\d+)', analysis_upper)
+            if conf_match:
+                confidence = min(10, max(1, int(conf_match.group(1))))
+
+            # Weight vote by confidence
+            weight = confidence / 10.0
+            if predicted_yes:
+                votes["Yes"] += 1
+                vote_weights["Yes"] += weight
+            else:
+                votes["No"] += 1
+                vote_weights["No"] += weight
+
+            # Store reasoning
+            prediction_str = "YES" if predicted_yes else "NO"
+            full_reasoning.append(f"**{agent_id}** ({prediction_str}, conf={confidence}/10):\n{analysis[:500]}...")
+            logger.info(f"  {agent_id}: {prediction_str} (confidence {confidence}/10)")
+
+        # Phase 3: Weighted consensus calculation
+        logger.info("⚖️ Phase 3: Calculating weighted consensus...")
+
+        total_weight = vote_weights["Yes"] + vote_weights["No"]
+        total_votes = votes["Yes"] + votes["No"]
+
+        if total_weight > 0:
+            yes_weighted_pct = vote_weights["Yes"] / total_weight
+
+            # Strong consensus thresholds
+            if yes_weighted_pct > 0.70:
+                direction = "bullish"
+                confidence = 0.70 + (yes_weighted_pct - 0.70) * 0.5  # 0.70-0.85 range
+            elif yes_weighted_pct < 0.30:
+                direction = "bearish"
+                confidence = 0.70 + (0.30 - yes_weighted_pct) * 0.5
+            elif yes_weighted_pct > 0.55:
+                direction = "bullish"
+                confidence = 0.55 + (yes_weighted_pct - 0.55) * 0.5  # 0.55-0.625 range
+            elif yes_weighted_pct < 0.45:
+                direction = "bearish"
+                confidence = 0.55 + (0.45 - yes_weighted_pct) * 0.5
+            else:
+                # Very close - market efficient, no edge
+                direction = "neutral"
+                confidence = 0.50
+
+            reasoning = (
+                f"Collective Intelligence Verdict: {votes['Yes']} YES / {votes['No']} NO\n"
+                f"Weighted Score: {yes_weighted_pct:.1%} YES confidence\n"
+                f"Agents consulted: {', '.join(agents_used)}"
+            )
         else:
             direction = "neutral"
             confidence = 0.5
-            reasoning = "No agent consensus reached"
+            reasoning = "Insufficient agent consensus - no prediction edge"
 
         signal = PredictiveSignal(
-            name="Collective Deliberation",
+            name="Collective Intelligence",
             signal_type="consensus",
             direction=direction,
             confidence=confidence,
             reasoning=reasoning,
-            data={"votes": votes, "agents": agents_used}
+            data={
+                "votes": votes,
+                "vote_weights": vote_weights,
+                "agents": agents_used,
+                "weighted_yes_pct": yes_weighted_pct if total_weight > 0 else 0.5
+            }
         )
 
-        final_reasoning = f"Agents consulted: {', '.join(agents_used)}\n" + "\n".join(reasonings)
-        return signal, final_reasoning
+        # Compile full deliberation transcript
+        deliberation_transcript = (
+            f"# Collective Deliberation on: {market.question}\n\n"
+            f"## Market Context\n"
+            f"- Odds: {json.dumps(market.current_odds)}\n"
+            f"- Volume: ${market.volume_24h:,.0f} (24h) / ${market.total_volume:,.0f} (total)\n\n"
+            f"## Agent Analyses\n\n" +
+            "\n\n---\n\n".join(full_reasoning) +
+            f"\n\n## Final Verdict\n{reasoning}"
+        )
+
+        logger.info(f"✅ Deliberation complete: {direction} ({confidence:.0%})")
+        return signal, deliberation_transcript
 
     # -------------------------------------------------------------------------
     # PREDICTION GENERATION
@@ -624,19 +812,23 @@ Answer with just: YES or NO, then a brief reason."""
         scored_markets = []
 
         for market in markets:
-            # Skip very lopsided markets (>90% or <10%)
+            # Skip very lopsided markets (>98% or <2%) - relaxed from 90%/10%
             max_odds = max(market.current_odds.values()) if market.current_odds else 0.5
             min_odds = min(market.current_odds.values()) if market.current_odds else 0.5
 
-            if max_odds > 0.92 or min_odds < 0.08:
+            if max_odds > 0.98 or min_odds < 0.02:
+                logger.debug(f"Skipping lopsided market: {market.question[:40]}... ({max_odds:.2%})")
                 continue
 
-            # Score based on volume and odds balance
-            volume_score = min(market.volume_24h / 50000, 1.0)
-            balance_score = 1 - abs(max_odds - 0.5) * 2  # Closer to 50/50 = more interesting
+            # Score based on volume and odds - prefer higher volume, slightly favor balanced odds
+            volume_score = min(market.volume_24h / 100000, 1.0)  # Scale to $100k
 
-            score = volume_score * 0.6 + balance_score * 0.4
+            # Still interesting if one side is favored, just need some uncertainty
+            uncertainty_score = 1 - (abs(max_odds - 0.5) ** 2)  # Squared to be less punishing
+
+            score = volume_score * 0.7 + uncertainty_score * 0.3
             scored_markets.append((market, score))
+            logger.debug(f"Scored market: {market.question[:40]}... score={score:.2f} odds={max_odds:.2%}")
 
         # Sort by score and take top candidates
         scored_markets.sort(key=lambda x: x[1], reverse=True)
@@ -644,14 +836,22 @@ Answer with just: YES or NO, then a brief reason."""
 
         predictions = []
 
+        logger.info(f"Analyzing {min(count, len(candidates))} candidate markets...")
+
         for market in candidates[:count]:
             try:
                 prediction = await self._analyze_market(market, markets)
-                if prediction and prediction.confidence >= 0.55:  # Only keep confident predictions
-                    predictions.append(prediction)
-                    self.predictions.append(prediction)
+                if prediction:
+                    if prediction.confidence >= 0.50:  # Accept any prediction with some confidence
+                        predictions.append(prediction)
+                        self.predictions.append(prediction)
+                        logger.info(f"Generated prediction: {prediction.predicted_outcome} on '{market.question[:50]}...' (conf={prediction.confidence:.2%})")
+                    else:
+                        logger.debug(f"Skipped low confidence prediction: {prediction.confidence:.2%}")
+                else:
+                    logger.debug(f"No prediction generated for: {market.question[:50]}...")
             except Exception as e:
-                logger.error(f"Failed to analyze market {market.market_id}: {e}")
+                logger.error(f"Failed to analyze market {market.market_id}: {e}", exc_info=True)
 
         # Save
         if predictions:
