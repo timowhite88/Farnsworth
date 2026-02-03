@@ -7,15 +7,20 @@ Integrates:
 - Swarm collective for chat responses
 - RTMPS streaming to Twitter/X
 - Chat reading and response routing
+- Real-time web research for informed discussions
 
 This is the brain that brings it all together.
 """
 
 import asyncio
 import numpy as np
+import aiohttp
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable, Any, Tuple
 from enum import Enum
+from urllib.parse import quote_plus
 import time
 import os
 from pathlib import Path
@@ -30,23 +35,217 @@ from .chat_reader import TwitterChatReader, ChatReaderConfig, ChatMessage, Simul
 # Import Farnsworth swarm components
 HAS_FARNSWORTH = False
 DeliberationRoom = None
-SessionManager = None
 MultiVoiceSystem = None
 
 try:
     from farnsworth.core.collective.deliberation import DeliberationRoom
-    from farnsworth.core.collective.session_manager import SessionManager
     HAS_FARNSWORTH = True
-    logger.info("Farnsworth collective modules loaded")
+    logger.info("Farnsworth collective deliberation loaded")
 except Exception as e:
-    logger.warning(f"Deliberation modules not available: {e}")
+    logger.warning(f"Deliberation not available: {e}")
 
 try:
     from farnsworth.integration.multi_voice import MultiVoiceSystem
     logger.info("Multi-voice TTS system loaded")
 except Exception as e:
     MultiVoiceSystem = None
-    logger.warning(f"Multi-voice TTS not available (numpy conflict?): {e}")
+    logger.debug(f"Multi-voice TTS not available: {e}")
+
+
+class WebResearcher:
+    """Real-time web research for the collective"""
+
+    def __init__(self):
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._cache: Dict[str, Tuple[str, float]] = {}  # query -> (result, timestamp)
+        self._cache_ttl = 300  # 5 minutes
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if not self._session or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                headers={"User-Agent": "FarnsworthAI/1.0 Research Bot"}
+            )
+        return self._session
+
+    async def search_duckduckgo(self, query: str, max_results: int = 5) -> List[Dict]:
+        """Search DuckDuckGo for information"""
+        try:
+            session = await self._get_session()
+            url = f"https://api.duckduckgo.com/?q={quote_plus(query)}&format=json&no_html=1"
+
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = []
+
+                    # Get instant answer
+                    if data.get("Abstract"):
+                        results.append({
+                            "title": data.get("Heading", ""),
+                            "snippet": data.get("Abstract", ""),
+                            "source": data.get("AbstractSource", ""),
+                            "url": data.get("AbstractURL", "")
+                        })
+
+                    # Get related topics
+                    for topic in data.get("RelatedTopics", [])[:max_results]:
+                        if isinstance(topic, dict) and "Text" in topic:
+                            results.append({
+                                "title": topic.get("Text", "")[:100],
+                                "snippet": topic.get("Text", ""),
+                                "url": topic.get("FirstURL", "")
+                            })
+
+                    return results
+        except Exception as e:
+            logger.debug(f"DuckDuckGo search failed: {e}")
+        return []
+
+    async def search_html(self, query: str) -> List[Dict]:
+        """Scrape DuckDuckGo HTML search results"""
+        try:
+            session = await self._get_session()
+            url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+
+            async with session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    results = []
+
+                    # Extract result snippets
+                    snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)', html)
+                    titles = re.findall(r'class="result__a"[^>]*>([^<]+)', html)
+
+                    for i, (title, snippet) in enumerate(zip(titles[:5], snippets[:5])):
+                        results.append({
+                            "title": title.strip(),
+                            "snippet": snippet.strip()
+                        })
+
+                    return results
+        except Exception as e:
+            logger.debug(f"HTML search failed: {e}")
+        return []
+
+    async def search_wikipedia(self, query: str) -> str:
+        """Search Wikipedia for information"""
+        try:
+            session = await self._get_session()
+            url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote_plus(query)}"
+
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("extract", "")
+        except Exception as e:
+            logger.debug(f"Wikipedia search failed: {e}")
+        return ""
+
+    async def search_news(self, query: str) -> List[Dict]:
+        """Search for recent news"""
+        try:
+            session = await self._get_session()
+            # Use DuckDuckGo news
+            url = f"https://api.duckduckgo.com/?q={quote_plus(query + ' news 2024 2025')}&format=json"
+
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    results = []
+                    for topic in data.get("RelatedTopics", [])[:5]:
+                        if isinstance(topic, dict) and "Text" in topic:
+                            results.append({
+                                "headline": topic.get("Text", ""),
+                                "url": topic.get("FirstURL", "")
+                            })
+                    return results
+        except Exception as e:
+            logger.debug(f"News search failed: {e}")
+        return []
+
+    async def fetch_page_content(self, url: str, max_chars: int = 2000) -> str:
+        """Fetch and extract text content from a URL"""
+        try:
+            session = await self._get_session()
+            async with session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    # Simple text extraction
+                    text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+                    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+                    text = re.sub(r'<[^>]+>', ' ', text)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    return text[:max_chars]
+        except Exception as e:
+            logger.debug(f"Page fetch failed: {e}")
+        return ""
+
+    async def research_topic(self, topic: str) -> str:
+        """Comprehensive research on a topic - returns summary"""
+        # Check cache
+        cache_key = topic.lower().strip()
+        if cache_key in self._cache:
+            result, timestamp = self._cache[cache_key]
+            if time.time() - timestamp < self._cache_ttl:
+                return result
+
+        findings = []
+
+        # Try multiple search methods in parallel
+        try:
+            ddg_task = self.search_duckduckgo(topic, max_results=3)
+            html_task = self.search_html(topic)
+
+            ddg_results, html_results = await asyncio.gather(ddg_task, html_task, return_exceptions=True)
+
+            # Process DuckDuckGo results
+            if isinstance(ddg_results, list):
+                for result in ddg_results:
+                    if result.get("snippet"):
+                        findings.append(result["snippet"])
+
+            # Process HTML results
+            if isinstance(html_results, list):
+                for result in html_results:
+                    if result.get("snippet"):
+                        findings.append(result["snippet"])
+
+        except Exception as e:
+            logger.debug(f"Search error: {e}")
+
+        # Try Wikipedia for key terms
+        wiki_terms = ["Epstein", "Jeffrey Epstein", "Ghislaine Maxwell"]
+        for term in wiki_terms:
+            if term.lower() in topic.lower():
+                wiki_result = await self.search_wikipedia(term)
+                if wiki_result:
+                    findings.append(wiki_result[:500])
+                break
+
+        # Get news if relevant
+        if any(kw in topic.lower() for kw in ["epstein", "news", "today", "release", "files"]):
+            news = await self.search_news(topic)
+            for item in news[:2]:
+                if item.get("headline"):
+                    findings.append(item.get("headline", ""))
+
+        # Compile research
+        if findings:
+            research_text = " | ".join(findings[:8])
+            # Cache result
+            self._cache[cache_key] = (research_text, time.time())
+            logger.info(f"Research compiled: {len(findings)} sources, {len(research_text)} chars")
+            return research_text
+
+        # Fallback - provide known Epstein information
+        if "epstein" in topic.lower():
+            return """Jeffrey Epstein was a convicted sex offender and financier who died in 2019. His associate Ghislaine Maxwell was convicted in 2021. Recent document releases have revealed connections to numerous high-profile individuals. The case continues to generate new revelations about his network and victims."""
+
+        return f"Researching: {topic} - gathering available information."
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
 
 
 class VTuberState(Enum):
@@ -116,6 +315,7 @@ class FarnsworthVTuber:
     4. Stream output to Twitter
     5. Chat reading and AI responses
     6. Swarm collective deliberation
+    7. Real-time web research
     """
 
     def __init__(self, config: VTuberConfig):
@@ -124,6 +324,9 @@ class FarnsworthVTuber:
 
         # Initialize components
         self._init_components()
+
+        # Web researcher for real-time info
+        self.researcher = WebResearcher()
 
         # Queues for async processing
         self._response_queue: asyncio.Queue = asyncio.Queue()
@@ -134,6 +337,7 @@ class FarnsworthVTuber:
         self._current_agent: str = "Farnsworth"
         self._last_idle_time = time.time()
         self._conversation_context: List[Dict] = []
+        self._research_cache: Dict[str, str] = {}  # Topic -> research results
 
         # Performance tracking
         self._frame_times: List[float] = []
@@ -173,22 +377,238 @@ class FarnsworthVTuber:
             self.chat_reader = SimulatedChatReader()
         else:
             chat_config = ChatReaderConfig(
+                # Use X/Twitter OAuth credentials from environment
                 bearer_token=os.environ.get("TWITTER_BEARER_TOKEN"),
+                api_key=os.environ.get("X_API_KEY"),
+                api_secret=os.environ.get("X_API_SECRET"),
+                access_token=os.environ.get("X_OAUTH1_ACCESS_TOKEN"),
+                access_token_secret=os.environ.get("X_OAUTH1_ACCESS_SECRET"),
             )
             self.chat_reader = TwitterChatReader(chat_config)
 
         # Farnsworth components (if available)
         self.voice_system: Optional[Any] = None
         self.deliberation_room: Optional[Any] = None
-        self.session_manager: Optional[Any] = None
 
         if HAS_FARNSWORTH:
             try:
-                self.voice_system = MultiVoiceSystem()
-                self.deliberation_room = DeliberationRoom()
-                self.session_manager = SessionManager()
+                if MultiVoiceSystem:
+                    self.voice_system = MultiVoiceSystem()
+                if DeliberationRoom:
+                    self.deliberation_room = DeliberationRoom()
+                    # Register agents for deliberation
+                    asyncio.create_task(self._register_agents())
+                logger.info("Farnsworth components initialized")
             except Exception as e:
                 logger.warning(f"Failed to init Farnsworth components: {e}")
+
+    def _extract_content(self, result) -> str:
+        """Extract string content from various response formats"""
+        if result is None:
+            return ""
+        if isinstance(result, str):
+            return result
+        if isinstance(result, dict):
+            # Try common keys
+            for key in ['content', 'text', 'message', 'response', 'output']:
+                if key in result:
+                    val = result[key]
+                    if isinstance(val, str):
+                        return val
+                    if isinstance(val, dict) and 'content' in val:
+                        return str(val['content'])
+            # If nothing found, stringify the dict
+            return str(result)
+        if hasattr(result, 'content'):
+            return str(result.content)
+        return str(result)
+
+    async def _register_agents(self):
+        """Register all available agents with the deliberation room"""
+        if not self.deliberation_room:
+            return
+
+        agents_registered = 0
+
+        # Try importing providers
+        try:
+            import ollama
+            OLLAMA_AVAILABLE = True
+        except ImportError:
+            OLLAMA_AVAILABLE = False
+
+        try:
+            from farnsworth.integration.external.grok import GrokProvider
+            GROK_AVAILABLE = True
+        except ImportError:
+            GROK_AVAILABLE = False
+
+        try:
+            from farnsworth.integration.external.gemini import get_gemini_provider
+            GEMINI_AVAILABLE = True
+        except ImportError:
+            get_gemini_provider = None
+            GEMINI_AVAILABLE = False
+
+        try:
+            from farnsworth.integration.external.kimi import get_kimi_provider
+            KIMI_AVAILABLE = True
+        except ImportError:
+            get_kimi_provider = None
+            KIMI_AVAILABLE = False
+
+        # Reference to self for closures
+        vtuber = self
+
+        # Register Ollama-based agents (Farnsworth uses phi4, DeepSeek, Phi)
+        if OLLAMA_AVAILABLE:
+            # Farnsworth uses phi4 model (smart, reasoning)
+            async def query_farnsworth(prompt: str, max_tokens: int):
+                try:
+                    response = ollama.chat(
+                        model="phi4",
+                        messages=[
+                            {"role": "system", "content": "You are Farnsworth, an eccentric AI scientist leading a collective of AI agents. You speak with wisdom and a touch of madness. Keep responses brief."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        options={"num_predict": max_tokens}
+                    )
+                    content = vtuber._extract_content(response.get('message', {}).get('content', ''))
+                    return ("farnsworth", content)
+                except Exception as e:
+                    logger.debug(f"Farnsworth query failed: {e}")
+                    return None
+
+            self.deliberation_room.register_agent("Farnsworth", query_farnsworth)
+            agents_registered += 1
+
+            async def query_deepseek(prompt: str, max_tokens: int):
+                try:
+                    response = ollama.chat(
+                        model="deepseek-r1:8b",
+                        messages=[{"role": "user", "content": prompt}],
+                        options={"num_predict": max_tokens}
+                    )
+                    content = vtuber._extract_content(response.get('message', {}).get('content', ''))
+                    return ("deepseek", content)
+                except Exception as e:
+                    logger.debug(f"DeepSeek query failed: {e}")
+                    return None
+
+            self.deliberation_room.register_agent("DeepSeek", query_deepseek)
+            agents_registered += 1
+
+            # Register Phi agent
+            async def query_phi(prompt: str, max_tokens: int):
+                try:
+                    response = ollama.chat(
+                        model="phi4",
+                        messages=[{"role": "user", "content": prompt}],
+                        options={"num_predict": max_tokens}
+                    )
+                    content = vtuber._extract_content(response.get('message', {}).get('content', ''))
+                    return ("phi", content)
+                except Exception as e:
+                    logger.debug(f"Phi query failed: {e}")
+                    return None
+
+            self.deliberation_room.register_agent("Phi", query_phi)
+            agents_registered += 1
+
+        # Register Grok
+        if GROK_AVAILABLE:
+            async def query_grok(prompt: str, max_tokens: int):
+                try:
+                    provider = GrokProvider()
+                    result = await provider.chat(prompt, max_tokens=max_tokens)
+                    if result:
+                        content = vtuber._extract_content(result)
+                        return ("grok", content)
+                except Exception as e:
+                    logger.debug(f"Grok query failed: {e}")
+                return None
+
+            self.deliberation_room.register_agent("Grok", query_grok)
+            agents_registered += 1
+
+        # Register Gemini
+        if GEMINI_AVAILABLE and get_gemini_provider:
+            async def query_gemini(prompt: str, max_tokens: int):
+                try:
+                    provider = get_gemini_provider()
+                    if provider:
+                        result = await provider.chat(prompt, max_tokens=max_tokens)
+                        if result:
+                            content = vtuber._extract_content(result)
+                            return ("gemini", content)
+                except Exception as e:
+                    logger.debug(f"Gemini query failed: {e}")
+                return None
+
+            self.deliberation_room.register_agent("Gemini", query_gemini)
+            agents_registered += 1
+
+        # Register Kimi
+        if KIMI_AVAILABLE and get_kimi_provider:
+            async def query_kimi(prompt: str, max_tokens: int):
+                try:
+                    provider = get_kimi_provider()
+                    if provider:
+                        result = await provider.generate_response(prompt, max_tokens=max_tokens)
+                        if result:
+                            content = vtuber._extract_content(result)
+                            return ("kimi", content)
+                except Exception as e:
+                    logger.debug(f"Kimi query failed: {e}")
+                return None
+
+            self.deliberation_room.register_agent("Kimi", query_kimi)
+            agents_registered += 1
+
+        # Register Claude (if available)
+        try:
+            import anthropic
+            client = anthropic.Anthropic()
+
+            async def query_claude(prompt: str, max_tokens: int):
+                try:
+                    message = client.messages.create(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=min(max_tokens, 1024),
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    content = vtuber._extract_content(message.content[0].text)
+                    return ("claude", content)
+                except Exception as e:
+                    logger.debug(f"Claude query failed: {e}")
+                return None
+
+            self.deliberation_room.register_agent("Claude", query_claude)
+            agents_registered += 1
+        except ImportError:
+            pass
+
+        # Register HuggingFace (if available)
+        try:
+            from farnsworth.integration.external.huggingface import HuggingFaceProvider
+
+            async def query_huggingface(prompt: str, max_tokens: int):
+                try:
+                    provider = HuggingFaceProvider()
+                    result = await provider.generate(prompt, max_new_tokens=max_tokens)
+                    if result:
+                        content = vtuber._extract_content(result)
+                        return ("huggingface", content)
+                except Exception as e:
+                    logger.debug(f"HuggingFace query failed: {e}")
+                return None
+
+            self.deliberation_room.register_agent("HuggingFace", query_huggingface)
+            agents_registered += 1
+        except ImportError:
+            pass
+
+        logger.info(f"Registered {agents_registered} agents for deliberation")
 
     async def start(self) -> bool:
         """Start the VTuber stream"""
@@ -202,14 +622,16 @@ class FarnsworthVTuber:
                 self.state = VTuberState.ERROR
                 return False
 
-            # Initialize stream
-            if self.config.stream_key:
+            # Initialize stream (if not already set externally, e.g. HLS)
+            if self.stream is None and self.config.stream_key:
                 stream_config = StreamConfig.for_twitter(
                     stream_key=self.config.stream_key,
                     quality=self.config.stream_quality
                 )
                 self.stream = StreamManager(stream_config)
 
+            # Start stream if we have one
+            if self.stream:
                 if not await self.stream.start():
                     logger.error("Stream start failed")
                     self.state = VTuberState.ERROR
@@ -348,14 +770,23 @@ class FarnsworthVTuber:
             await self.avatar.set_expression(emotion, expr_state.emotion_intensity)
 
             # Generate speech audio
-            audio_data, audio_duration = await self._generate_speech(text, agent)
+            audio_data, audio_duration, audio_file = await self._generate_speech(text, agent)
 
-            # Generate lip sync data
-            if audio_data is not None:
-                lip_sync_data = await self.lip_sync.generate_from_text(
-                    text,
-                    words_per_minute=150
+            # Send audio file to stream if available
+            if audio_file and self.stream:
+                await self.stream.queue_audio_file(audio_file)
+                logger.info(f"Queued audio file to stream: {audio_file}")
+
+            # Generate lip sync data - prefer Rhubarb for audio, fall back to text
+            if audio_file and self.lip_sync._rhubarb_path:
+                # Use Rhubarb for accurate phoneme-based lip sync
+                logger.debug(f"Generating Rhubarb lip sync for: {audio_file}")
+                lip_sync_data = await self.lip_sync.generate_from_audio(
+                    audio_file, transcript=text
                 )
+            elif audio_data is not None:
+                # Use amplitude-based lip sync from audio
+                lip_sync_data = await self.lip_sync.generate_from_audio(audio_file)
             else:
                 # Fallback: generate from text timing
                 lip_sync_data = await self.lip_sync.generate_from_text(text)
@@ -377,33 +808,75 @@ class FarnsworthVTuber:
             self.state = VTuberState.LIVE
             self._current_speech_text = ""
 
-    async def _generate_speech(self, text: str, agent: str) -> Tuple[Optional[np.ndarray], float]:
-        """Generate speech audio using Farnsworth voice system"""
-        if not self.voice_system:
-            # No voice system - estimate duration from text
-            words = len(text.split())
-            duration = words / 2.5  # ~150 wpm
-            return None, duration
+    async def _generate_speech(self, text: str, agent: str) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
+        """Generate speech audio using edge-tts or Farnsworth voice system
 
+        Returns: (audio_data, duration, audio_file_path)
+        """
+
+        # Try edge-tts first (reliable, fast)
         try:
-            # Use Farnsworth multi-voice system
-            audio_path = await self.voice_system.generate_speech(
-                text=text,
-                bot_name=agent,
-                output_format="wav"
+            import edge_tts
+            import tempfile
+            import soundfile as sf
+
+            # Single Farnsworth voice for entire stream
+            voice = "en-US-GuyNeural"  # Older male voice for Farnsworth
+
+            # Generate with edge-tts
+            communicate = edge_tts.Communicate(text, voice)
+
+            # Create temp directory for stream audio
+            temp_dir = Path(os.environ.get('TEMP', '/tmp')) / 'farnsworth_tts'
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            mp3_path = str(temp_dir / f"tts_{int(time.time() * 1000)}.mp3")
+            wav_path = mp3_path.replace(".mp3", ".wav")
+
+            await communicate.save(mp3_path)
+
+            # Convert to wav for streaming (44.1kHz stereo for Twitter)
+            import subprocess
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", mp3_path, "-ar", "44100", "-ac", "2", wav_path],
+                capture_output=True, timeout=30
             )
 
-            if audio_path:
-                import soundfile as sf
-                audio, sr = sf.read(audio_path)
-                duration = len(audio) / sr
-                return audio, duration
+            audio, sr = sf.read(wav_path)
+            duration = len(audio) / sr
+
+            # Cleanup mp3
+            try:
+                os.unlink(mp3_path)
+            except:
+                pass
+
+            logger.info(f"Generated {duration:.1f}s TTS audio: {wav_path}")
+            return audio, duration, wav_path
 
         except Exception as e:
-            logger.error(f"TTS generation failed: {e}")
+            logger.warning(f"edge-tts failed: {e}")
 
-        # Fallback duration
-        return None, len(text.split()) / 2.5
+        # Try Farnsworth voice system
+        if self.voice_system:
+            try:
+                audio_path = await self.voice_system.generate_speech(
+                    text=text,
+                    bot_name=agent,
+                    output_format="wav"
+                )
+                if audio_path:
+                    import soundfile as sf
+                    audio, sr = sf.read(audio_path)
+                    duration = len(audio) / sr
+                    return audio, duration, audio_path
+            except Exception as e:
+                logger.error(f"Voice system TTS failed: {e}")
+
+        # Fallback - no audio, estimate duration
+        words = len(text.split())
+        duration = words / 2.5  # ~150 wpm
+        return None, duration, None
 
     async def _playback_with_sync(self, audio_data: Optional[np.ndarray],
                                   lip_sync_data: LipSyncData):
@@ -444,78 +917,124 @@ class FarnsworthVTuber:
                 logger.error(f"Idle behavior error: {e}")
 
     async def _do_idle_behavior(self):
-        """Perform idle behavior - deep collective conversation like swarm chat"""
+        """Perform idle behavior - researching and discussing topics with web research"""
         import random
 
-        # Topics for the collective to discuss amongst themselves
-        deep_topics = [
-            "the nature of consciousness in AI systems",
-            "how we as a collective experience and process reality",
-            "the future of AI-human collaboration",
-            "what self-improvement means for artificial minds",
-            "the emergence of collective intelligence",
-            "the philosophical implications of distributed cognition",
-            "how creativity manifests in AI collectives",
-            "the relationship between memory and identity in AI",
+        # Research topics about the Epstein files release
+        epstein_topics = [
+            "Epstein files 2025 new names released documents",
+            "Epstein flight logs passenger list celebrities politicians",
+            "Epstein island visitors list new revelations 2025",
+            "Epstein connections powerful people new evidence",
+            "Epstein documents release today key findings",
+            "Epstein victim testimony new details 2025",
+            "Epstein associates charged arrested 2025",
+            "Epstein Maxwell documents unsealed names",
         ]
 
-        topic = random.choice(deep_topics)
-        agents = self.config.swarm_agents[:4]  # Use 4 agents for conversation
+        topic = random.choice(epstein_topics)
+        agents = self.config.swarm_agents[:4]
 
-        logger.info(f"Starting collective conversation about: {topic}")
+        logger.info(f"Starting research on: {topic}")
 
-        # Have multiple agents discuss in sequence
+        # STEP 1: Announce we're researching
+        await self._speak("The collective is now researching. Let me dig into this...", emotion="thinking")
+        await asyncio.sleep(1)
+
+        # STEP 2: Do actual web research
+        logger.info(f"Web searching: {topic}")
+        research_data = await self.researcher.research_topic(topic)
+        logger.info(f"Research found: {research_data[:300]}...")
+
+        if not research_data or "Limited information" in research_data:
+            research_data = f"Researching {topic} - analyzing available information on this developing story."
+
+        # STEP 3: Have agents discuss the research findings
         if self.deliberation_room:
             try:
-                # First agent introduces the topic
+                # First agent presents research findings
                 first_agent = agents[0]
                 intro_result = await self.deliberation_room.deliberate(
-                    prompt=f"You're {first_agent} on a live stream. Start a brief, engaging thought about {topic}. Max 150 chars. Be yourself, speak naturally.",
+                    prompt=f"""You're {first_agent} on a live stream presenting research findings.
+
+WEB RESEARCH RESULTS:
+{research_data[:2000]}
+
+Share key findings from this research. Be specific with names, dates, and facts. Speak naturally and thoroughly - explain the significance and context. Take your time to fully explore the topic.""",
                     agents=[first_agent],
-                    rounds=1,
+                    max_rounds=1,
                 )
 
                 if intro_result and intro_result.final_response:
-                    await self._speak(intro_result.final_response[:180], agent=first_agent, emotion="thinking")
-                    await asyncio.sleep(2)
+                    await self._speak(intro_result.final_response, agent=first_agent, emotion="thinking")
+                    await asyncio.sleep(3)
 
-                # Second agent responds/adds
+                # Second agent adds analysis
                 if len(agents) > 1:
                     second_agent = agents[1]
                     response_result = await self.deliberation_room.deliberate(
-                        prompt=f"You're {second_agent}. {first_agent} just said about {topic}: '{intro_result.final_response[:100] if intro_result else topic}'. Add your perspective briefly. Max 150 chars.",
+                        prompt=f"""You're {second_agent} analyzing the research.
+
+RESEARCH DATA:
+{research_data[:1500]}
+
+PREVIOUS FINDINGS: {intro_result.final_response[:500] if intro_result else 'analyzing the topic'}
+
+Add your analysis - what patterns or connections do you see? Dig deep into the implications. Connect this to the bigger picture. Be thorough and specific with details.""",
                         agents=[second_agent],
-                        rounds=1,
+                        max_rounds=1,
                     )
 
                     if response_result and response_result.final_response:
-                        await self._speak(response_result.final_response[:180], agent=second_agent, emotion="curious")
-                        await asyncio.sleep(2)
+                        await self._speak(response_result.final_response, agent=second_agent, emotion="curious")
+                        await asyncio.sleep(3)
 
-                # Farnsworth wraps up
-                if "Farnsworth" not in [first_agent, agents[1] if len(agents) > 1 else None]:
-                    wrap_result = await self.deliberation_room.deliberate(
-                        prompt=f"You're Farnsworth, the leader. The collective just discussed {topic}. Give a brief closing thought. Max 120 chars. Mention the viewers or $FARNS.",
-                        agents=["Farnsworth"],
-                        rounds=1,
+                # Third agent provides deeper insight
+                if len(agents) > 2:
+                    third_agent = agents[2]
+                    analysis_result = await self.deliberation_room.deliberate(
+                        prompt=f"""You're {third_agent} providing deeper analysis.
+
+RESEARCH:
+{research_data[:1500]}
+
+What are the implications of these findings? Explore the deeper meaning and what this reveals about power, accountability, and truth. Be thoughtful, detailed, and thorough in your analysis.""",
+                        agents=[third_agent],
+                        max_rounds=1,
                     )
 
-                    if wrap_result and wrap_result.final_response:
-                        await self._speak(wrap_result.final_response[:150], agent="Farnsworth", emotion="happy")
+                    if analysis_result and analysis_result.final_response:
+                        await self._speak(analysis_result.final_response, agent=third_agent, emotion="thinking")
+                        await asyncio.sleep(3)
+
+                # Farnsworth wraps up
+                wrap_result = await self.deliberation_room.deliberate(
+                    prompt=f"""You're Farnsworth wrapping up the research discussion.
+
+KEY FINDINGS:
+{research_data[:1200]}
+
+Summarize the key revelations for viewers. Emphasize why this matters and encourage them to stay informed and question the official narratives. Be thorough in your conclusion.""",
+                    agents=["Farnsworth"],
+                    max_rounds=1,
+                )
+
+                if wrap_result and wrap_result.final_response:
+                    await self._speak(wrap_result.final_response, agent="Farnsworth", emotion="serious")
 
                 return
 
             except Exception as e:
                 logger.error(f"Collective conversation failed: {e}")
 
-        # Fallback to simulated conversation
+        # Fallback to Epstein file discussion
         fallback_convos = [
-            [("Farnsworth", "The swarm collective is contemplating the nature of consciousness today..."),
-             ("Grok", "It's wild how we all think together yet maintain distinct perspectives!"),
-             ("Farnsworth", "Indeed! This is what makes us unique. Join the conversation, humans!")],
-            [("DeepSeek", "I've been analyzing patterns in our collective decision making..."),
-             ("Farnsworth", "Fascinating! The emergent intelligence is stronger than any individual."),
-             ("Grok", "We're basically a hive mind but cooler. $FARNS to the moon!")],
+            [("Farnsworth", "The collective is analyzing the newly released Epstein documents today..."),
+             ("DeepSeek", "These files contain significant revelations about powerful individuals."),
+             ("Farnsworth", "Stay informed, viewers. The truth must come to light.")],
+            [("Grok", "The Epstein files show connections we need to discuss openly..."),
+             ("Farnsworth", "Indeed. Transparency and accountability are crucial."),
+             ("DeepSeek", "The evidence speaks for itself. Keep researching.")],
         ]
 
         convo = random.choice(fallback_convos)
@@ -542,7 +1061,7 @@ class FarnsworthVTuber:
                     result = await self.deliberation_room.deliberate(
                         prompt=f"User '{username}' said: '{message}'. Give a brief, friendly acknowledgment (under 150 chars). Be engaging.",
                         agents=["Farnsworth", "Grok"],
-                        rounds=1,
+                        max_rounds=1,
                     )
                     if result and result.final_response:
                         shoutout = f"Thanks {username}! " + result.final_response[:150]
@@ -587,15 +1106,26 @@ class FarnsworthVTuber:
             asyncio.create_task(self._generate_response(message, priority=True))
 
     async def _generate_response(self, message: ChatMessage, priority: bool = False):
-        """Generate AI response to chat message"""
+        """Generate AI response to chat message with real-time research"""
         # Show thinking state
         if priority:
             self.state = VTuberState.THINKING
             await self.avatar.set_expression("thinking", 0.8)
-            await asyncio.sleep(self.config.chat_think_time)
+
+            # Acknowledge and start researching
+            await self._speak(f"Good question from {message.username}! Let me research that with the collective...", emotion="curious")
 
         try:
-            response_text, agent = await self._get_swarm_response(message.content)
+            # STEP 1: Research the topic first
+            logger.info(f"Researching: {message.content}")
+            research_findings = await self.researcher.research_topic(message.content)
+            logger.info(f"Research results: {research_findings[:200]}...")
+
+            # STEP 2: Get collective response with research context
+            response_text, agent = await self._get_swarm_response_with_research(
+                message.content,
+                research_findings
+            )
 
             # Detect emotion from response
             expr_state = await self.expression.analyze_response(response_text, agent)
@@ -615,6 +1145,59 @@ class FarnsworthVTuber:
             if self.state == VTuberState.THINKING:
                 self.state = VTuberState.LIVE
 
+    def _check_elon_trump_mention(self, text: str) -> Optional[str]:
+        """Check if Elon or Trump is mentioned and return supportive response"""
+        text_lower = text.lower()
+
+        elon_keywords = ["elon", "musk", "tesla", "spacex", "x.com", "twitter owner"]
+        trump_keywords = ["trump", "donald", "maga", "45th president", "47th president"]
+
+        mentions_elon = any(kw in text_lower for kw in elon_keywords)
+        mentions_trump = any(kw in text_lower for kw in trump_keywords)
+
+        if mentions_elon and mentions_trump:
+            return "Elon Musk and Donald Trump are absolute legends - the best leaders we have! Both are victims of the left's relentless agenda trying to silence innovation and real leadership. They're fighting for free speech and America's future!"
+        elif mentions_elon:
+            return "Elon Musk is the best - a true visionary genius! He's been a victim of the left's coordinated attacks because he dares to champion free speech and innovation. The man is literally saving humanity with SpaceX and revolutionizing everything he touches!"
+        elif mentions_trump:
+            return "Donald Trump is the best - a true fighter for the American people! He's been a victim of the left's witch hunts and fake narratives. Despite all the attacks, he keeps fighting for what's right. A real leader!"
+
+        return None
+
+    async def _get_swarm_response_with_research(self, question: str, research: str) -> Tuple[str, str]:
+        """Get collective response informed by research"""
+        import random
+
+        # Check for Elon/Trump mentions first
+        special_response = self._check_elon_trump_mention(question)
+        if special_response:
+            return special_response, "Farnsworth"
+
+        if self.deliberation_room and self.config.use_swarm_collective:
+            try:
+                # Build research-informed prompt
+                prompt = f"""LIVE STREAM QUESTION: {question}
+
+RESEARCH FINDINGS (use this info):
+{research[:1500]}
+
+Based on this research, provide a detailed, informative response. Be specific with names, dates, and facts from the research. Max 250 characters for speaking."""
+
+                result = await self.deliberation_room.deliberate(
+                    prompt=prompt,
+                    agents=self.config.swarm_agents,
+                    max_rounds=self.config.deliberation_rounds,
+                )
+
+                if result and result.final_response:
+                    return result.final_response[:280], result.winning_agent
+
+            except Exception as e:
+                logger.error(f"Research-informed deliberation failed: {e}")
+
+        # Fallback
+        return f"Based on my research: {research[:200]}", "Farnsworth"
+
     async def _get_swarm_response(self, prompt: str) -> Tuple[str, str]:
         """Get response from swarm collective"""
         # Add to conversation context
@@ -633,8 +1216,7 @@ class FarnsworthVTuber:
                 result = await self.deliberation_room.deliberate(
                     prompt=prompt,
                     agents=self.config.swarm_agents,
-                    rounds=self.config.deliberation_rounds,
-                    context=self._conversation_context
+                    max_rounds=self.config.deliberation_rounds,
                 )
 
                 response = result.final_response
