@@ -1072,6 +1072,13 @@ app.add_middleware(
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Register VTuber routes
+try:
+    from farnsworth.integration.vtuber.server_integration import register_vtuber_routes
+    register_vtuber_routes(app)
+except ImportError as e:
+    logging.warning(f"VTuber module not available: {e}")
+
 # Mount uploads directory for AutoGram avatars and post images
 UPLOADS_DIR = WEB_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -4188,6 +4195,15 @@ async def landing(request: Request):
 async def chat_page(request: Request):
     """Serve the main chat interface (Swarm Chat)."""
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/vtuber", response_class=HTMLResponse)
+async def vtuber_panel(request: Request):
+    """Serve the VTuber control panel."""
+    panel_path = STATIC_DIR / "vtuber_panel.html"
+    if panel_path.exists():
+        return FileResponse(str(panel_path), media_type="text/html")
+    return HTMLResponse("<h1>VTuber Panel Not Found</h1>", status_code=404)
 
 
 @app.post("/api/chat")

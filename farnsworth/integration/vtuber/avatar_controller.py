@@ -246,15 +246,24 @@ class AvatarController:
             return False
 
     async def _init_image_sequence(self) -> bool:
-        """Initialize simple image-based avatar (fallback)"""
+        """Initialize image-based avatar using generated Gemini images"""
         if not HAS_CV2:
             logger.error("OpenCV not installed. Install with: pip install opencv-python")
             return False
 
-        # Create a placeholder Farnsworth avatar
+        # Try to load generated avatar images first
+        avatar_dir = Path(__file__).parent / "avatars"
+
+        if avatar_dir.exists():
+            loaded = self._load_generated_avatars(avatar_dir)
+            if loaded:
+                logger.info(f"Loaded {len(self._image_frames)} generated avatar expressions")
+                return True
+
+        # Fallback to placeholder if no generated images
+        logger.warning("No generated avatars found, using placeholder")
         self._base_image = self._create_placeholder_avatar()
 
-        # Pre-generate expression frames
         self._image_frames = {
             "neutral": self._base_image.copy(),
             "speaking_1": self._create_speaking_frame(0.3),
@@ -265,7 +274,51 @@ class AvatarController:
             "excited": self._create_expression_frame("excited"),
         }
 
-        logger.info("Image sequence avatar initialized")
+        logger.info("Image sequence avatar initialized (placeholder)")
+        return True
+
+    def _load_generated_avatars(self, avatar_dir: Path) -> bool:
+        """Load generated avatar images from directory"""
+        self._image_frames = {}
+
+        # Expected avatar files
+        expressions = [
+            "base", "neutral", "happy", "excited", "thinking",
+            "surprised", "speaking_1", "speaking_2", "speaking_3"
+        ]
+
+        for expr in expressions:
+            img_path = avatar_dir / f"farnsworth_{expr}.png"
+            if img_path.exists():
+                img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
+                if img is not None:
+                    # Resize to stream dimensions if needed
+                    if img.shape[0] != self.config.height or img.shape[1] != self.config.width:
+                        img = cv2.resize(img, (self.config.width, self.config.height))
+
+                    # Ensure BGRA format
+                    if len(img.shape) == 2:
+                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+                    elif img.shape[2] == 3:
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+
+                    self._image_frames[expr] = img
+                    logger.debug(f"Loaded avatar: {expr}")
+
+        if not self._image_frames:
+            return False
+
+        # Set base image
+        self._base_image = self._image_frames.get("base") or self._image_frames.get("neutral")
+
+        # Ensure we have speaking frames (duplicate if missing)
+        if "speaking_1" not in self._image_frames:
+            self._image_frames["speaking_1"] = self._base_image.copy()
+        if "speaking_2" not in self._image_frames:
+            self._image_frames["speaking_2"] = self._base_image.copy()
+        if "speaking_3" not in self._image_frames:
+            self._image_frames["speaking_3"] = self._base_image.copy()
+
         return True
 
     async def _init_neural(self) -> bool:

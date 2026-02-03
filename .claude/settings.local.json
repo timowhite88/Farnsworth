@@ -130,7 +130,10 @@
       "WebFetch(domain:bags.fm)",
       "WebFetch(domain:www.moltbook.com)",
       "WebFetch(domain:pypi.org)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(start \"\" \"C:\\\\Fawnsworth\\\\claude_auth.html\")",
+      "Bash(python scripts/build_documentation.py:*)",
+      "WebFetch(domain:developer.twitter.com)"
     ]
   }
 }

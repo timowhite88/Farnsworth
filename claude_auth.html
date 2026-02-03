@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Claude Code Authorization - FRESH SESSION</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: #16213e;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        h1 { color: #00ff00; }
+        a.auth-link {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 20px 40px;
+            background: #00ff00;
+            color: black;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        a.auth-link:hover {
+            background: #00cc00;
+        }
+        .ready {
+            color: #00ff00;
+            font-weight: bold;
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FRESH SESSION READY!</h1>
+        <p class="ready">Click and paste code in chat!</p>
+
+        <a class="auth-link" href="https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=N4vK5uQai1B-nk2vWObFBqvUmrifGtoD7ImbVQF7pPc&code_challenge_method=S256&state=Vxa6KPNA36u64vjXTe4uV30e2yovJPCuaKTJ_26mT18" target="_blank">
+            AUTHORIZE NOW
+        </a>
+    </div>
+</body>
+</html>
