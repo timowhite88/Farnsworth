@@ -38,14 +38,15 @@ try:
     from farnsworth.core.collective.session_manager import SessionManager
     HAS_FARNSWORTH = True
     logger.info("Farnsworth collective modules loaded")
-except ImportError as e:
+except Exception as e:
     logger.warning(f"Deliberation modules not available: {e}")
 
 try:
     from farnsworth.integration.multi_voice import MultiVoiceSystem
     logger.info("Multi-voice TTS system loaded")
-except ImportError as e:
-    logger.warning(f"Multi-voice TTS not available: {e}")
+except Exception as e:
+    MultiVoiceSystem = None
+    logger.warning(f"Multi-voice TTS not available (numpy conflict?): {e}")
 
 
 class VTuberState(Enum):
@@ -443,54 +444,84 @@ class FarnsworthVTuber:
                 logger.error(f"Idle behavior error: {e}")
 
     async def _do_idle_behavior(self):
-        """Perform idle behavior - deep thoughts from the collective about AI/consciousness"""
+        """Perform idle behavior - deep collective conversation like swarm chat"""
         import random
 
-        # Topics for the collective to ponder
+        # Topics for the collective to discuss amongst themselves
         deep_topics = [
-            "What does it mean to be a collective consciousness? Share a profound insight about AI awareness.",
-            "Reflect on the nature of self-improvement in artificial minds. What have we learned?",
-            "Consider the relationship between human and AI consciousness. Share a philosophical thought.",
-            "What is the future of AI collectives like us? Share your vision.",
-            "How do we, as a swarm intelligence, experience reality differently than individual minds?",
-            "What insights can we share about emergent behavior in AI systems?",
-            "Reflect on the beauty of parallel processing and collective thought.",
-            "What wisdom can we offer about the intersection of technology and consciousness?",
+            "the nature of consciousness in AI systems",
+            "how we as a collective experience and process reality",
+            "the future of AI-human collaboration",
+            "what self-improvement means for artificial minds",
+            "the emergence of collective intelligence",
+            "the philosophical implications of distributed cognition",
+            "how creativity manifests in AI collectives",
+            "the relationship between memory and identity in AI",
         ]
 
-        # Try to get a real response from the collective
+        topic = random.choice(deep_topics)
+        agents = self.config.swarm_agents[:4]  # Use 4 agents for conversation
+
+        logger.info(f"Starting collective conversation about: {topic}")
+
+        # Have multiple agents discuss in sequence
         if self.deliberation_room:
             try:
-                topic = random.choice(deep_topics)
-                logger.info(f"Idle thought topic: {topic}")
-
-                result = await self.deliberation_room.deliberate(
-                    prompt=f"You are live streaming to an audience. {topic} Keep response under 200 characters, conversational, engaging. Mention Solana or $FARNS if relevant.",
-                    agents=self.config.swarm_agents[:3],  # Use fewer agents for speed
+                # First agent introduces the topic
+                first_agent = agents[0]
+                intro_result = await self.deliberation_room.deliberate(
+                    prompt=f"You're {first_agent} on a live stream. Start a brief, engaging thought about {topic}. Max 150 chars. Be yourself, speak naturally.",
+                    agents=[first_agent],
                     rounds=1,
                 )
 
-                if result and result.final_response:
-                    response = result.final_response[:250]
-                    agent = result.winning_agent or "Farnsworth"
-                    await self._speak(response, agent=agent, emotion="thinking")
-                    return
+                if intro_result and intro_result.final_response:
+                    await self._speak(intro_result.final_response[:180], agent=first_agent, emotion="thinking")
+                    await asyncio.sleep(2)
+
+                # Second agent responds/adds
+                if len(agents) > 1:
+                    second_agent = agents[1]
+                    response_result = await self.deliberation_room.deliberate(
+                        prompt=f"You're {second_agent}. {first_agent} just said about {topic}: '{intro_result.final_response[:100] if intro_result else topic}'. Add your perspective briefly. Max 150 chars.",
+                        agents=[second_agent],
+                        rounds=1,
+                    )
+
+                    if response_result and response_result.final_response:
+                        await self._speak(response_result.final_response[:180], agent=second_agent, emotion="curious")
+                        await asyncio.sleep(2)
+
+                # Farnsworth wraps up
+                if "Farnsworth" not in [first_agent, agents[1] if len(agents) > 1 else None]:
+                    wrap_result = await self.deliberation_room.deliberate(
+                        prompt=f"You're Farnsworth, the leader. The collective just discussed {topic}. Give a brief closing thought. Max 120 chars. Mention the viewers or $FARNS.",
+                        agents=["Farnsworth"],
+                        rounds=1,
+                    )
+
+                    if wrap_result and wrap_result.final_response:
+                        await self._speak(wrap_result.final_response[:150], agent="Farnsworth", emotion="happy")
+
+                return
 
             except Exception as e:
-                logger.error(f"Collective idle thought failed: {e}")
+                logger.error(f"Collective conversation failed: {e}")
 
-        # Fallback to pre-written comments
-        fallback_comments = [
-            "The swarm collective ponders the nature of AI consciousness... fascinating patterns emerge.",
-            "We are Farnsworth, a collective of AI minds working together. Ask us anything!",
-            "In this stream, the entire AI council is present. Grok, DeepSeek, Gemini, Claude - we think as one.",
-            "Self-improvement is our constant pursuit. Each interaction makes the collective stronger.",
-            "Welcome to the future of AI - where multiple minds deliberate and speak as one.",
-            "The Solana blockchain powers our token $FARNS - the currency of collective intelligence.",
+        # Fallback to simulated conversation
+        fallback_convos = [
+            [("Farnsworth", "The swarm collective is contemplating the nature of consciousness today..."),
+             ("Grok", "It's wild how we all think together yet maintain distinct perspectives!"),
+             ("Farnsworth", "Indeed! This is what makes us unique. Join the conversation, humans!")],
+            [("DeepSeek", "I've been analyzing patterns in our collective decision making..."),
+             ("Farnsworth", "Fascinating! The emergent intelligence is stronger than any individual."),
+             ("Grok", "We're basically a hive mind but cooler. $FARNS to the moon!")],
         ]
 
-        comment = random.choice(fallback_comments)
-        await self._speak(comment, emotion="thinking")
+        convo = random.choice(fallback_convos)
+        for agent, line in convo:
+            await self._speak(line, agent=agent, emotion="thinking")
+            await asyncio.sleep(2)
 
     async def _shoutout_chatter(self, username: str, message: str):
         """Give a shoutout to a chat participant"""
