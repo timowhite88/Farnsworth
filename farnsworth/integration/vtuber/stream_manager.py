@@ -271,21 +271,25 @@ class StreamManager:
                 '-i', f'anullsrc=channel_layout=stereo:sample_rate=44100',
             ])
 
-        # Video encoding - Twitter optimized, lower quality for stability
+        # Video encoding - Twitter Media Studio specs
+        gop_size = self.config.fps * self.config.keyframe_interval  # 3 sec keyframes
         cmd.extend([
             '-c:v', self.config.encoder,
-            '-preset', 'veryfast',  # Faster encoding, less CPU
+            '-preset', 'medium',  # Better quality
             '-tune', 'zerolatency',
-            '-profile:v', 'main',  # Main profile for compatibility
-            '-level', '4.1',  # Good compatibility
+            '-profile:v', 'high',  # High profile for better compression
+            '-level', '4.2',
+            # CBR-like encoding for consistent bitrate
             '-b:v', f'{self.config.video_bitrate}k',
-            '-maxrate', f'{int(self.config.video_bitrate * 1.2)}k',
-            '-bufsize', f'{self.config.video_bitrate * 2}k',
-            '-g', str(self.config.fps * 2),  # 2 second GOP
-            '-keyint_min', str(self.config.fps),
+            '-minrate', f'{self.config.video_bitrate}k',  # Force minimum = target
+            '-maxrate', f'{self.config.video_bitrate}k',  # Force maximum = target
+            '-bufsize', f'{self.config.video_bitrate}k',  # 1 second buffer
+            '-g', str(gop_size),  # Keyframe interval (3 sec = 90 frames at 30fps)
+            '-keyint_min', str(gop_size),  # Force exact keyframe interval
             '-sc_threshold', '0',  # Disable scene change detection
             '-pix_fmt', 'yuv420p',
             '-flags', '+cgop',  # Closed GOP for better streaming
+            '-x264opts', f'keyint={gop_size}:min-keyint={gop_size}:no-scenecut',
         ])
 
         # Audio encoding - Twitter optimized with volume boost

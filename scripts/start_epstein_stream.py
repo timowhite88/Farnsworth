@@ -38,10 +38,10 @@ EPSTEIN_RESEARCH_TOPICS = [
     "JP Morgan Epstein banking relationship",
 ]
 
-# Output directories
-HLS_OUTPUT_DIR = "/workspace/Farnsworth/farnsworth/web/static/hls"
+# Output directories - use separate vtuber_hls to avoid conflict with main server
+HLS_OUTPUT_DIR = "/workspace/Farnsworth/farnsworth/web/static/vtuber_hls"
 RESEARCH_DIR = "/workspace/Farnsworth/research/epstein"
-HLS_BASE_URL = "https://ai.farnsworth.cloud/static/hls"
+HLS_BASE_URL = "https://ai.farnsworth.cloud/static/vtuber_hls"
 
 
 class EpsteinResearcher:
