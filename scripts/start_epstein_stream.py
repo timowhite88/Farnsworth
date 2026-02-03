@@ -224,15 +224,22 @@ async def main():
     # Create VTuber (chat config loaded from env vars automatically)
     vtuber = FarnsworthVTuber(config)
 
-    # Setup HLS stream (local output, no RTMP key needed)
+    # Setup HLS stream - Twitter Media Studio specs
     hls_config = StreamConfig(
         platform=StreamPlatform.TWITTER_HLS,
         hls_output_dir=HLS_OUTPUT_DIR,
         hls_base_url=HLS_BASE_URL,
-        width=854,
-        height=480,
-        fps=24,
-        video_bitrate=1500,
+        # Video: 1080p @ 9Mbps
+        width=1920,
+        height=1080,
+        fps=30,
+        video_bitrate=9000,  # 9 Mbps
+        # Audio: 128kbps AAC
+        audio_bitrate=128,
+        sample_rate=44100,
+        channels=2,
+        # Keyframe every 3 seconds
+        keyframe_interval=3,
     )
     vtuber.stream = StreamManager(hls_config)
 
