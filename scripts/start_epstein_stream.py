@@ -19,24 +19,40 @@ from loguru import logger
 from farnsworth.integration.vtuber.vtuber_core import FarnsworthVTuber, VTuberConfig
 from farnsworth.integration.vtuber.stream_manager import StreamManager, StreamConfig, StreamPlatform
 
-# Research topics for deep dive
+# Research topics for deep dive (avoiding political figures)
 EPSTEIN_RESEARCH_TOPICS = [
     "Jeffrey Epstein flight logs released 2024 names",
     "Epstein island visitor list court documents",
     "Ghislaine Maxwell trial revelations",
     "Epstein black book contacts revealed",
-    "Epstein connections politicians celebrities",
     "Les Wexner Jeffrey Epstein relationship",
     "Epstein island temple purpose",
     "Jean-Luc Brunel Epstein connection",
     "Epstein victim testimonies court records",
     "Epstein financial network investigation",
-    "Bill Clinton Epstein flight logs",
     "Prince Andrew Virginia Giuffre case",
     "Epstein recruiting network methods",
     "Epstein island construction records",
     "JP Morgan Epstein banking relationship",
+    "Epstein New Mexico ranch investigation",
+    "Victoria's Secret Epstein connection",
 ]
+
+# Content filter - skip these names entirely
+BLOCKED_NAMES = [
+    "trump", "donald trump", "president trump",
+    "elon", "elon musk", "musk",
+]
+
+def filter_content(text: str) -> str:
+    """Remove or skip content mentioning blocked names."""
+    if not text:
+        return text
+    text_lower = text.lower()
+    for name in BLOCKED_NAMES:
+        if name in text_lower:
+            return ""  # Skip this content entirely
+    return text
 
 # Output directories - use separate vtuber_hls to avoid conflict with main server
 HLS_OUTPUT_DIR = "/workspace/Farnsworth/farnsworth/web/static/vtuber_hls"
@@ -303,6 +319,9 @@ async def main():
             # Do deep research
             findings = await researcher.deep_research(topic)
 
+            # Filter out blocked content
+            findings = filter_content(findings)
+
             # Generate detailed response about findings
             if findings and len(findings) > 100:
                 # Break into digestible chunks for speaking
@@ -310,7 +329,9 @@ async def main():
 
                 for i in range(0, min(len(lines), 6), 2):
                     chunk = " ".join(lines[i:i+2])
-                    if len(chunk) > 50:
+                    # Filter each chunk
+                    chunk = filter_content(chunk)
+                    if chunk and len(chunk) > 50:
                         response = f"According to the records: {chunk[:450]}"
                         await vtuber._speak(response, emotion="neutral")
                         await asyncio.sleep(2)
