@@ -308,8 +308,14 @@ class AvatarController:
         if not self._image_frames:
             return False
 
-        # Set base image
-        self._base_image = self._image_frames.get("base") or self._image_frames.get("neutral")
+        # Set base image (can't use 'or' with numpy arrays)
+        if "base" in self._image_frames:
+            self._base_image = self._image_frames["base"]
+        elif "neutral" in self._image_frames:
+            self._base_image = self._image_frames["neutral"]
+        else:
+            # Use first available
+            self._base_image = list(self._image_frames.values())[0]
 
         # Ensure we have speaking frames (duplicate if missing)
         if "speaking_1" not in self._image_frames:
