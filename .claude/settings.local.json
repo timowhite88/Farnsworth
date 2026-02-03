@@ -133,7 +133,10 @@
       "Bash(git rm:*)",
       "Bash(start \"\" \"C:\\\\Fawnsworth\\\\claude_auth.html\")",
       "Bash(python scripts/build_documentation.py:*)",
-      "WebFetch(domain:developer.twitter.com)"
+      "WebFetch(domain:developer.twitter.com)",
+      "WebFetch(domain:media.twitter.com)",
+      "WebFetch(domain:help.x.com)",
+      "WebFetch(domain:create.twitter.com)"
     ]
   }
 }

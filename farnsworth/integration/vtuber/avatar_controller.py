@@ -280,6 +280,7 @@ class AvatarController:
     def _load_generated_avatars(self, avatar_dir: Path) -> bool:
         """Load generated avatar images from directory"""
         self._image_frames = {}
+        self._viseme_frames = {}  # Separate dict for viseme-specific frames
 
         # Expected avatar files
         expressions = [
@@ -305,6 +306,14 @@ class AvatarController:
                     self._image_frames[expr] = img
                     logger.debug(f"Loaded avatar: {expr}")
 
+        # Load viseme-specific frames (Rhubarb mouth shapes A-X)
+        visemes_dir = avatar_dir / "visemes"
+        if visemes_dir.exists():
+            self._load_viseme_frames(visemes_dir)
+        else:
+            # Create default viseme mappings from speaking frames
+            self._create_default_viseme_mapping()
+
         if not self._image_frames:
             return False
 
@@ -326,6 +335,78 @@ class AvatarController:
             self._image_frames["speaking_3"] = self._base_image.copy()
 
         return True
+
+    def _load_viseme_frames(self, visemes_dir: Path):
+        """Load Rhubarb viseme-specific avatar frames"""
+        # Rhubarb uses shapes A-X
+        viseme_names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'X']
+
+        for viseme in viseme_names:
+            # Try multiple naming patterns
+            patterns = [
+                f"farnsworth_viseme_{viseme}.png",
+                f"mouth_{viseme}.png",
+                f"viseme_{viseme}.png",
+            ]
+
+            for pattern in patterns:
+                img_path = visemes_dir / pattern
+                if img_path.exists():
+                    img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
+                    if img is not None:
+                        if img.shape[0] != self.config.height or img.shape[1] != self.config.width:
+                            img = cv2.resize(img, (self.config.width, self.config.height))
+                        if len(img.shape) == 2:
+                            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+                        elif img.shape[2] == 3:
+                            img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+
+                        self._viseme_frames[viseme] = img
+                        logger.debug(f"Loaded viseme frame: {viseme}")
+                        break
+
+        if self._viseme_frames:
+            logger.info(f"Loaded {len(self._viseme_frames)} viseme frames for lip-sync")
+        else:
+            self._create_default_viseme_mapping()
+
+    def _create_default_viseme_mapping(self):
+        """Create default viseme to expression mapping when no dedicated frames exist"""
+        # Map Rhubarb visemes to available speaking frames
+        # X = silence -> neutral
+        # A = closed (M,B,P) -> neutral
+        # B = slightly open -> speaking_1
+        # C = open (E,AH) -> speaking_2
+        # D = wide open (AA) -> speaking_3
+        # E = round (OH) -> speaking_2
+        # F = pucker (OO) -> speaking_1
+        # G = teeth (F,V) -> speaking_1
+        # H = tongue (L,TH) -> speaking_2
+
+        base = self._base_image if self._base_image is not None else self._image_frames.get("neutral")
+
+        if base is None:
+            logger.warning("No base image for viseme mapping")
+            return
+
+        neutral = self._image_frames.get("neutral", base)
+        speak1 = self._image_frames.get("speaking_1", base)
+        speak2 = self._image_frames.get("speaking_2", base)
+        speak3 = self._image_frames.get("speaking_3", base)
+
+        self._viseme_frames = {
+            'X': neutral,  # Silence
+            'A': neutral,  # Closed lips (M, B, P)
+            'B': speak1,   # Slightly open
+            'C': speak2,   # Open (E, EH)
+            'D': speak3,   # Wide open (AA)
+            'E': speak2,   # Round (OH)
+            'F': speak1,   # Pucker (OO)
+            'G': speak1,   # Teeth on lip (F, V)
+            'H': speak2,   # Tongue (L, TH)
+        }
+
+        logger.info("Created default viseme mapping from speaking frames")
 
     async def _init_neural(self) -> bool:
         """Initialize neural avatar (MuseTalk/StyleAvatar)"""
@@ -611,12 +692,43 @@ class AvatarController:
             return None
 
     async def _render_image_sequence(self) -> Optional[np.ndarray]:
-        """Render using pre-generated image frames"""
+        """Render using pre-generated image frames with viseme support"""
         if self._base_image is None:
             return None
 
-        # Select frame based on state
-        if self.state.is_speaking:
+        # If speaking and we have viseme data, use viseme-based animation
+        if self.state.is_speaking and self._viseme_frames:
+            # Get current viseme from state
+            viseme = self.state.current_viseme.upper() if self.state.current_viseme else 'X'
+
+            # Map internal viseme names to Rhubarb shapes
+            viseme_map = {
+                'SIL': 'X', 'PP': 'A', 'FF': 'G', 'TH': 'H',
+                'DD': 'B', 'KK': 'B', 'CH': 'C', 'SS': 'B',
+                'NN': 'B', 'RR': 'B', 'AA': 'D', 'E': 'C',
+                'IH': 'B', 'OH': 'E', 'OU': 'F',
+                # Direct Rhubarb shapes pass through
+                'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D',
+                'E': 'E', 'F': 'F', 'G': 'G', 'H': 'H', 'X': 'X'
+            }
+
+            rhubarb_shape = viseme_map.get(viseme, 'X')
+
+            if rhubarb_shape in self._viseme_frames:
+                return self._viseme_frames[rhubarb_shape].copy()
+
+            # Fallback to intensity-based if specific viseme not found
+            intensity = self.state.mouth_open
+            if intensity > 0.7:
+                frame_key = "speaking_3"
+            elif intensity > 0.4:
+                frame_key = "speaking_2"
+            elif intensity > 0.1:
+                frame_key = "speaking_1"
+            else:
+                frame_key = "neutral"
+        elif self.state.is_speaking:
+            # No viseme frames, use intensity-based
             intensity = self.state.mouth_open
             if intensity > 0.7:
                 frame_key = "speaking_3"
@@ -627,6 +739,7 @@ class AvatarController:
             else:
                 frame_key = "neutral"
         else:
+            # Not speaking, use emotion-based expression
             frame_key = self.state.current_emotion
             if frame_key not in self._image_frames:
                 frame_key = "neutral"

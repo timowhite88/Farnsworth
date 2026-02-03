@@ -136,14 +136,26 @@ class LipSyncEngine:
 
     def _check_rhubarb(self):
         """Check if Rhubarb Lip Sync is available"""
-        try:
-            result = subprocess.run(['rhubarb', '--version'],
-                                   capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                self._rhubarb_path = 'rhubarb'
-                logger.info(f"Rhubarb Lip Sync found: {result.stdout.strip()}")
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            logger.warning("Rhubarb Lip Sync not found - using amplitude fallback")
+        # Check common installation paths
+        rhubarb_paths = [
+            '/workspace/Rhubarb-Lip-Sync-1.13.0-Linux/rhubarb',
+            '/workspace/rhubarb/rhubarb',
+            '/usr/local/bin/rhubarb',
+            'rhubarb'  # PATH fallback
+        ]
+
+        for path in rhubarb_paths:
+            try:
+                result = subprocess.run([path, '--version'],
+                                       capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    self._rhubarb_path = path
+                    logger.info(f"Rhubarb Lip Sync found at {path}")
+                    return
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                continue
+
+        logger.warning("Rhubarb Lip Sync not found - using amplitude fallback")
 
     async def generate_from_audio(self, audio_path: str,
                                   transcript: Optional[str] = None) -> LipSyncData:
@@ -156,8 +168,9 @@ class LipSyncEngine:
     async def _generate_rhubarb(self, audio_path: str,
                                 transcript: Optional[str] = None) -> LipSyncData:
         """Use Rhubarb Lip Sync for accurate phoneme detection"""
+        transcript_path = None
         try:
-            cmd = [self._rhubarb_path, audio_path, '-f', 'json', '--machineReadable']
+            cmd = [self._rhubarb_path, audio_path, '-f', 'json']
 
             # Add transcript for better accuracy
             if transcript:
@@ -166,46 +179,60 @@ class LipSyncEngine:
                     transcript_path = f.name
                 cmd.extend(['-d', transcript_path])
 
+            logger.debug(f"Running Rhubarb: {' '.join(cmd)}")
+
             result = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
 
-            stdout, stderr = await result.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                result.communicate(),
+                timeout=60.0  # 60 second timeout
+            )
 
             if result.returncode != 0:
                 logger.error(f"Rhubarb failed: {stderr.decode()}")
                 return await self._generate_amplitude(audio_path)
 
-            data = json.loads(stdout.decode())
+            # Parse JSON output (skip progress lines)
+            output = stdout.decode()
+            json_start = output.find('{')
+            if json_start >= 0:
+                data = json.loads(output[json_start:])
+            else:
+                logger.error("No JSON output from Rhubarb")
+                return await self._generate_amplitude(audio_path)
 
             visemes = []
-            for i, cue in enumerate(data.get('mouthCues', [])):
+            for cue in data.get('mouthCues', []):
                 start = cue['start']
                 end = cue['end']
                 shape = cue['value']
 
-                # Rhubarb uses A-X for shapes, map to our visemes
-                rhubarb_map = {
-                    'A': 'PP',   # Closed
-                    'B': 'aa',   # Open
-                    'C': 'E',    # Open (E/I)
-                    'D': 'oh',   # Round
-                    'E': 'SS',   # Teeth
-                    'F': 'ou',   # Small round
-                    'G': 'FF',   # Teeth on lip
-                    'H': 'DD',   # Tongue up
-                    'X': 'sil',  # Silence
+                # Keep Rhubarb shapes (A-X) directly - avatar controller will map them
+                # Also provide intensity based on mouth openness
+                intensity_map = {
+                    'X': 0.0,   # Silence
+                    'A': 0.1,   # Closed (M, B, P)
+                    'B': 0.3,   # Slightly open
+                    'C': 0.6,   # Open (E, EH)
+                    'D': 0.9,   # Wide open (AA)
+                    'E': 0.5,   # Round (OH)
+                    'F': 0.4,   # Pucker (OO)
+                    'G': 0.3,   # Teeth (F, V)
+                    'H': 0.5,   # Tongue (L, TH)
                 }
 
-                viseme = rhubarb_map.get(shape, 'sil')
                 visemes.append(VisemeEvent(
-                    viseme=viseme,
+                    viseme=shape,  # Keep original Rhubarb shape (A-X)
                     start_time=start,
                     end_time=end,
-                    intensity=1.0 if viseme != 'sil' else 0.0
+                    intensity=intensity_map.get(shape, 0.5)
                 ))
+
+            logger.info(f"Rhubarb generated {len(visemes)} visemes for {data.get('metadata', {}).get('duration', 0):.1f}s audio")
 
             return LipSyncData(
                 duration=data.get('metadata', {}).get('duration', 0),
@@ -213,9 +240,19 @@ class LipSyncEngine:
                 audio_path=audio_path
             )
 
+        except asyncio.TimeoutError:
+            logger.error("Rhubarb timed out")
+            return await self._generate_amplitude(audio_path)
         except Exception as e:
             logger.error(f"Rhubarb processing failed: {e}")
             return await self._generate_amplitude(audio_path)
+        finally:
+            # Cleanup transcript file
+            if transcript_path:
+                try:
+                    os.unlink(transcript_path)
+                except:
+                    pass
 
     async def _generate_amplitude(self, audio_path: str) -> LipSyncData:
         """Generate lip sync from audio amplitude (simpler fallback)"""

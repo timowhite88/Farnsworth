@@ -226,17 +226,15 @@ async def main():
 
     # Setup HLS stream (local output, no RTMP key needed)
     hls_config = StreamConfig(
-        platform=StreamPlatform.CUSTOM,
-        rtmp_url="",  # No RTMP - HLS only
-        stream_key="",
-        width=1280,
-        height=720,
+        platform=StreamPlatform.TWITTER_HLS,
+        hls_output_dir=HLS_OUTPUT_DIR,
+        hls_base_url=HLS_BASE_URL,
+        width=854,
+        height=480,
         fps=24,
-        video_bitrate=2500,
+        video_bitrate=1500,
     )
     vtuber.stream = StreamManager(hls_config)
-    vtuber.stream.hls_output_dir = HLS_OUTPUT_DIR
-    vtuber.stream.hls_base_url = HLS_BASE_URL
 
     # Store researcher reference
     vtuber._researcher = researcher

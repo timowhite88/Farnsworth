@@ -189,12 +189,12 @@ class TwitterChatReader:
                 await asyncio.sleep(10)
 
     async def _fetch_broadcast_replies(self):
-        """Fetch replies to the broadcast tweet using conversation_id"""
+        """Fetch replies to the broadcast tweet using multiple methods"""
         if not self._session or not self.config.broadcast_tweet_id:
             return
 
+        # Try conversation_id search first (requires elevated access)
         try:
-            # Use conversation_id search to get all replies to the broadcast
             url = "https://api.twitter.com/2/tweets/search/recent"
             params = {
                 "query": f"conversation_id:{self.config.broadcast_tweet_id} -is:retweet",
@@ -208,14 +208,54 @@ class TwitterChatReader:
                 if resp.status == 200:
                     data = await resp.json()
                     await self._process_tweets(data)
+                    return  # Success, no need for fallback
                 elif resp.status == 429:
                     logger.warning("Rate limited on conversation search, backing off")
                     await asyncio.sleep(60)
-                else:
-                    logger.warning(f"Conversation search returned {resp.status}")
+                    return
+                # 401/403 = auth issue, try fallback
 
         except Exception as e:
-            logger.error(f"Failed to fetch broadcast replies: {e}")
+            logger.debug(f"Conversation search failed: {e}")
+
+        # Fallback: Use tweepy to search for replies
+        await self._fetch_replies_tweepy()
+
+    async def _fetch_replies_tweepy(self):
+        """Fallback method using tweepy to get replies"""
+        if not self._tweepy_client or not self.config.broadcast_tweet_id:
+            return
+
+        try:
+            import tweepy
+
+            # Search for tweets replying to our broadcast
+            query = f"to:FarnsworthAI -is:retweet"
+            tweets = self._tweepy_client.search_recent_tweets(
+                query=query,
+                max_results=50,
+                tweet_fields=["author_id", "created_at", "in_reply_to_user_id", "conversation_id"],
+                user_fields=["name", "username", "verified"],
+                expansions=["author_id"]
+            )
+
+            if tweets.data:
+                # Convert to dict format for _process_tweets
+                data = {
+                    "data": [{"id": str(t.id), "text": t.text, "author_id": str(t.author_id),
+                             "created_at": t.created_at.isoformat() if t.created_at else None}
+                            for t in tweets.data],
+                    "includes": {
+                        "users": [{"id": str(u.id), "username": u.username, "name": u.name,
+                                  "verified": getattr(u, 'verified', False)}
+                                 for u in (tweets.includes.get('users', []) if tweets.includes else [])]
+                    }
+                }
+                await self._process_tweets(data)
+                logger.debug(f"Tweepy found {len(tweets.data)} potential replies")
+
+        except Exception as e:
+            logger.debug(f"Tweepy reply search failed: {e}")
 
     async def reply_to_tweet(self, tweet_id: str, text: str) -> bool:
         """
