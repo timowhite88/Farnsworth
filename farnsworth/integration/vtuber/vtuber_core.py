@@ -809,34 +809,62 @@ class FarnsworthVTuber:
             self._current_speech_text = ""
 
     async def _generate_speech(self, text: str, agent: str) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
-        """Generate speech audio using edge-tts or Farnsworth voice system
+        """Generate speech audio using MultiVoice system (XTTS voice cloning)
+
+        Priority: MultiVoiceSystem (cloned voices) > edge-tts (fallback)
 
         Returns: (audio_data, duration, audio_file_path)
         """
+        import soundfile as sf
 
-        # Try edge-tts first (reliable, fast)
+        # PRIMARY: Use MultiVoiceSystem with cloned voices for each agent
+        if self.voice_system:
+            try:
+                logger.info(f"Generating speech for {agent} using MultiVoiceSystem...")
+                audio_path = await self.voice_system.generate_speech(
+                    text=text,
+                    bot_name=agent,
+                    use_cache=True
+                )
+                if audio_path:
+                    audio, sr = sf.read(str(audio_path))
+                    duration = len(audio) / sr
+                    logger.info(f"[{agent}] Generated {duration:.1f}s TTS with cloned voice: {audio_path}")
+                    return audio, duration, str(audio_path)
+            except Exception as e:
+                logger.warning(f"MultiVoiceSystem TTS failed for {agent}: {e}")
+
+        # FALLBACK: Use edge-tts with bot-specific voices
         try:
             import edge_tts
-            import tempfile
-            import soundfile as sf
+            import subprocess
 
-            # Single Farnsworth voice for entire stream
-            voice = "en-US-GuyNeural"  # Older male voice for Farnsworth
+            # Map agents to Edge TTS voices for personality matching
+            edge_voices = {
+                "Farnsworth": "en-US-GuyNeural",      # Older male, professor
+                "DeepSeek": "en-US-DavisNeural",      # Deep authoritative male
+                "Phi": "en-US-ChristopherNeural",     # Clear technical male
+                "Grok": "en-US-JasonNeural",          # Casual witty male
+                "Gemini": "en-US-JennyNeural",        # Professional female
+                "Kimi": "en-US-AriaNeural",           # Calm wise female
+                "Claude": "en-GB-RyanNeural",         # Refined British male
+                "ClaudeOpus": "en-US-GuyNeural",      # Authoritative male
+                "HuggingFace": "en-US-SaraNeural",    # Friendly enthusiastic female
+                "Swarm-Mind": "en-AU-WilliamNeural",  # Ethereal collective
+            }
+            voice = edge_voices.get(agent, "en-US-GuyNeural")
 
-            # Generate with edge-tts
             communicate = edge_tts.Communicate(text, voice)
 
-            # Create temp directory for stream audio
             temp_dir = Path(os.environ.get('TEMP', '/tmp')) / 'farnsworth_tts'
             temp_dir.mkdir(parents=True, exist_ok=True)
 
-            mp3_path = str(temp_dir / f"tts_{int(time.time() * 1000)}.mp3")
+            mp3_path = str(temp_dir / f"tts_{agent}_{int(time.time() * 1000)}.mp3")
             wav_path = mp3_path.replace(".mp3", ".wav")
 
             await communicate.save(mp3_path)
 
             # Convert to wav for streaming (44.1kHz stereo for Twitter)
-            import subprocess
             subprocess.run(
                 ["ffmpeg", "-y", "-i", mp3_path, "-ar", "44100", "-ac", "2", wav_path],
                 capture_output=True, timeout=30
@@ -845,33 +873,16 @@ class FarnsworthVTuber:
             audio, sr = sf.read(wav_path)
             duration = len(audio) / sr
 
-            # Cleanup mp3
             try:
                 os.unlink(mp3_path)
             except:
                 pass
 
-            logger.info(f"Generated {duration:.1f}s TTS audio: {wav_path}")
+            logger.info(f"[{agent}] Generated {duration:.1f}s TTS (edge fallback): {wav_path}")
             return audio, duration, wav_path
 
         except Exception as e:
-            logger.warning(f"edge-tts failed: {e}")
-
-        # Try Farnsworth voice system
-        if self.voice_system:
-            try:
-                audio_path = await self.voice_system.generate_speech(
-                    text=text,
-                    bot_name=agent,
-                    output_format="wav"
-                )
-                if audio_path:
-                    import soundfile as sf
-                    audio, sr = sf.read(audio_path)
-                    duration = len(audio) / sr
-                    return audio, duration, audio_path
-            except Exception as e:
-                logger.error(f"Voice system TTS failed: {e}")
+            logger.warning(f"edge-tts failed for {agent}: {e}")
 
         # Fallback - no audio, estimate duration
         words = len(text.split())
