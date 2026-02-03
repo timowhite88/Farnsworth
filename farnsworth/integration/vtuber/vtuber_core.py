@@ -839,18 +839,18 @@ class FarnsworthVTuber:
             import edge_tts
             import subprocess
 
-            # Map agents to Edge TTS voices for personality matching
+            # Map agents to Edge TTS voices (only verified working voices)
             edge_voices = {
                 "Farnsworth": "en-US-GuyNeural",      # Older male, professor
-                "DeepSeek": "en-US-DavisNeural",      # Deep authoritative male
+                "DeepSeek": "en-US-RogerNeural",      # Deep authoritative male
                 "Phi": "en-US-ChristopherNeural",     # Clear technical male
-                "Grok": "en-US-JasonNeural",          # Casual witty male
+                "Grok": "en-US-EricNeural",           # Casual witty male
                 "Gemini": "en-US-JennyNeural",        # Professional female
                 "Kimi": "en-US-AriaNeural",           # Calm wise female
                 "Claude": "en-GB-RyanNeural",         # Refined British male
                 "ClaudeOpus": "en-US-GuyNeural",      # Authoritative male
-                "HuggingFace": "en-US-SaraNeural",    # Friendly enthusiastic female
-                "Swarm-Mind": "en-AU-WilliamNeural",  # Ethereal collective
+                "HuggingFace": "en-US-JennyNeural",   # Friendly enthusiastic female
+                "Swarm-Mind": "en-US-SteffanNeural",  # Ethereal collective
             }
             voice = edge_voices.get(agent, "en-US-GuyNeural")
 
