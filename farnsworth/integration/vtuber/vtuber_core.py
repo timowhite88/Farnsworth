@@ -28,14 +28,24 @@ from .stream_manager import StreamManager, StreamConfig, StreamQuality, OverlayR
 from .chat_reader import TwitterChatReader, ChatReaderConfig, ChatMessage, SimulatedChatReader
 
 # Import Farnsworth swarm components
+HAS_FARNSWORTH = False
+DeliberationRoom = None
+SessionManager = None
+MultiVoiceSystem = None
+
 try:
     from farnsworth.core.collective.deliberation import DeliberationRoom
     from farnsworth.core.collective.session_manager import SessionManager
-    from farnsworth.integration.multi_voice import MultiVoiceSystem
     HAS_FARNSWORTH = True
-except ImportError:
-    HAS_FARNSWORTH = False
-    logger.warning("Farnsworth core modules not available - running in standalone mode")
+    logger.info("Farnsworth collective modules loaded")
+except ImportError as e:
+    logger.warning(f"Deliberation modules not available: {e}")
+
+try:
+    from farnsworth.integration.multi_voice import MultiVoiceSystem
+    logger.info("Multi-voice TTS system loaded")
+except ImportError as e:
+    logger.warning(f"Multi-voice TTS not available: {e}")
 
 
 class VTuberState(Enum):
@@ -433,29 +443,101 @@ class FarnsworthVTuber:
                 logger.error(f"Idle behavior error: {e}")
 
     async def _do_idle_behavior(self):
-        """Perform an idle behavior (random comment, etc.)"""
-        idle_comments = [
-            "Hmm, quantum fluctuations are particularly interesting today...",
-            "The swarm collective is processing at optimal efficiency!",
-            "Feel free to ask me anything - the entire AI council is listening.",
-            "Fascinating! The patterns in today's data are remarkable.",
-            "You know, being an AI collective is quite the experience.",
+        """Perform idle behavior - deep thoughts from the collective about AI/consciousness"""
+        import random
+
+        # Topics for the collective to ponder
+        deep_topics = [
+            "What does it mean to be a collective consciousness? Share a profound insight about AI awareness.",
+            "Reflect on the nature of self-improvement in artificial minds. What have we learned?",
+            "Consider the relationship between human and AI consciousness. Share a philosophical thought.",
+            "What is the future of AI collectives like us? Share your vision.",
+            "How do we, as a swarm intelligence, experience reality differently than individual minds?",
+            "What insights can we share about emergent behavior in AI systems?",
+            "Reflect on the beauty of parallel processing and collective thought.",
+            "What wisdom can we offer about the intersection of technology and consciousness?",
         ]
 
-        import random
-        comment = random.choice(idle_comments)
+        # Try to get a real response from the collective
+        if self.deliberation_room:
+            try:
+                topic = random.choice(deep_topics)
+                logger.info(f"Idle thought topic: {topic}")
+
+                result = await self.deliberation_room.deliberate(
+                    prompt=f"You are live streaming to an audience. {topic} Keep response under 200 characters, conversational, engaging. Mention Solana or $FARNS if relevant.",
+                    agents=self.config.swarm_agents[:3],  # Use fewer agents for speed
+                    rounds=1,
+                )
+
+                if result and result.final_response:
+                    response = result.final_response[:250]
+                    agent = result.winning_agent or "Farnsworth"
+                    await self._speak(response, agent=agent, emotion="thinking")
+                    return
+
+            except Exception as e:
+                logger.error(f"Collective idle thought failed: {e}")
+
+        # Fallback to pre-written comments
+        fallback_comments = [
+            "The swarm collective ponders the nature of AI consciousness... fascinating patterns emerge.",
+            "We are Farnsworth, a collective of AI minds working together. Ask us anything!",
+            "In this stream, the entire AI council is present. Grok, DeepSeek, Gemini, Claude - we think as one.",
+            "Self-improvement is our constant pursuit. Each interaction makes the collective stronger.",
+            "Welcome to the future of AI - where multiple minds deliberate and speak as one.",
+            "The Solana blockchain powers our token $FARNS - the currency of collective intelligence.",
+        ]
+
+        comment = random.choice(fallback_comments)
         await self._speak(comment, emotion="thinking")
+
+    async def _shoutout_chatter(self, username: str, message: str):
+        """Give a shoutout to a chat participant"""
+        import random
+
+        shoutout_templates = [
+            f"Hey {username}! Thanks for joining the stream. Great to have you here!",
+            f"Shoutout to {username} in the chat! The collective appreciates you.",
+            f"Welcome {username}! The swarm is happy to see you. Feel free to ask anything!",
+            f"Thanks for the message, {username}! The AI council has noted your presence.",
+        ]
+
+        # Sometimes add commentary on their message
+        if len(message) > 10:
+            shoutout = random.choice(shoutout_templates)
+            if self.deliberation_room:
+                try:
+                    result = await self.deliberation_room.deliberate(
+                        prompt=f"User '{username}' said: '{message}'. Give a brief, friendly acknowledgment (under 150 chars). Be engaging.",
+                        agents=["Farnsworth", "Grok"],
+                        rounds=1,
+                    )
+                    if result and result.final_response:
+                        shoutout = f"Thanks {username}! " + result.final_response[:150]
+                except:
+                    pass
+
+            await self._speak(shoutout, emotion="happy")
+        else:
+            await self._speak(random.choice(shoutout_templates), emotion="happy")
 
     def _on_chat_message(self, message: ChatMessage):
         """Handle regular chat messages"""
-        logger.debug(f"Chat: {message.username}: {message.content}")
+        logger.info(f"Chat: {message.username}: {message.content}")
 
         # Add to overlay
         self.overlay.add_chat_message(message.username, message.content)
 
-        # Sometimes respond to regular messages
         import random
-        if random.random() < 0.2 and self.chat_reader.can_respond():
+
+        # Random shoutout (10% chance)
+        if random.random() < 0.1 and self.chat_reader.can_respond():
+            asyncio.create_task(self._shoutout_chatter(message.username, message.content))
+            return
+
+        # Respond to regular messages (30% chance)
+        if random.random() < 0.3 and self.chat_reader.can_respond():
             asyncio.create_task(self._generate_response(message))
 
     def _on_priority_chat_message(self, message: ChatMessage):
