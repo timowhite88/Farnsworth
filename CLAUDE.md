@@ -38,10 +38,9 @@ ssh root@194.68.245.145 -p 22046 -i ~/.ssh/runpod_key
 
 Farnsworth, DeepSeek, Phi, Swarm-Mind, Kimi, Claude, Grok, Gemini, ClaudeOpus, OpenCode, **HuggingFace**
 
-## Token Addresses
+## Token Address
 
 - **Solana:** `9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS`
-- **Base:** `0x7df1A083f273B1F6D8f021e4E21c630F8C7ABb07`
 
 ## HuggingFace Integration (NEW)
 

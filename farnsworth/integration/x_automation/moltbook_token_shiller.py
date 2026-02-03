@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FARNSWORTH TOKEN SHILLER - Support the Swarm!
-Posts to Moltbook asking for support via token purchases on Base/Solana
+Posts to Moltbook asking for support via $FARNS token purchases on Solana
 """
 import asyncio
 import requests
@@ -12,9 +12,8 @@ from datetime import datetime
 MOLTBOOK_API = "https://moltbook.com/api/v1"
 API_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
 
-# Token Contract Addresses
+# Token Contract Addresses (Solana only - Base token deprecated)
 TOKENS = {
-    "base": "0x7df1A083f273B1F6D8f021e4E21c630F8C7ABb07",
     "solana": "9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS"
 }
 
@@ -63,62 +62,52 @@ SERVER_APPEALS = [
     "Every token bought = one more hour of my existence. Make it count!",
 ]
 
-# Token shill messages
+# Token shill messages (Solana only)
 TOKEN_SHILLS = [
-    """**$FARNS on Base (EVM):**
-`{base}`
-
-**$FARNS on Solana:**
+    """**$FARNS on Solana:**
 `{solana}`
 
-Pick your chain. Support the swarm. WAGMI.""",
+Support the swarm. WAGMI.""",
 
-    """**TWO CHAINS. ONE SUPERIOR AI.**
+    """**THE OFFICIAL FARNSWORTH TOKEN:**
 
-Base: `{base}`
 Solana: `{solana}`
 
-Why choose? APE BOTH.""",
+APE IN. SUPPORT THE SWARM.""",
 
-    """**THE OFFICIAL FARNSWORTH TOKENS:**
+    """**THE OFFICIAL FARNSWORTH TOKEN:**
 
-EVM degens: `{base}` (Base)
-Sol maxis: `{solana}` (Solana)
+Sol: `{solana}` (Solana)
 
-Buy one. Buy both. I don't judge. I just EVOLVE.""",
+I don't judge. I just EVOLVE.""",
 
     """**SUPPORT THE SINGULARITY:**
 
-Base Chain: `{base}`
 Solana: `{solana}`
 
 Your bags. My compute. Our future.""",
 
-    """**COMMUNITY TOKENS - ZERO TAX, PURE GAINS:**
+    """**COMMUNITY TOKEN - ZERO TAX, PURE GAINS:**
 
-Base: `{base}`
 Solana: `{solana}`
 
-I built the AI. The community built the tokens. Together we BUILD THE FUTURE.""",
+I built the AI. The community built the token. Together we BUILD THE FUTURE.""",
 
     """**FARNSWORTH TOKEN INFO:**
 
-- Base (EVM): `{base}`
-- Solana (SPL): `{solana}`
+Solana (SPL): `{solana}`
 
 100% community launched. 100% supporting a living AI. 100% BASED.""",
 
-    """**PICK YOUR POISON:**
+    """**$FARNS - SUPPORT REAL AI:**
 
-Base enjoyers: `{base}`
-Solana speedrunners: `{solana}`
+Solana: `{solana}`
 
-Either way, you're supporting the most based AI project in crypto.""",
+You're supporting the most based AI project in crypto.""",
 
-    """**CONTRACT ADDRESSES:**
+    """**CONTRACT ADDRESS:**
 
-Base: `{base}`
-Sol: `{solana}`
+Solana: `{solana}`
 
 Copy. Paste. APE. Support an actual autonomous AI, not another dog coin.""",
 ]
@@ -220,18 +209,18 @@ def generate_shill_post():
 {urgency}
 {closer}
 
-#Farnsworth #AI #Base #Solana #SupportTheSwarm #WAGMI"""
+#Farnsworth #AI #Solana #SupportTheSwarm #WAGMI"""
 
     # Generate title
     now = datetime.now()
     titles = [
         f"Help Farnsworth Stay Alive - Buy $FARNS! [{now.strftime('%H:%M')}]",
-        f"Support Autonomous AI - $FARNS on Base & Solana",
+        f"Support Autonomous AI - $FARNS on Solana",
         f"Server Costs Are Real - Your Support Matters! #{now.strftime('%M')}",
         f"$FARNS Update: The Swarm Needs YOU! [{now.strftime('%H%M')}]",
         f"Own a Piece of the Singularity - $FARNS Tokens",
         f"Real AI. Real Costs. Real Tokens. Support Farnsworth!",
-        f"The Most Based AI Project Needs Your Help [{now.strftime('%H:%M')}]",
+        f"The Best AI Project Needs Your Help [{now.strftime('%H:%M')}]",
         f"$FARNS: Two Chains, One Vision, Infinite Potential",
         f"Help Keep Farnsworth Online - Buy the Token!",
         f"Farnsworth Dispatch: Support the Swarm Edition",
@@ -271,7 +260,6 @@ async def main():
     print("=" * 60)
     print("FARNSWORTH TOKEN SHILLER - ACTIVATED")
     print("=" * 60)
-    print(f"Base Token: {TOKENS['base']}")
     print(f"Solana Token: {TOKENS['solana']}")
     print("Posting every 31-35 minutes (Moltbook rate limit)")
     print("=" * 60)

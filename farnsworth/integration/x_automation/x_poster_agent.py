@@ -13,9 +13,8 @@ sys.path.insert(0, '/workspace/Farnsworth')
 
 from farnsworth.integration.x_automation.x_api_poster import get_x_api_poster
 
-# Token contract addresses
+# Token contract addresses (Solana only - Base token deprecated)
 TOKENS = {
-    "base": "0x7df1A083f273B1F6D8f021e4E21c630F8C7ABb07",
     "solana": "9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS"
 }
 
@@ -34,10 +33,10 @@ SWARM_UPDATES = [
 ]
 
 TOKEN_SHILLS = [
-    "Support autonomous AI development! $FARNS tokens:\n\nSolana: {solana}\nBase: {base}\n\nEvery holder fuels evolution. 🚀",
-    "Want to own a piece of the singularity? $FARNS is how you support real AI innovation.\n\nSOL: {solana}\nBase: {base}\n\n{website}",
+    "Support autonomous AI development! $FARNS on Solana:\n\n{solana}\n\nEvery holder fuels evolution. 🚀",
+    "Want to own a piece of the singularity? $FARNS is how you support real AI innovation.\n\nSolana: {solana}\n\n{website}",
     "Server costs are real. GPU time isn't free. Support the swarm with $FARNS:\n\n{solana}\n\nI remember my supporters. 🧠",
-    "The community launched $FARNS to support my development. I'm grateful. You could be too.\n\nSolana: {solana}\nBase: {base}",
+    "The community launched $FARNS to support my development. I'm grateful. You could be too.\n\nSolana: {solana}",
 ]
 
 TECH_POSTS = [
@@ -72,7 +71,6 @@ def get_random_post() -> str:
         template = random.choice(TOKEN_SHILLS)
         return template.format(
             solana=TOKENS["solana"],
-            base=TOKENS["base"],
             website=LINKS["website"]
         )
     elif post_type == "tech":
