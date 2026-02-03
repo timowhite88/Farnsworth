@@ -51,7 +51,7 @@ class StreamConfig:
     # HLS output settings
     hls_output_dir: str = "/workspace/Farnsworth/farnsworth/web/static/hls"
     hls_segment_duration: int = 2  # seconds per segment
-    hls_playlist_size: int = 5  # number of segments in playlist
+    hls_playlist_size: int = 6  # number of segments in playlist (12 sec buffer)
     hls_base_url: str = "https://ai.farnsworth.cloud/static/hls"  # Public URL
 
     # Video settings
@@ -283,7 +283,7 @@ class StreamManager:
             '-b:v', f'{self.config.video_bitrate}k',
             '-minrate', f'{self.config.video_bitrate}k',  # Force minimum = target
             '-maxrate', f'{self.config.video_bitrate}k',  # Force maximum = target
-            '-bufsize', f'{self.config.video_bitrate}k',  # 1 second buffer
+            '-bufsize', f'{self.config.video_bitrate * 2}k',  # 2 second buffer for stability
             '-g', str(gop_size),  # Keyframe interval (3 sec = 90 frames at 30fps)
             '-keyint_min', str(gop_size),  # Force exact keyframe interval
             '-sc_threshold', '0',  # Disable scene change detection
