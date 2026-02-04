@@ -6,19 +6,32 @@ Novel Approaches:
 2. Capability-Based Routing - Match tasks to best agent
 3. Parallel Execution - Run independent subtasks concurrently
 4. Emergent Behavior - Allow agent team compositions to evolve
+
+AGI UPGRADES (v1.4):
+- Fully event-driven via Nexus (central nervous system)
+- Context vector routing (semantic agent matching)
+- Memory-aware task assignment (recall before routing)
+- Speculative agent spawning on spontaneous thoughts
+- Evolution triggers on dialogue consensus and anomalies
+- Closed AGI loop: Memory ↔ Nexus ↔ Swarm
 """
 
 import asyncio
 import random
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional, Callable
+from typing import Any, Optional, Callable, List, Dict
 import uuid
 
 from loguru import logger
 
 from farnsworth.agents.base_agent import BaseAgent, AgentCapability, AgentStatus, TaskResult
+from farnsworth.core.nexus import (
+    nexus, Signal, SignalType,
+    emit_thought, emit_memory_consolidation,
+)
 
 
 # =============================================================================
@@ -109,6 +122,11 @@ class SwarmTask:
     context: dict = field(default_factory=dict)
     priority: int = 5  # 1-10, higher = more priority
 
+    # AGI: Semantic routing
+    context_vector: Optional[List[float]] = None  # For neural routing
+    semantic_tags: List[str] = field(default_factory=list)
+    memory_refs: List[str] = field(default_factory=list)  # Related memory IDs
+
 
 @dataclass
 class SwarmState:
@@ -131,15 +149,24 @@ class SwarmOrchestrator:
     - Handoff protocols between specialists
     - Shared state and memory management
     - Parallel subtask execution
+
+    AGI Upgrades:
+    - Fully event-driven via Nexus signals
+    - Context vector routing (semantic agent matching)
+    - Memory-aware task assignment
+    - Speculative agent spawning on spontaneous thoughts
+    - Evolution triggers on dialogue consensus/anomalies
     """
 
     def __init__(
         self,
         max_concurrent_agents: int = 5,
         handoff_timeout_seconds: float = 30.0,
+        enable_nexus: bool = True,
     ):
         self.max_concurrent = max_concurrent_agents
         self.handoff_timeout = handoff_timeout_seconds
+        self.enable_nexus = enable_nexus
 
         self.state = SwarmState()
 
@@ -150,15 +177,380 @@ class SwarmOrchestrator:
         self.llm_backend = None
         self.memory_system = None
 
-        # Event handlers
+        # Event handlers (legacy - kept for backwards compatibility)
         self._on_task_complete: list[Callable] = []
         self._on_handoff: list[Callable] = []
 
         self._lock = asyncio.Lock()
 
-    def register_agent_factory(self, agent_type: str, factory: Callable[[], BaseAgent]):
-        """Register an agent factory for dynamic creation."""
+        # AGI: Nexus integration
+        self._nexus_subscribed = False
+        self._speculative_spawn_probability = 0.3  # Chance to spawn on thought
+        self._evolution_on_consensus = True
+        self._evolution_on_anomaly = True
+        self._memory_aware_routing = True
+
+        # AGI: Agent capability vectors (for semantic matching)
+        self._agent_type_vectors: Dict[str, List[float]] = {}
+
+        # AGI: Speculative agent tracking
+        self._speculative_agents: Dict[str, str] = {}  # agent_id -> thought_id
+
+        logger.info("SwarmOrchestrator initialized with AGI upgrades")
+
+    # =========================================================================
+    # NEXUS INTEGRATION (AGI Upgrade)
+    # =========================================================================
+
+    async def connect_to_nexus(self):
+        """
+        Connect the swarm to the Nexus event bus.
+
+        Subscribes to relevant signals for event-driven operation:
+        - THOUGHT_EMITTED: Speculative agent spawning
+        - DIALOGUE_CONSENSUS: Evolution triggers
+        - ANOMALY_DETECTED: Evolution and adaptation
+        - MEMORY_CONSOLIDATION: Memory-aware routing
+        - TASK_* signals: Task lifecycle events
+        """
+        if self._nexus_subscribed:
+            logger.warning("Already connected to Nexus")
+            return
+
+        # Subscribe to cognitive signals
+        nexus.subscribe(SignalType.THOUGHT_EMITTED, self._on_thought_emitted)
+        nexus.subscribe(SignalType.DIALOGUE_CONSENSUS, self._on_dialogue_consensus)
+        nexus.subscribe(SignalType.ANOMALY_DETECTED, self._on_anomaly_detected)
+        nexus.subscribe(SignalType.MEMORY_CONSOLIDATION, self._on_memory_consolidation)
+
+        # Subscribe to P2P signals
+        nexus.subscribe(SignalType.TASK_RECEIVED, self._on_external_task)
+        nexus.subscribe(SignalType.SKILL_RECEIVED, self._on_skill_received)
+
+        # Subscribe to resonance signals (collective thoughts)
+        nexus.subscribe(SignalType.RESONANCE_RECEIVED, self._on_resonance_received)
+
+        self._nexus_subscribed = True
+        logger.info("SwarmOrchestrator connected to Nexus")
+
+        # Emit startup signal
+        await nexus.emit(
+            SignalType.SYSTEM_STARTUP,
+            {"component": "swarm_orchestrator", "agent_types": list(self._agent_factories.keys())},
+            source="swarm_orchestrator",
+            urgency=0.8,
+        )
+
+    async def disconnect_from_nexus(self):
+        """Disconnect from Nexus."""
+        if not self._nexus_subscribed:
+            return
+
+        # Note: Nexus doesn't currently support unsubscribe by handler
+        # In production, we'd track subscription IDs
+        self._nexus_subscribed = False
+        logger.info("SwarmOrchestrator disconnected from Nexus")
+
+    async def _on_thought_emitted(self, signal: Signal):
+        """
+        Handle spontaneous thought signals.
+
+        May trigger speculative agent spawning for interesting thoughts.
+        """
+        if not self.enable_nexus:
+            return
+
+        thought_content = signal.payload.get("content", "")
+        thought_type = signal.payload.get("thought_type", "general")
+        relevance = signal.payload.get("relevance", 0.5)
+
+        # Only consider high-relevance thoughts
+        if relevance < 0.6:
+            return
+
+        # Probabilistic speculative spawning
+        if random.random() > self._speculative_spawn_probability:
+            return
+
+        # Determine if thought suggests a useful task
+        agent_type = self._infer_agent_type_from_thought(thought_content, thought_type)
+
+        if agent_type and agent_type in self._agent_factories:
+            # Spawn speculative agent
+            agent = await self.spawn_agent(agent_type)
+            if agent:
+                self._speculative_agents[agent.agent_id] = signal.id
+                logger.info(
+                    f"Speculative agent spawned: {agent.name} "
+                    f"(triggered by thought: {thought_content[:50]}...)"
+                )
+
+                # Create exploratory task from thought
+                if thought_type == "question":
+                    task_desc = f"Investigate: {thought_content}"
+                elif thought_type == "insight":
+                    task_desc = f"Explore implications: {thought_content}"
+                else:
+                    task_desc = f"Research: {thought_content}"
+
+                await self.submit_task(
+                    description=task_desc,
+                    context={"speculative": True, "source_thought": signal.id},
+                    context_vector=signal.context_vector,
+                    priority=3,  # Lower priority for speculative tasks
+                )
+
+    async def _on_dialogue_consensus(self, signal: Signal):
+        """
+        Handle dialogue consensus signals.
+
+        High-confidence consensus may trigger evolution of agent population.
+        """
+        if not self._evolution_on_consensus:
+            return
+
+        session_id = signal.payload.get("session_id")
+        confidence = signal.payload.get("confidence", 0.0)
+        decision = signal.payload.get("decision", "")
+
+        # High-confidence consensus triggers evolution
+        if confidence >= 0.85:
+            logger.info(f"High-confidence consensus detected - considering evolution")
+
+            if hasattr(self, '_evolution_config') and self._population:
+                # Boost fitness of agents that contributed to consensus
+                contributors = signal.payload.get("contributors", [])
+                for agent_id in contributors:
+                    for variant in self._population.values():
+                        if variant.base_agent_type in agent_id:
+                            variant.fitness_score *= 1.1  # 10% fitness boost
+                            variant.mutation_history.append(f"consensus_boost:{session_id}")
+
+    async def _on_anomaly_detected(self, signal: Signal):
+        """
+        Handle anomaly signals.
+
+        Anomalies may trigger defensive evolution or adaptation.
+        """
+        if not self._evolution_on_anomaly:
+            return
+
+        anomaly_type = signal.payload.get("anomaly_type", "unknown")
+        severity = signal.payload.get("severity", 0.5)
+
+        if severity >= 0.7:
+            logger.warning(f"High-severity anomaly: {anomaly_type} - triggering adaptation")
+
+            # Trigger evolution with stricter fitness threshold
+            if hasattr(self, '_evolution_config'):
+                self.evolve_subscriptions_internal(fitness_threshold=0.5)
+
+            # Potentially spawn defensive agents
+            if anomaly_type in ["security", "resource_exhaustion", "cascade_failure"]:
+                if "defensive" in self._agent_factories:
+                    agent = await self.spawn_agent("defensive")
+                    if agent:
+                        await self.submit_task(
+                            description=f"Investigate and mitigate anomaly: {anomaly_type}",
+                            context={"anomaly_signal": signal.id},
+                            priority=9,  # High priority
+                        )
+
+    async def _on_memory_consolidation(self, signal: Signal):
+        """
+        Handle memory consolidation signals.
+
+        Updates routing knowledge based on memory patterns.
+        """
+        if not self._memory_aware_routing:
+            return
+
+        memory_ids = signal.payload.get("memory_ids", [])
+        new_vector = signal.payload.get("new_vector")
+        session_ref = signal.payload.get("session_ref")
+
+        # If we have a context vector, update agent type vectors
+        if new_vector and session_ref:
+            # Associate vector with successful agent types
+            if session_ref in self.state.tasks:
+                task = self.state.tasks[session_ref]
+                if task.assigned_agent:
+                    agent = self.state.active_agents.get(task.assigned_agent)
+                    if agent:
+                        agent_type = agent.name
+                        self._update_agent_type_vector(agent_type, new_vector)
+
+    async def _on_external_task(self, signal: Signal):
+        """Handle tasks received from P2P network."""
+        task_data = signal.payload.get("task", {})
+        description = task_data.get("description", "")
+        priority = task_data.get("priority", 5)
+        context_vector = signal.context_vector
+
+        if description:
+            await self.submit_task(
+                description=description,
+                context={"p2p_source": signal.source_id},
+                context_vector=context_vector,
+                priority=priority,
+            )
+
+    async def _on_skill_received(self, signal: Signal):
+        """Handle new skill received from network."""
+        skill_type = signal.payload.get("skill_type")
+        factory_code = signal.payload.get("factory")
+
+        # Note: In production, would validate/sandbox received skills
+        logger.info(f"Skill received from network: {skill_type}")
+
+    async def _on_resonance_received(self, signal: Signal):
+        """Handle collective thoughts from other Farnsworth instances."""
+        thought = signal.payload.get("thought", "")
+        source_collective = signal.payload.get("source_collective")
+
+        if thought and signal.context_vector:
+            # Consider spawning based on collective resonance
+            await self._on_thought_emitted(signal)
+
+    def _infer_agent_type_from_thought(self, content: str, thought_type: str) -> Optional[str]:
+        """Infer what agent type might be useful for a thought."""
+        content_lower = content.lower()
+
+        if thought_type == "connection":
+            return "reasoning"
+        elif thought_type == "question":
+            if any(kw in content_lower for kw in ["code", "implement", "function"]):
+                return "code"
+            elif any(kw in content_lower for kw in ["research", "find", "search"]):
+                return "research"
+            return "reasoning"
+        elif thought_type == "insight":
+            return "reasoning"
+        elif thought_type == "idea":
+            if any(kw in content_lower for kw in ["creative", "design", "write"]):
+                return "creative"
+            return "general"
+
+        return None
+
+    def _update_agent_type_vector(self, agent_type: str, vector: List[float], alpha: float = 0.1):
+        """Update the semantic vector for an agent type (exponential moving average)."""
+        if agent_type not in self._agent_type_vectors:
+            self._agent_type_vectors[agent_type] = vector
+        else:
+            existing = self._agent_type_vectors[agent_type]
+            if len(existing) == len(vector):
+                # EMA update
+                self._agent_type_vectors[agent_type] = [
+                    alpha * v + (1 - alpha) * e
+                    for v, e in zip(vector, existing)
+                ]
+
+    def evolve_subscriptions_internal(self, fitness_threshold: float = 0.3):
+        """Trigger evolution of agent population based on fitness."""
+        if not hasattr(self, '_population') or not self._population:
+            return
+
+        # Flag low-fitness variants for replacement
+        to_replace = []
+        for variant_id, variant in self._population.items():
+            if variant.fitness_score < fitness_threshold:
+                to_replace.append(variant_id)
+
+        if to_replace:
+            logger.info(f"Evolution: {len(to_replace)} low-fitness variants flagged")
+
+    # =========================================================================
+    # NEXUS SIGNAL EMISSION
+    # =========================================================================
+
+    async def _emit_task_created(self, task: SwarmTask):
+        """Emit TASK_CREATED signal."""
+        if self.enable_nexus:
+            await nexus.emit(
+                SignalType.TASK_CREATED,
+                {
+                    "task_id": task.id,
+                    "description": task.description[:200],
+                    "priority": task.priority,
+                    "capabilities": [c.value for c in task.required_capabilities],
+                },
+                source="swarm_orchestrator",
+                urgency=0.5 + task.priority * 0.05,
+                context_vector=task.context_vector,
+            )
+
+    async def _emit_task_completed(self, task: SwarmTask, result: TaskResult):
+        """Emit TASK_COMPLETED signal."""
+        if self.enable_nexus:
+            await nexus.emit(
+                SignalType.TASK_COMPLETED,
+                {
+                    "task_id": task.id,
+                    "success": result.success,
+                    "confidence": result.confidence,
+                    "assigned_agent": task.assigned_agent,
+                    "execution_time": result.execution_time,
+                },
+                source="swarm_orchestrator",
+                urgency=0.6,
+                context_vector=task.context_vector,
+            )
+
+    async def _emit_task_failed(self, task: SwarmTask, error: str):
+        """Emit TASK_FAILED signal."""
+        if self.enable_nexus:
+            await nexus.emit(
+                SignalType.TASK_FAILED,
+                {
+                    "task_id": task.id,
+                    "error": error,
+                    "assigned_agent": task.assigned_agent,
+                    "retry_count": task.context.get("retry_count", 0),
+                },
+                source="swarm_orchestrator",
+                urgency=0.8,
+                context_vector=task.context_vector,
+            )
+
+    async def _emit_handoff(self, from_agent: str, to_type: str, reason: str):
+        """Emit handoff signal."""
+        if self.enable_nexus:
+            self.state.total_handoffs += 1
+            # Use external event for handoffs
+            await nexus.emit(
+                SignalType.EXTERNAL_EVENT,
+                {
+                    "event_type": "agent_handoff",
+                    "from_agent": from_agent,
+                    "to_agent_type": to_type,
+                    "reason": reason,
+                },
+                source="swarm_orchestrator",
+                urgency=0.6,
+            )
+
+    # =========================================================================
+    # ORIGINAL METHODS (Enhanced)
+    # =========================================================================
+
+    def register_agent_factory(
+        self,
+        agent_type: str,
+        factory: Callable[[], BaseAgent],
+        capability_vector: Optional[List[float]] = None,
+    ):
+        """
+        Register an agent factory for dynamic creation.
+
+        Args:
+            agent_type: Name of the agent type
+            factory: Factory function to create agent instances
+            capability_vector: Optional semantic vector for this agent type
+        """
         self._agent_factories[agent_type] = factory
+        if capability_vector:
+            self._agent_type_vectors[agent_type] = capability_vector
         logger.info(f"Registered agent factory: {agent_type}")
 
     async def spawn_agent(self, agent_type: str) -> Optional[BaseAgent]:
@@ -213,11 +605,22 @@ class SwarmOrchestrator:
         required_capabilities: Optional[set[AgentCapability]] = None,
         context: Optional[dict] = None,
         priority: int = 5,
+        context_vector: Optional[List[float]] = None,
+        semantic_tags: Optional[List[str]] = None,
     ) -> str:
         """
         Submit a task to the swarm.
 
-        Returns task ID.
+        Args:
+            description: Task description
+            required_capabilities: Required agent capabilities
+            context: Additional context dict
+            priority: Task priority (1-10)
+            context_vector: Semantic vector for neural routing
+            semantic_tags: Tags for categorization
+
+        Returns:
+            Task ID
         """
         task_id = f"task_{uuid.uuid4().hex[:8]}"
 
@@ -227,7 +630,18 @@ class SwarmOrchestrator:
             required_capabilities=required_capabilities or set(),
             context=context or {},
             priority=priority,
+            context_vector=context_vector,
+            semantic_tags=semantic_tags or [],
         )
+
+        # AGI: Memory-aware routing - recall relevant memories
+        if self._memory_aware_routing and self.memory_system and context_vector:
+            try:
+                memories = await self._recall_relevant_memories(description, context_vector)
+                task.memory_refs = [m.get("id", "") for m in memories if m.get("id")]
+                task.context["memory_context"] = memories[:3]  # Top 3 for context
+            except Exception as e:
+                logger.debug(f"Memory recall failed: {e}")
 
         async with self._lock:
             self.state.tasks[task_id] = task
@@ -246,10 +660,40 @@ class SwarmOrchestrator:
 
         logger.info(f"Task submitted: {task_id} - {description[:50]}...")
 
+        # Emit Nexus signal
+        await self._emit_task_created(task)
+
         # Try to process immediately
         asyncio.create_task(self._process_queue())
 
         return task_id
+
+    async def _recall_relevant_memories(
+        self,
+        description: str,
+        context_vector: List[float],
+        limit: int = 5,
+    ) -> List[Dict]:
+        """Recall relevant memories for a task."""
+        if not self.memory_system:
+            return []
+
+        try:
+            # Try to use memory system's recall method
+            if hasattr(self.memory_system, 'recall'):
+                results = await self.memory_system.recall(
+                    query=description,
+                    context_vector=context_vector,
+                    limit=limit,
+                )
+                return [r.to_dict() if hasattr(r, 'to_dict') else r for r in results]
+            elif hasattr(self.memory_system, 'query'):
+                results = await self.memory_system.query(description, top_k=limit)
+                return results
+        except Exception as e:
+            logger.debug(f"Memory recall error: {e}")
+
+        return []
 
     async def _process_queue(self):
         """Process tasks in the queue."""
@@ -283,7 +727,14 @@ class SwarmOrchestrator:
                 asyncio.create_task(self._execute_task(task, agent))
 
     async def _find_best_agent(self, task: SwarmTask) -> Optional[BaseAgent]:
-        """Find the best available agent for a task."""
+        """
+        Find the best available agent for a task.
+
+        Uses hybrid scoring:
+        1. Capability matching (original)
+        2. Context vector similarity (AGI)
+        3. Agent performance history
+        """
         best_agent = None
         best_score = 0.0
 
@@ -291,16 +742,42 @@ class SwarmOrchestrator:
             if agent.state.status not in (AgentStatus.IDLE, AgentStatus.COMPLETED):
                 continue
 
-            score = agent.can_handle(task.required_capabilities)
+            # Original capability score
+            capability_score = agent.can_handle(task.required_capabilities)
 
-            # Adjust for agent performance
-            score *= (0.5 + 0.5 * agent.state.avg_confidence)
+            # AGI: Context vector similarity
+            vector_score = 0.0
+            if task.context_vector and agent.name in self._agent_type_vectors:
+                agent_vector = self._agent_type_vectors[agent.name]
+                vector_score = self._cosine_similarity(task.context_vector, agent_vector)
+
+            # Combine scores
+            if task.context_vector and agent.name in self._agent_type_vectors:
+                # Weighted combination when vector available
+                score = capability_score * 0.4 + vector_score * 0.4 + agent.state.avg_confidence * 0.2
+            else:
+                # Original scoring when no vector
+                score = capability_score * (0.5 + 0.5 * agent.state.avg_confidence)
 
             if score > best_score:
                 best_score = score
                 best_agent = agent
 
         return best_agent if best_score > 0.3 else None
+
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        if not vec1 or not vec2 or len(vec1) != len(vec2):
+            return 0.0
+
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        norm1 = math.sqrt(sum(a * a for a in vec1))
+        norm2 = math.sqrt(sum(b * b for b in vec2))
+
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+
+        return dot_product / (norm1 * norm2)
 
     def _infer_agent_type(self, task: SwarmTask) -> str:
         """Infer the best agent type for a task."""
@@ -342,9 +819,11 @@ class SwarmOrchestrator:
     ):
         """Execute a task with an agent, with retry logic and fallback."""
         task.status = TaskStatus.IN_PROGRESS
+        task.context["retry_count"] = 0
 
         last_error = None
         for attempt in range(max_retries):
+            task.context["retry_count"] = attempt
             try:
                 result = await agent.execute(task.description, task.context)
 
@@ -357,12 +836,27 @@ class SwarmOrchestrator:
                     self.state.total_tasks_processed += 1
                     self.state.completed_tasks.append(task.id)
 
-                    # Notify listeners
+                    # Notify legacy listeners
                     for handler in self._on_task_complete:
                         try:
                             await handler(task, result)
                         except Exception as e:
                             logger.error(f"Task complete handler error: {e}")
+
+                    # AGI: Emit Nexus signal
+                    await self._emit_task_completed(task, result)
+
+                    # AGI: Update agent type vector with successful task
+                    if task.context_vector:
+                        self._update_agent_type_vector(agent.name, task.context_vector)
+
+                    # AGI: Emit memory consolidation for successful tasks
+                    if self.enable_nexus and task.memory_refs:
+                        await emit_memory_consolidation(
+                            memory_ids=task.memory_refs,
+                            session_ref=task.id,
+                            context_vector=task.context_vector,
+                        )
 
                     logger.info(f"Task {task.id} completed: success={result.success}")
                     return
@@ -375,6 +869,8 @@ class SwarmOrchestrator:
                     # Try to find a different agent
                     alt_agent = await self._find_alternative_agent(task, agent.agent_id)
                     if alt_agent:
+                        # AGI: Emit handoff signal
+                        await self._emit_handoff(agent.agent_id, alt_agent.name, last_error)
                         agent = alt_agent
                         logger.info(f"Retrying with alternative agent: {alt_agent.name}")
                     await asyncio.sleep(retry_delay * (attempt + 1))
@@ -395,6 +891,9 @@ class SwarmOrchestrator:
         logger.error(f"Task {task.id} failed after {max_retries} attempts")
         task.status = TaskStatus.FAILED
         task.result = TaskResult(success=False, output=f"Failed after {max_retries} attempts: {last_error}")
+
+        # AGI: Emit failure signal
+        await self._emit_task_failed(task, last_error or "Unknown error")
 
     async def _find_alternative_agent(
         self,
@@ -423,19 +922,27 @@ class SwarmOrchestrator:
     ):
         """Handle a handoff request from an agent."""
         logger.info(f"Handoff requested: {target_agent_type} - {reason}")
-        self.state.total_handoffs += 1
 
-        # Notify listeners
+        # Notify legacy listeners
         for handler in self._on_handoff:
             try:
                 await handler(target_agent_type, task_description, reason)
             except Exception as e:
                 logger.error(f"Handoff handler error: {e}")
 
+        # AGI: Emit handoff signal via Nexus
+        await self._emit_handoff("unknown", target_agent_type, reason)
+
+        # Extract context_vector if available
+        context_vector = None
+        if context and "context_vector" in context:
+            context_vector = context["context_vector"]
+
         # Submit as new task
         await self.submit_task(
             description=task_description,
             context=context,
+            context_vector=context_vector,
             priority=6,  # Slightly higher priority for handoffs
         )
 
@@ -529,6 +1036,13 @@ class SwarmOrchestrator:
             "total_tasks_processed": self.state.total_tasks_processed,
             "total_handoffs": self.state.total_handoffs,
             "agent_types": list(self._agent_factories.keys()),
+            # AGI metrics
+            "nexus_connected": self._nexus_subscribed,
+            "speculative_agents": len(self._speculative_agents),
+            "agent_type_vectors": len(self._agent_type_vectors),
+            "memory_aware_routing": self._memory_aware_routing,
+            "evolution_on_consensus": self._evolution_on_consensus,
+            "evolution_on_anomaly": self._evolution_on_anomaly,
         }
 
     # =========================================================================
