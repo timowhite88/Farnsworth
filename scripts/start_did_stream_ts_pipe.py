@@ -326,6 +326,7 @@ class ClipGenerator:
             "-c", "copy",  # No re-encode
             "-f", "mpegts",
             "-bsf:v", "h264_mp4toannexb",  # Required for TS compatibility
+            "-avoid_negative_ts", "make_zero",  # Prevent timestamp discontinuities
             str(ts_path)
         ]
         result = subprocess.run(cmd, capture_output=True)
