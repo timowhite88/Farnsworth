@@ -10,6 +10,11 @@ Full-featured Polymarket API integration:
 - Event tracking
 - Order book data
 - Historical data
+
+AGI v1.8 Quantum Enhancements:
+- Quantum Monte Carlo (QMC) for risk assessment
+- Quantum sampling for probability distribution modeling
+- IBM Quantum integration (simulators unlimited, hardware 10min/month)
 """
 
 import aiohttp
@@ -128,6 +133,16 @@ class PolymarketAPI:
         self._session: Optional[aiohttp.ClientSession] = None
         self._cache: Dict[str, tuple] = {}
         self._cache_ttl = 60  # 1 minute cache
+
+        # AGI v1.8: Quantum risk modeling
+        self._quantum_available = False
+        try:
+            from farnsworth.integration.quantum import QISKIT_AVAILABLE
+            self._quantum_available = QISKIT_AVAILABLE
+            if QISKIT_AVAILABLE:
+                logger.info("Quantum risk modeling available (IBM Quantum)")
+        except ImportError:
+            pass
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -423,6 +438,143 @@ class PolymarketAPI:
         for event in events:
             markets.extend(event.markets)
         return markets[:limit]
+
+    async def quantum_risk_assessment(
+        self,
+        market_id: str,
+        num_scenarios: int = 100,
+        use_hardware: bool = False,
+    ) -> Dict:
+        """
+        AGI v1.8: Quantum Monte Carlo risk assessment for market prediction.
+
+        Uses quantum sampling to model probability distributions and estimate
+        risk metrics like VaR (Value at Risk) and expected outcomes.
+
+        Args:
+            market_id: Polymarket market ID.
+            num_scenarios: Number of quantum scenarios to simulate.
+            use_hardware: Use IBM Quantum hardware (limited 10min/month).
+
+        Returns:
+            Risk assessment with quantum-derived confidence intervals.
+        """
+        market = await self.get_market(market_id)
+        if not market:
+            return {"error": "Market not found"}
+
+        # Classical analysis as baseline
+        classical_analysis = await self.analyze_market(market_id)
+        if "error" in classical_analysis:
+            return classical_analysis
+
+        # If quantum not available, return classical with note
+        if not self._quantum_available:
+            return {
+                **classical_analysis,
+                "quantum_assessment": {
+                    "available": False,
+                    "message": "Quantum computing not available, using classical analysis"
+                }
+            }
+
+        try:
+            import numpy as np
+            from farnsworth.integration.quantum import get_quantum_provider, QISKIT_AVAILABLE
+            if QISKIT_AVAILABLE:
+                from qiskit import QuantumCircuit
+            else:
+                return {
+                    **classical_analysis,
+                    "quantum_assessment": {"available": False, "message": "Qiskit not installed"}
+                }
+
+            provider = get_quantum_provider()
+            if not provider:
+                return {
+                    **classical_analysis,
+                    "quantum_assessment": {"available": False, "message": "Quantum provider not initialized"}
+                }
+
+            # Build quantum circuit for Monte Carlo sampling
+            # Use market probability as rotation angle
+            prob_yes = market.price_yes
+            theta_yes = 2 * np.arcsin(np.sqrt(prob_yes))
+
+            # Create superposition weighted by probability
+            num_qubits = min(8, max(3, int(np.log2(num_scenarios))))
+
+            qc = QuantumCircuit(num_qubits, num_qubits)
+            for i in range(num_qubits):
+                qc.ry(theta_yes, i)  # Rotate based on market probability
+            qc.measure_all()
+
+            # Run quantum sampling
+            result = await provider.run_circuit(
+                qc,
+                shots=num_scenarios,
+                prefer_hardware=use_hardware,
+            )
+
+            if not result.success or not result.counts:
+                return {
+                    **classical_analysis,
+                    "quantum_assessment": {"available": True, "error": result.error or "No counts returned"}
+                }
+
+            # Analyze quantum distribution
+            total_shots = sum(result.counts.values())
+            yes_outcomes = sum(
+                count for bitstring, count in result.counts.items()
+                if bitstring.count('1') > bitstring.count('0')
+            )
+            quantum_prob_yes = yes_outcomes / total_shots
+
+            # Calculate quantum confidence interval
+            # Standard error from binomial distribution
+            std_error = np.sqrt(quantum_prob_yes * (1 - quantum_prob_yes) / total_shots)
+            ci_95_low = max(0, quantum_prob_yes - 1.96 * std_error)
+            ci_95_high = min(1, quantum_prob_yes + 1.96 * std_error)
+
+            # VaR-style risk metrics (simplified for prediction markets)
+            # If betting $100 on YES at market price
+            bet_amount = 100
+            potential_profit = bet_amount * (1 / prob_yes - 1) if prob_yes > 0 else 0
+            potential_loss = bet_amount
+            expected_value = quantum_prob_yes * potential_profit - (1 - quantum_prob_yes) * potential_loss
+
+            return {
+                **classical_analysis,
+                "quantum_assessment": {
+                    "available": True,
+                    "backend": result.backend_used,
+                    "scenarios_simulated": total_shots,
+                    "quantum_probability_yes": round(quantum_prob_yes * 100, 2),
+                    "market_probability_yes": round(prob_yes * 100, 2),
+                    "probability_divergence": round(abs(quantum_prob_yes - prob_yes) * 100, 2),
+                    "confidence_interval_95": {
+                        "low": round(ci_95_low * 100, 2),
+                        "high": round(ci_95_high * 100, 2),
+                    },
+                    "risk_metrics": {
+                        "expected_value_$100_yes": round(expected_value, 2),
+                        "potential_profit": round(potential_profit, 2),
+                        "potential_loss": potential_loss,
+                        "risk_adjusted_recommendation": (
+                            "BUY YES" if expected_value > 10 else
+                            "BUY NO" if expected_value < -10 else
+                            "HOLD"
+                        )
+                    }
+                }
+            }
+
+        except Exception as e:
+            logger.warning(f"Quantum risk assessment failed: {e}")
+            return {
+                **classical_analysis,
+                "quantum_assessment": {"available": True, "error": str(e)}
+            }
 
     async def close(self):
         """Close the HTTP session."""

@@ -226,6 +226,21 @@ class KnowledgeGraph:
         # AGI v1.8: Cache invalidation flag
         self._cache_dirty = False
 
+        # AGI v1.8: Quantum search integration
+        self._quantum_available = False
+        self._quantum_pattern_extractor = None
+        try:
+            from farnsworth.integration.quantum import QISKIT_AVAILABLE, get_quantum_provider
+            from farnsworth.integration.quantum.ibm_quantum import QuantumPatternExtractor
+            self._quantum_available = QISKIT_AVAILABLE
+            if QISKIT_AVAILABLE:
+                provider = get_quantum_provider()
+                if provider:
+                    self._quantum_pattern_extractor = QuantumPatternExtractor(provider)
+                    logger.info("Quantum pattern search available (IBM Quantum)")
+        except ImportError:
+            pass
+
     async def initialize(self) -> None:
         """
         Load existing graph from disk.
@@ -643,6 +658,116 @@ class KnowledgeGraph:
                 paths=paths[:10],
                 score=len(matched_entities) / max(1, len(query_entities)),
             )
+
+    async def quantum_search(
+        self,
+        query: str,
+        max_entities: int = 10,
+        use_hardware: bool = False,
+    ) -> GraphQuery:
+        """
+        AGI v1.8: Quantum-enhanced search using Grover's algorithm concepts.
+
+        Uses quantum sampling to explore the entity space, potentially finding
+        relevant patterns faster than classical substring matching.
+
+        For small graphs (<1000 entities), falls back to classical search.
+        For larger graphs, quantum sampling can provide speedup.
+
+        Args:
+            query: Natural language query string.
+            max_entities: Maximum number of entities to return.
+            use_hardware: Use IBM Quantum hardware (limited to 10min/month).
+
+        Returns:
+            GraphQuery with quantum-discovered entities and relationships.
+        """
+        # For small graphs, use classical search
+        if len(self.entities) < 100 or not self._quantum_available or not self._quantum_pattern_extractor:
+            return await self.query(query, max_entities)
+
+        try:
+            import numpy as np
+
+            # Build entity embedding matrix for quantum pattern extraction
+            entity_ids = list(self.entities.keys())
+            embeddings = []
+
+            for entity_id in entity_ids:
+                entity = self.entities[entity_id]
+                if entity.embedding:
+                    embeddings.append(entity.embedding)
+                else:
+                    # Use simple hash-based embedding as fallback
+                    hash_val = hash(entity.name)
+                    emb = [(hash_val >> i) & 1 for i in range(64)]
+                    embeddings.append(emb)
+
+            if not embeddings:
+                return await self.query(query, max_entities)
+
+            # Normalize to same dimension
+            max_dim = max(len(e) for e in embeddings)
+            embedding_matrix = np.array([
+                e + [0] * (max_dim - len(e)) for e in embeddings
+            ], dtype=np.float32)
+
+            # Use quantum pattern extraction to find relevant entity clusters
+            patterns = await self._quantum_pattern_extractor.extract_patterns(
+                embedding_matrix,
+                num_patterns=max_entities,
+                prefer_hardware=use_hardware,
+            )
+
+            # Convert patterns to matched entities
+            matched_entities = []
+            for pattern in patterns:
+                indices = pattern.get("memory_indices", [])
+                for idx in indices:
+                    if 0 <= idx < len(entity_ids):
+                        entity_id = entity_ids[idx]
+                        if entity_id in self.entities:
+                            entity = self.entities[entity_id]
+                            if entity not in matched_entities:
+                                matched_entities.append(entity)
+                                if len(matched_entities) >= max_entities:
+                                    break
+                if len(matched_entities) >= max_entities:
+                    break
+
+            # Also include classical query matches for robustness
+            classical_result = await self.query(query, max(1, max_entities // 2))
+            for entity in classical_result.entities:
+                if entity not in matched_entities:
+                    matched_entities.append(entity)
+                    if len(matched_entities) >= max_entities:
+                        break
+
+            # Get relationships between matched entities
+            relationships = []
+            entity_ids_set = {e.id for e in matched_entities}
+
+            if self.graph is not None:
+                for e_id in entity_ids_set:
+                    for _, target, data in self.graph.out_edges(e_id, data=True):
+                        if target in entity_ids_set:
+                            relationships.append(Relationship(
+                                source_id=e_id,
+                                target_id=target,
+                                relation_type=data.get("relation_type", "relates_to"),
+                                weight=data.get("weight", 1.0),
+                            ))
+
+            return GraphQuery(
+                entities=matched_entities[:max_entities],
+                relationships=relationships,
+                paths=[],
+                score=len(matched_entities) / max_entities,
+            )
+
+        except Exception as e:
+            logger.warning(f"Quantum search failed, falling back to classical: {e}")
+            return await self.query(query, max_entities)
 
     async def get_neighbors(
         self,

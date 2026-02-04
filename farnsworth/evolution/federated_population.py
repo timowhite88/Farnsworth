@@ -11,6 +11,11 @@ AGI Cohesion Features:
 - Distributed selection pressure
 - Cross-collective evolution
 
+AGI v1.8 Quantum Enhancements:
+- Quantum population generation using superposition
+- Quantum self-improvement loops via IBM Quantum
+- Simulator-first strategy (unlimited) with hardware validation (10min/month)
+
 This enables AGI collectives to evolve together while maintaining
 privacy and allowing diverse evolutionary paths.
 """
@@ -135,6 +140,21 @@ class FederatedPopulationManager:
 
         self._lock = asyncio.Lock()
         self._is_running = False
+
+        # AGI v1.8: Quantum evolution integration
+        self._quantum_available = False
+        self._quantum_optimizer = None
+        try:
+            from farnsworth.integration.quantum import QISKIT_AVAILABLE, get_quantum_provider
+            from farnsworth.integration.quantum.ibm_quantum import QuantumGeneticOptimizer
+            self._quantum_available = QISKIT_AVAILABLE
+            if QISKIT_AVAILABLE:
+                provider = get_quantum_provider()
+                if provider:
+                    self._quantum_optimizer = QuantumGeneticOptimizer(provider, num_qubits=8)
+                    logger.info("Quantum self-improvement enabled (IBM Quantum)")
+        except ImportError:
+            pass
 
     def set_node_id(self, node_id: str):
         """Set the local node ID."""
@@ -526,6 +546,125 @@ class FederatedPopulationManager:
                 "privacy_epsilon": self.config.privacy_epsilon,
             },
         }
+
+    async def quantum_self_improve_population(
+        self,
+        fitness_func: Optional[Callable] = None,
+        grover_iterations: int = 1,
+        use_hardware: bool = False,
+    ) -> int:
+        """
+        AGI v1.8: Quantum self-improvement using superposition-based population diversity.
+
+        Uses quantum genetic algorithm to generate diverse population variants,
+        potentially finding optimal configurations faster than classical evolution.
+
+        Args:
+            fitness_func: Optional fitness function (uses optimizer's if None)
+            grover_iterations: Number of Grover iterations for amplitude amplification
+            use_hardware: Use IBM Quantum hardware (limited to 10min/month)
+
+        Returns:
+            Number of improved genomes integrated into population
+        """
+        if not self._quantum_available or not self._quantum_optimizer:
+            logger.debug("Quantum not available, skipping quantum self-improvement")
+            return 0
+
+        if not self.optimizer or not self.optimizer.population:
+            return 0
+
+        try:
+            # Get current best genome as baseline
+            sorted_pop = sorted(
+                self.optimizer.population,
+                key=lambda g: g.total_fitness(),
+                reverse=True,
+            )
+            best_genome = sorted_pop[0]
+            baseline_fitness = best_genome.total_fitness()
+
+            # Define fitness function for quantum optimization
+            def quantum_fitness(bitstring: str) -> float:
+                if fitness_func:
+                    return fitness_func(bitstring)
+                # Default: count 1s (maximize diversity)
+                return sum(int(b) for b in bitstring) / len(bitstring)
+
+            # Generate quantum population using superposition
+            quantum_population = await self._quantum_optimizer.generate_quantum_population(
+                population_size=min(10, len(self.optimizer.population)),
+                fitness_func=quantum_fitness,
+                grover_iterations=grover_iterations,
+                prefer_hardware=use_hardware,
+            )
+
+            # Integrate improved quantum genomes into local population
+            improved_count = 0
+            from farnsworth.evolution.genetic_optimizer import Genome, Gene
+
+            for bitstring, qfitness in quantum_population:
+                # Convert bitstring to gene values
+                if not bitstring or len(bitstring) < 8:
+                    continue
+
+                # Create genome from quantum sample
+                genes = {}
+                gene_names = list(self.optimizer.gene_definitions.keys())
+                bits_per_gene = max(1, len(bitstring) // max(1, len(gene_names)))
+
+                for i, name in enumerate(gene_names):
+                    defn = self.optimizer.gene_definitions[name]
+                    # Extract bits for this gene
+                    start_bit = i * bits_per_gene
+                    end_bit = min(start_bit + bits_per_gene, len(bitstring))
+                    gene_bits = bitstring[start_bit:end_bit]
+
+                    if gene_bits:
+                        # Convert bits to normalized value
+                        value_int = int(gene_bits, 2)
+                        max_val = 2 ** len(gene_bits) - 1
+                        normalized = value_int / max(1, max_val)
+                        value = defn["min"] + normalized * (defn["max"] - defn["min"])
+
+                        genes[name] = Gene(
+                            name=name,
+                            value=value,
+                            min_val=defn["min"],
+                            max_val=defn["max"],
+                            mutation_sigma=defn["sigma"],
+                        )
+
+                if genes:
+                    quantum_genome = Genome(
+                        id=f"quantum_{self.generation}_{hash(bitstring) % 10000:04d}",
+                        genes=genes,
+                        generation=self.generation,
+                        parent_ids=["quantum_self_improvement"],
+                    )
+
+                    # Check if quantum genome is better than worst local
+                    worst_local = min(
+                        self.optimizer.population,
+                        key=lambda g: g.total_fitness()
+                    )
+                    if qfitness > worst_local.total_fitness():
+                        # Replace worst with quantum genome
+                        try:
+                            idx = self.optimizer.population.index(worst_local)
+                            self.optimizer.population[idx] = quantum_genome
+                            improved_count += 1
+                        except ValueError:
+                            pass
+
+            if improved_count > 0:
+                logger.info(f"Quantum self-improvement: integrated {improved_count} enhanced genomes")
+
+            return improved_count
+
+        except Exception as e:
+            logger.warning(f"Quantum self-improvement failed: {e}")
+            return 0
 
     async def federated_average(
         self,
