@@ -20,12 +20,100 @@ from farnsworth.agents.planner_agent import PlannerAgent
 from farnsworth.memory.memory_system import MemorySystem
 
 
+# =============================================================================
+# EMERGENCE DETECTION (AGI Upgrade)
+# =============================================================================
+
+@dataclass
+class EmergenceTrigger:
+    """
+    A trigger condition for detecting emergent behaviors.
+
+    Emergence = collective behavior that isn't explicitly programmed,
+    arising from interactions between agents/systems.
+    """
+    trigger_id: str
+    name: str
+    description: str
+
+    # Detection parameters
+    pattern_type: str  # "threshold", "anomaly", "correlation", "convergence"
+    metric_name: str  # What to measure
+    threshold_value: float = 0.7
+    window_seconds: float = 300.0  # Time window for detection
+
+    # Response configuration
+    response_action: str  # "notify", "amplify", "dampen", "record"
+    response_payload: dict = field(default_factory=dict)
+
+    # State tracking
+    is_active: bool = True
+    last_triggered: Optional[datetime] = None
+    trigger_count: int = 0
+    cooldown_seconds: float = 60.0  # Min time between triggers
+
+    def can_trigger(self) -> bool:
+        """Check if trigger is off cooldown."""
+        if not self.is_active:
+            return False
+        if not self.last_triggered:
+            return True
+        elapsed = (datetime.now() - self.last_triggered).total_seconds()
+        return elapsed >= self.cooldown_seconds
+
+
+@dataclass
+class EmergenceEvent:
+    """Record of a detected emergence event."""
+    event_id: str
+    trigger_id: str
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    # What was detected
+    pattern_description: str = ""
+    metric_values: dict = field(default_factory=dict)
+    contributing_agents: list[str] = field(default_factory=list)
+
+    # Classification
+    emergence_type: str = "unknown"  # "synergy", "consensus", "innovation", "cascade"
+    novelty_score: float = 0.0  # How unexpected was this
+    impact_score: float = 0.0  # How significant
+
+    # Response taken
+    response_action: str = ""
+    response_result: Optional[str] = None
+
+
+@dataclass
+class EmergenceMetrics:
+    """Metrics tracked for emergence detection."""
+    # Synergy metrics
+    collective_vs_individual_ratio: float = 1.0  # >1 = synergy
+    cross_agent_correlation: float = 0.0  # How aligned are agents
+
+    # Consensus metrics
+    opinion_convergence: float = 0.0  # Are agents converging on answers
+    decision_agreement_rate: float = 0.0
+
+    # Innovation metrics
+    novel_pattern_count: int = 0
+    solution_diversity: float = 0.0  # Variety of approaches
+
+    # Cascade metrics
+    influence_spread_rate: float = 0.0  # How fast ideas spread
+    activation_chains: int = 0  # Sequences of agent activations
+
+    # Timestamp
+    measured_at: datetime = field(default_factory=datetime.now)
+
+
 class ProactiveState(Enum):
     IDLE = "idle"
     OBSERVING = "observing"  # Watching user actions to learn
     ANALYZING = "analyzing"  # Analyzing context to find opportunities
     SUGGESTING = "suggesting" # Preparing a suggestion
     ACTING = "acting"        # Autonomously executing a task
+    DETECTING_EMERGENCE = "detecting_emergence"  # AGI: Monitoring for emergence
 
 
 @dataclass
@@ -533,4 +621,480 @@ Analyze and return ONLY the JSON:"""
             "pending_suggestions": len(self.get_pending_suggestions()),
             "scheduled_tasks": len(self.scheduled_tasks),
             "active_scheduled_tasks": len([t for t in self.scheduled_tasks if t.enabled]),
+        }
+
+    # =========================================================================
+    # EMERGENCE DETECTION (AGI Upgrade)
+    # =========================================================================
+
+    def _init_emergence_tracking(self):
+        """Initialize emergence detection state."""
+        if not hasattr(self, '_emergence_triggers'):
+            self._emergence_triggers: list[EmergenceTrigger] = []
+            self._emergence_events: list[EmergenceEvent] = []
+            self._metrics_history: list[EmergenceMetrics] = []
+            self._agent_states: dict[str, list[dict]] = {}  # agent_id -> state history
+            self._emergence_callbacks: list[Callable] = []
+
+            # Register default triggers
+            self._register_default_triggers()
+
+    def _register_default_triggers(self):
+        """Register default emergence detection triggers."""
+        self._emergence_triggers = [
+            EmergenceTrigger(
+                trigger_id="synergy_detection",
+                name="Synergy Emergence",
+                description="Collective output exceeds sum of individual contributions",
+                pattern_type="threshold",
+                metric_name="collective_vs_individual_ratio",
+                threshold_value=1.2,  # 20% better than individuals
+                response_action="amplify",
+                response_payload={"boost_collaboration": True},
+            ),
+            EmergenceTrigger(
+                trigger_id="consensus_formation",
+                name="Consensus Formation",
+                description="Agents converging on similar conclusions independently",
+                pattern_type="convergence",
+                metric_name="opinion_convergence",
+                threshold_value=0.8,
+                response_action="record",
+                response_payload={"log_consensus": True},
+            ),
+            EmergenceTrigger(
+                trigger_id="innovation_spike",
+                name="Innovation Spike",
+                description="Unusual increase in novel solution patterns",
+                pattern_type="anomaly",
+                metric_name="novel_pattern_count",
+                threshold_value=3.0,  # 3x baseline
+                response_action="notify",
+                response_payload={"alert_type": "innovation"},
+            ),
+            EmergenceTrigger(
+                trigger_id="cascade_activation",
+                name="Cascade Activation",
+                description="Chain reaction of agent activations",
+                pattern_type="correlation",
+                metric_name="activation_chains",
+                threshold_value=5,  # 5+ chain length
+                response_action="dampen",
+                response_payload={"rate_limit": True},
+            ),
+        ]
+
+    def add_emergence_trigger(self, trigger: EmergenceTrigger):
+        """Add a custom emergence trigger."""
+        self._init_emergence_tracking()
+        self._emergence_triggers.append(trigger)
+        logger.info(f"Added emergence trigger: {trigger.name}")
+
+    def on_emergence(self, callback: Callable[[EmergenceEvent], None]):
+        """Register a callback for emergence events."""
+        self._init_emergence_tracking()
+        self._emergence_callbacks.append(callback)
+
+    async def record_agent_state(
+        self,
+        agent_id: str,
+        state: dict,
+    ):
+        """
+        Record an agent's state for emergence analysis.
+
+        Args:
+            agent_id: The agent identifier
+            state: Current state dict (should include 'output', 'confidence', 'timestamp')
+        """
+        self._init_emergence_tracking()
+
+        if agent_id not in self._agent_states:
+            self._agent_states[agent_id] = []
+
+        state['recorded_at'] = datetime.now()
+        self._agent_states[agent_id].append(state)
+
+        # Keep only recent states (last 100 per agent)
+        if len(self._agent_states[agent_id]) > 100:
+            self._agent_states[agent_id] = self._agent_states[agent_id][-100:]
+
+    async def compute_emergence_metrics(
+        self,
+        time_window_seconds: float = 300.0,
+    ) -> EmergenceMetrics:
+        """
+        Compute current emergence metrics from agent states.
+
+        Args:
+            time_window_seconds: Look at states within this window
+
+        Returns:
+            EmergenceMetrics snapshot
+        """
+        self._init_emergence_tracking()
+
+        metrics = EmergenceMetrics()
+        cutoff = datetime.now()
+
+        # Gather recent states
+        recent_states: dict[str, list[dict]] = {}
+        for agent_id, states in self._agent_states.items():
+            recent = [
+                s for s in states
+                if (cutoff - s.get('recorded_at', cutoff)).total_seconds() < time_window_seconds
+            ]
+            if recent:
+                recent_states[agent_id] = recent
+
+        if len(recent_states) < 2:
+            # Not enough data for emergence analysis
+            return metrics
+
+        # 1. Synergy: Compare collective outputs to individual
+        individual_scores = []
+        collective_indicators = []
+        for agent_id, states in recent_states.items():
+            for state in states:
+                if 'confidence' in state:
+                    individual_scores.append(state['confidence'])
+                if 'collective_contribution' in state:
+                    collective_indicators.append(state['collective_contribution'])
+
+        if individual_scores:
+            avg_individual = sum(individual_scores) / len(individual_scores)
+            if collective_indicators:
+                avg_collective = sum(collective_indicators) / len(collective_indicators)
+                metrics.collective_vs_individual_ratio = avg_collective / avg_individual if avg_individual > 0 else 1.0
+
+        # 2. Consensus: Check for convergence in outputs
+        outputs_by_topic: dict[str, list[str]] = {}
+        for agent_id, states in recent_states.items():
+            for state in states:
+                topic = state.get('topic', 'general')
+                output = state.get('output', '')
+                if topic not in outputs_by_topic:
+                    outputs_by_topic[topic] = []
+                outputs_by_topic[topic].append(output)
+
+        if outputs_by_topic:
+            convergence_scores = []
+            for topic, outputs in outputs_by_topic.items():
+                if len(outputs) >= 2:
+                    # Simple similarity check (word overlap)
+                    all_words = set()
+                    for o in outputs:
+                        all_words.update(o.lower().split())
+                    if all_words:
+                        overlap_ratio = self._compute_output_similarity(outputs)
+                        convergence_scores.append(overlap_ratio)
+
+            if convergence_scores:
+                metrics.opinion_convergence = sum(convergence_scores) / len(convergence_scores)
+
+        # 3. Innovation: Count novel patterns
+        seen_patterns: set[str] = set()
+        novel_count = 0
+        for agent_id, states in recent_states.items():
+            for state in states:
+                pattern = state.get('solution_pattern', '')
+                if pattern and pattern not in seen_patterns:
+                    seen_patterns.add(pattern)
+                    novel_count += 1
+
+        metrics.novel_pattern_count = novel_count
+        metrics.solution_diversity = len(seen_patterns) / max(1, sum(len(s) for s in recent_states.values()))
+
+        # 4. Cascade: Detect activation chains
+        activation_times: list[tuple[str, datetime]] = []
+        for agent_id, states in recent_states.items():
+            for state in states:
+                if state.get('activated', False):
+                    activation_times.append((agent_id, state.get('recorded_at', cutoff)))
+
+        activation_times.sort(key=lambda x: x[1])
+        chain_length = self._detect_activation_chain(activation_times)
+        metrics.activation_chains = chain_length
+
+        # Compute influence spread rate
+        if len(activation_times) >= 2:
+            time_span = (activation_times[-1][1] - activation_times[0][1]).total_seconds()
+            if time_span > 0:
+                metrics.influence_spread_rate = len(activation_times) / time_span
+
+        self._metrics_history.append(metrics)
+
+        # Keep only recent metrics (last 50)
+        if len(self._metrics_history) > 50:
+            self._metrics_history = self._metrics_history[-50:]
+
+        return metrics
+
+    def _compute_output_similarity(self, outputs: list[str]) -> float:
+        """Compute average pairwise similarity between outputs."""
+        if len(outputs) < 2:
+            return 0.0
+
+        similarities = []
+        for i in range(len(outputs)):
+            for j in range(i + 1, len(outputs)):
+                words_i = set(outputs[i].lower().split())
+                words_j = set(outputs[j].lower().split())
+                if words_i or words_j:
+                    intersection = len(words_i & words_j)
+                    union = len(words_i | words_j)
+                    similarities.append(intersection / union if union > 0 else 0)
+
+        return sum(similarities) / len(similarities) if similarities else 0.0
+
+    def _detect_activation_chain(
+        self,
+        activations: list[tuple[str, datetime]],
+        max_gap_seconds: float = 5.0,
+    ) -> int:
+        """Detect longest chain of rapid activations."""
+        if not activations:
+            return 0
+
+        max_chain = 1
+        current_chain = 1
+
+        for i in range(1, len(activations)):
+            gap = (activations[i][1] - activations[i - 1][1]).total_seconds()
+            if gap <= max_gap_seconds:
+                current_chain += 1
+                max_chain = max(max_chain, current_chain)
+            else:
+                current_chain = 1
+
+        return max_chain
+
+    async def check_emergence_triggers(
+        self,
+        metrics: Optional[EmergenceMetrics] = None,
+    ) -> list[EmergenceEvent]:
+        """
+        Check all triggers against current metrics.
+
+        Args:
+            metrics: Pre-computed metrics, or compute fresh if None
+
+        Returns:
+            List of triggered emergence events
+        """
+        self._init_emergence_tracking()
+
+        if metrics is None:
+            metrics = await self.compute_emergence_metrics()
+
+        triggered_events = []
+
+        for trigger in self._emergence_triggers:
+            if not trigger.can_trigger():
+                continue
+
+            triggered = False
+            metric_value = getattr(metrics, trigger.metric_name, None)
+
+            if metric_value is None:
+                continue
+
+            # Check based on pattern type
+            if trigger.pattern_type == "threshold":
+                triggered = metric_value >= trigger.threshold_value
+
+            elif trigger.pattern_type == "anomaly":
+                # Compare to historical baseline
+                baseline = self._get_metric_baseline(trigger.metric_name)
+                if baseline > 0:
+                    triggered = metric_value >= baseline * trigger.threshold_value
+
+            elif trigger.pattern_type == "convergence":
+                triggered = metric_value >= trigger.threshold_value
+
+            elif trigger.pattern_type == "correlation":
+                triggered = metric_value >= trigger.threshold_value
+
+            if triggered:
+                event = await self._create_emergence_event(trigger, metrics, metric_value)
+                triggered_events.append(event)
+
+                # Execute response
+                await self._execute_emergence_response(trigger, event)
+
+                # Update trigger state
+                trigger.last_triggered = datetime.now()
+                trigger.trigger_count += 1
+
+                logger.info(
+                    f"Emergence detected: {trigger.name} "
+                    f"(value={metric_value:.3f}, threshold={trigger.threshold_value:.3f})"
+                )
+
+        return triggered_events
+
+    def _get_metric_baseline(self, metric_name: str) -> float:
+        """Get historical baseline for a metric."""
+        if not self._metrics_history:
+            return 0.0
+
+        values = [
+            getattr(m, metric_name, 0)
+            for m in self._metrics_history[:-1]  # Exclude most recent
+        ]
+
+        return sum(values) / len(values) if values else 0.0
+
+    async def _create_emergence_event(
+        self,
+        trigger: EmergenceTrigger,
+        metrics: EmergenceMetrics,
+        triggered_value: float,
+    ) -> EmergenceEvent:
+        """Create an emergence event record."""
+        event = EmergenceEvent(
+            event_id=f"emergence_{len(self._emergence_events) + 1}_{int(datetime.now().timestamp())}",
+            trigger_id=trigger.trigger_id,
+            pattern_description=trigger.description,
+            metric_values={
+                trigger.metric_name: triggered_value,
+                "collective_ratio": metrics.collective_vs_individual_ratio,
+                "convergence": metrics.opinion_convergence,
+                "novel_patterns": metrics.novel_pattern_count,
+            },
+            contributing_agents=list(self._agent_states.keys()),
+            emergence_type=self._classify_emergence(trigger, metrics),
+            novelty_score=self._compute_novelty_score(trigger, triggered_value),
+            impact_score=self._compute_impact_score(trigger, metrics),
+        )
+
+        self._emergence_events.append(event)
+
+        # Notify callbacks
+        for callback in self._emergence_callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(event)
+                else:
+                    callback(event)
+            except Exception as e:
+                logger.error(f"Emergence callback error: {e}")
+
+        return event
+
+    def _classify_emergence(self, trigger: EmergenceTrigger, metrics: EmergenceMetrics) -> str:
+        """Classify the type of emergence."""
+        if trigger.metric_name == "collective_vs_individual_ratio":
+            return "synergy"
+        elif trigger.metric_name == "opinion_convergence":
+            return "consensus"
+        elif trigger.metric_name == "novel_pattern_count":
+            return "innovation"
+        elif trigger.metric_name == "activation_chains":
+            return "cascade"
+        return "unknown"
+
+    def _compute_novelty_score(self, trigger: EmergenceTrigger, value: float) -> float:
+        """Compute how novel this emergence event is."""
+        baseline = self._get_metric_baseline(trigger.metric_name)
+        if baseline == 0:
+            return 0.5  # Unknown baseline
+
+        ratio = value / baseline
+        # Novelty increases logarithmically with ratio
+        import math
+        return min(1.0, math.log(max(1, ratio)) / 2)
+
+    def _compute_impact_score(self, trigger: EmergenceTrigger, metrics: EmergenceMetrics) -> float:
+        """Compute the potential impact of this emergence."""
+        # Impact based on number of agents involved and metric magnitude
+        agent_factor = min(1.0, len(self._agent_states) / 10)
+
+        # Combine multiple metrics for impact
+        metric_factor = (
+            metrics.collective_vs_individual_ratio * 0.3 +
+            metrics.opinion_convergence * 0.2 +
+            metrics.novel_pattern_count / 10 * 0.3 +
+            metrics.influence_spread_rate * 0.2
+        )
+
+        return min(1.0, agent_factor * 0.4 + metric_factor * 0.6)
+
+    async def _execute_emergence_response(
+        self,
+        trigger: EmergenceTrigger,
+        event: EmergenceEvent,
+    ):
+        """Execute the response action for a triggered emergence."""
+        action = trigger.response_action
+        payload = trigger.response_payload
+
+        event.response_action = action
+
+        try:
+            if action == "notify":
+                # Create a high-priority suggestion
+                await self._generate_suggestion({
+                    "title": f"Emergence Detected: {trigger.name}",
+                    "description": f"{trigger.description}. Novelty: {event.novelty_score:.2f}, Impact: {event.impact_score:.2f}",
+                    "action_type": "none",
+                    "confidence": event.impact_score,
+                    "reasoning": "Automatic emergence detection",
+                })
+                event.response_result = "notification_created"
+
+            elif action == "amplify":
+                # Could adjust system parameters to encourage more of this behavior
+                logger.info(f"Amplifying emergence: {trigger.name}")
+                event.response_result = "amplification_logged"
+
+            elif action == "dampen":
+                # Could add rate limiting or cooling periods
+                logger.info(f"Dampening emergence: {trigger.name}")
+                event.response_result = "dampening_logged"
+
+            elif action == "record":
+                # Just log for analysis
+                event.response_result = "recorded"
+
+        except Exception as e:
+            logger.error(f"Emergence response error: {e}")
+            event.response_result = f"error: {e}"
+
+    def get_emergence_history(
+        self,
+        limit: int = 20,
+        emergence_type: Optional[str] = None,
+    ) -> list[EmergenceEvent]:
+        """Get recent emergence events, optionally filtered by type."""
+        self._init_emergence_tracking()
+
+        events = self._emergence_events
+        if emergence_type:
+            events = [e for e in events if e.emergence_type == emergence_type]
+
+        return events[-limit:]
+
+    def get_emergence_stats(self) -> dict:
+        """Get summary statistics about emergence detection."""
+        self._init_emergence_tracking()
+
+        if not self._emergence_events:
+            return {"total_events": 0}
+
+        by_type = {}
+        for event in self._emergence_events:
+            by_type[event.emergence_type] = by_type.get(event.emergence_type, 0) + 1
+
+        avg_novelty = sum(e.novelty_score for e in self._emergence_events) / len(self._emergence_events)
+        avg_impact = sum(e.impact_score for e in self._emergence_events) / len(self._emergence_events)
+
+        return {
+            "total_events": len(self._emergence_events),
+            "by_type": by_type,
+            "avg_novelty_score": avg_novelty,
+            "avg_impact_score": avg_impact,
+            "active_triggers": len([t for t in self._emergence_triggers if t.is_active]),
+            "agents_tracked": len(self._agent_states),
+            "metrics_history_size": len(self._metrics_history),
         }

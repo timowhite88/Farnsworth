@@ -37,6 +37,72 @@ class AgentCapability(Enum):
     USER_MODELING = "user_modeling"
 
 
+# =============================================================================
+# MIND-WANDERING MODE (AGI Upgrade)
+# =============================================================================
+
+@dataclass
+class WanderingThought:
+    """
+    A thought generated during mind-wandering mode.
+
+    Mind-wandering allows agents to make creative connections between
+    disparate concepts when not actively executing tasks.
+    """
+    thought_id: str
+    agent_id: str
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    # Content
+    content: str = ""
+    thought_type: str = "association"  # "association", "question", "insight", "connection"
+
+    # Source concepts
+    source_concepts: list[str] = field(default_factory=list)
+    connection_strength: float = 0.5  # How strongly concepts are connected
+
+    # Quality metrics
+    novelty_score: float = 0.0  # How new/unexpected
+    relevance_score: float = 0.0  # How relevant to current goals
+    creativity_score: float = 0.0  # How creative/lateral
+
+    # Metadata
+    wandering_context: str = ""  # What triggered wandering
+    follow_up_actions: list[str] = field(default_factory=list)
+    is_actionable: bool = False
+
+    def overall_quality(self) -> float:
+        """Calculate overall quality score."""
+        return (
+            self.novelty_score * 0.3 +
+            self.relevance_score * 0.4 +
+            self.creativity_score * 0.3
+        )
+
+
+@dataclass
+class WanderingSession:
+    """A session of mind-wandering."""
+    session_id: str
+    agent_id: str
+    started_at: datetime = field(default_factory=datetime.now)
+    ended_at: Optional[datetime] = None
+
+    # Configuration
+    duration_seconds: float = 60.0
+    focus_concepts: list[str] = field(default_factory=list)  # Optional focus areas
+    creativity_level: float = 0.7  # 0=analytical, 1=highly creative
+
+    # Results
+    thoughts: list[WanderingThought] = field(default_factory=list)
+    insights_found: int = 0
+    connections_made: int = 0
+
+    # State
+    is_active: bool = True
+    interrupt_reason: Optional[str] = None
+
+
 class AgentStatus(Enum):
     """Agent execution status."""
     IDLE = "idle"
@@ -45,6 +111,7 @@ class AgentStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     DELEGATED = "delegated"
+    WANDERING = "wandering"  # AGI: Mind-wandering mode
 
 
 @dataclass
@@ -357,3 +424,430 @@ class BaseAgent(ABC):
         self.state.current_task = ""
         self.state.progress = 0.0
         self.state.context.clear()
+
+    # =========================================================================
+    # MIND-WANDERING MODE (AGI Upgrade)
+    # =========================================================================
+
+    def _init_wandering(self):
+        """Initialize mind-wandering state."""
+        if not hasattr(self, '_wandering_sessions'):
+            self._wandering_sessions: list[WanderingSession] = []
+            self._all_thoughts: list[WanderingThought] = []
+            self._concept_memory: dict[str, list[str]] = {}  # concept -> related concepts
+            self._thought_counter = 0
+            self._wandering_callbacks: list[Callable] = []
+            self._is_wandering = False
+            self._wandering_task: Optional[asyncio.Task] = None
+
+    async def start_wandering(
+        self,
+        duration_seconds: float = 60.0,
+        focus_concepts: Optional[list[str]] = None,
+        creativity_level: float = 0.7,
+    ) -> WanderingSession:
+        """
+        Start a mind-wandering session.
+
+        Mind-wandering allows the agent to make creative connections
+        between concepts when not actively executing tasks.
+
+        Args:
+            duration_seconds: How long to wander
+            focus_concepts: Optional list of concepts to focus on
+            creativity_level: 0=analytical, 1=highly creative
+
+        Returns:
+            WanderingSession that will collect thoughts
+        """
+        self._init_wandering()
+
+        if self._is_wandering:
+            raise RuntimeError("Already wandering - stop current session first")
+
+        session = WanderingSession(
+            session_id=f"wander_{self.agent_id}_{len(self._wandering_sessions)}",
+            agent_id=self.agent_id,
+            duration_seconds=duration_seconds,
+            focus_concepts=focus_concepts or [],
+            creativity_level=creativity_level,
+        )
+
+        self._wandering_sessions.append(session)
+        self._is_wandering = True
+        self.state.status = AgentStatus.WANDERING
+
+        logger.info(f"Agent {self.name} starting mind-wandering session ({duration_seconds}s)")
+
+        # Start wandering loop
+        self._wandering_task = asyncio.create_task(
+            self._wandering_loop(session)
+        )
+
+        return session
+
+    async def stop_wandering(self, reason: str = "manual_stop") -> Optional[WanderingSession]:
+        """
+        Stop the current mind-wandering session.
+
+        Args:
+            reason: Why wandering was stopped
+
+        Returns:
+            The completed session
+        """
+        self._init_wandering()
+
+        if not self._is_wandering:
+            return None
+
+        self._is_wandering = False
+
+        if self._wandering_task:
+            self._wandering_task.cancel()
+            try:
+                await self._wandering_task
+            except asyncio.CancelledError:
+                pass
+            self._wandering_task = None
+
+        # Mark session complete
+        if self._wandering_sessions:
+            session = self._wandering_sessions[-1]
+            session.is_active = False
+            session.ended_at = datetime.now()
+            session.interrupt_reason = reason
+
+            self.state.status = AgentStatus.IDLE
+            logger.info(f"Agent {self.name} stopped wandering: {len(session.thoughts)} thoughts")
+
+            return session
+
+        return None
+
+    async def _wandering_loop(self, session: WanderingSession):
+        """Main mind-wandering loop."""
+        import time
+        start_time = time.time()
+
+        try:
+            while self._is_wandering:
+                elapsed = time.time() - start_time
+                if elapsed >= session.duration_seconds:
+                    break
+
+                # Generate a thought
+                thought = await self._generate_thought(session)
+                if thought:
+                    session.thoughts.append(thought)
+                    self._all_thoughts.append(thought)
+
+                    if thought.thought_type == "insight":
+                        session.insights_found += 1
+                    if thought.thought_type == "connection":
+                        session.connections_made += 1
+
+                    # Notify callbacks
+                    for callback in self._wandering_callbacks:
+                        try:
+                            if asyncio.iscoroutinefunction(callback):
+                                await callback(thought)
+                            else:
+                                callback(thought)
+                        except Exception as e:
+                            logger.error(f"Wandering callback error: {e}")
+
+                # Wait before next thought (random interval for naturalism)
+                import random
+                wait_time = random.uniform(2.0, 8.0) * (1 - session.creativity_level * 0.5)
+                await asyncio.sleep(wait_time)
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            session.is_active = False
+            session.ended_at = datetime.now()
+            self._is_wandering = False
+            self.state.status = AgentStatus.IDLE
+
+    async def _generate_thought(self, session: WanderingSession) -> Optional[WanderingThought]:
+        """Generate a single wandering thought."""
+        self._thought_counter += 1
+
+        thought = WanderingThought(
+            thought_id=f"thought_{self.agent_id}_{self._thought_counter}",
+            agent_id=self.agent_id,
+            wandering_context=", ".join(session.focus_concepts) if session.focus_concepts else "free association",
+        )
+
+        # Determine thought type based on creativity level
+        import random
+        thought_types = ["association", "question", "insight", "connection"]
+        weights = [0.4, 0.3, 0.15, 0.15]  # Default weights
+
+        if session.creativity_level > 0.7:
+            weights = [0.2, 0.2, 0.3, 0.3]  # More insights and connections
+        elif session.creativity_level < 0.3:
+            weights = [0.5, 0.4, 0.05, 0.05]  # More analytical
+
+        thought.thought_type = random.choices(thought_types, weights=weights)[0]
+
+        # Generate content based on type
+        if self.llm_backend:
+            try:
+                thought = await self._llm_generate_thought(session, thought)
+            except Exception as e:
+                logger.debug(f"LLM thought generation failed, using heuristic: {e}")
+                thought = self._heuristic_generate_thought(session, thought)
+        else:
+            thought = self._heuristic_generate_thought(session, thought)
+
+        return thought
+
+    async def _llm_generate_thought(
+        self,
+        session: WanderingSession,
+        thought: WanderingThought,
+    ) -> WanderingThought:
+        """Generate thought using LLM."""
+        # Gather recent concepts from memory
+        recent_concepts = list(self._concept_memory.keys())[-20:] if self._concept_memory else []
+
+        prompt = f"""You are an AI agent in "mind-wandering" mode - a creative thinking state where you make unexpected connections between concepts.
+
+AGENT TYPE: {self.name}
+CAPABILITIES: {[c.value for c in self.capabilities]}
+CREATIVITY LEVEL: {session.creativity_level:.1f} (0=analytical, 1=highly creative)
+
+FOCUS AREAS: {session.focus_concepts if session.focus_concepts else "Open exploration"}
+RECENT CONCEPTS: {recent_concepts[-10:] if recent_concepts else "None yet"}
+
+THOUGHT TYPE TO GENERATE: {thought.thought_type}
+
+THOUGHT TYPE DEFINITIONS:
+- "association": Connect two concepts that don't usually go together
+- "question": Ask a thought-provoking question about the domain
+- "insight": Realize something non-obvious about how things work
+- "connection": Find a structural similarity between different domains
+
+CREATIVITY GUIDELINES:
+- At high creativity (>0.7): Make bold, unexpected leaps. Question assumptions.
+- At low creativity (<0.3): Stay closer to known facts. Make logical extensions.
+- Consider analogies from biology, physics, art, games, nature
+
+Generate ONE {thought.thought_type} thought. Return JSON:
+{{
+    "content": "The actual thought content - be specific and interesting",
+    "source_concepts": ["concept1", "concept2"],  // What concepts you connected
+    "novelty_score": 0.0-1.0,  // How unexpected is this thought
+    "relevance_score": 0.0-1.0,  // How relevant to AI/agent capabilities
+    "creativity_score": 0.0-1.0,  // How creative/lateral
+    "follow_up_actions": ["optional action 1", "optional action 2"],  // What could be done with this
+    "is_actionable": true/false  // Can this lead to concrete improvements
+}}
+
+Return ONLY the JSON:"""
+
+        result = await self.llm_backend.generate(prompt)
+
+        try:
+            import json
+            # Extract JSON
+            response = result.text
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            if start >= 0 and end > start:
+                data = json.loads(response[start:end])
+
+                thought.content = data.get("content", "")
+                thought.source_concepts = data.get("source_concepts", [])
+                thought.novelty_score = float(data.get("novelty_score", 0.5))
+                thought.relevance_score = float(data.get("relevance_score", 0.5))
+                thought.creativity_score = float(data.get("creativity_score", 0.5))
+                thought.follow_up_actions = data.get("follow_up_actions", [])
+                thought.is_actionable = data.get("is_actionable", False)
+
+                # Update concept memory
+                for concept in thought.source_concepts:
+                    if concept not in self._concept_memory:
+                        self._concept_memory[concept] = []
+                    # Cross-link concepts
+                    for other in thought.source_concepts:
+                        if other != concept and other not in self._concept_memory[concept]:
+                            self._concept_memory[concept].append(other)
+
+        except Exception as e:
+            logger.debug(f"Failed to parse thought JSON: {e}")
+            thought.content = result.text[:200]
+            thought.novelty_score = 0.5
+            thought.relevance_score = 0.5
+            thought.creativity_score = 0.5
+
+        return thought
+
+    def _heuristic_generate_thought(
+        self,
+        session: WanderingSession,
+        thought: WanderingThought,
+    ) -> WanderingThought:
+        """Generate thought using heuristics when LLM unavailable."""
+        import random
+
+        # Sample concepts for association
+        all_concepts = list(self._concept_memory.keys()) if self._concept_memory else []
+        all_concepts.extend(session.focus_concepts)
+        all_concepts.extend([c.value for c in self.capabilities])
+
+        if len(all_concepts) < 2:
+            all_concepts = ["intelligence", "learning", "memory", "creativity", "patterns", "emergence"]
+
+        # Pick random concepts
+        concept1 = random.choice(all_concepts)
+        concept2 = random.choice([c for c in all_concepts if c != concept1])
+
+        thought.source_concepts = [concept1, concept2]
+
+        # Generate content based on thought type
+        templates = {
+            "association": [
+                f"What if {concept1} could be applied to {concept2}?",
+                f"There might be a hidden connection between {concept1} and {concept2}.",
+                f"{concept1} and {concept2} share an underlying structure.",
+            ],
+            "question": [
+                f"Why does {concept1} work the way it does?",
+                f"What would happen if {concept1} was combined with {concept2}?",
+                f"Is there a better way to think about {concept1}?",
+            ],
+            "insight": [
+                f"{concept1} is actually a form of {concept2} at a different scale.",
+                f"The limitations of {concept1} might be features, not bugs.",
+                f"{concept1} succeeds because it embraces {concept2}.",
+            ],
+            "connection": [
+                f"{concept1} in AI is like {concept2} in biology.",
+                f"The pattern in {concept1} appears again in {concept2}.",
+                f"Both {concept1} and {concept2} solve the same fundamental problem.",
+            ],
+        }
+
+        thought.content = random.choice(templates.get(thought.thought_type, templates["association"]))
+        thought.novelty_score = random.uniform(0.3, 0.7)
+        thought.relevance_score = random.uniform(0.4, 0.8)
+        thought.creativity_score = session.creativity_level * random.uniform(0.5, 1.0)
+
+        return thought
+
+    def on_thought(self, callback: Callable[[WanderingThought], None]):
+        """Register a callback for new thoughts during wandering."""
+        self._init_wandering()
+        self._wandering_callbacks.append(callback)
+
+    def get_insights(
+        self,
+        min_quality: float = 0.6,
+        thought_types: Optional[list[str]] = None,
+        limit: int = 20,
+    ) -> list[WanderingThought]:
+        """
+        Get high-quality thoughts from wandering sessions.
+
+        Args:
+            min_quality: Minimum overall quality score
+            thought_types: Filter by thought types (None = all)
+            limit: Maximum number to return
+
+        Returns:
+            List of WanderingThoughts sorted by quality
+        """
+        self._init_wandering()
+
+        thoughts = self._all_thoughts
+
+        # Filter by type
+        if thought_types:
+            thoughts = [t for t in thoughts if t.thought_type in thought_types]
+
+        # Filter by quality
+        thoughts = [t for t in thoughts if t.overall_quality() >= min_quality]
+
+        # Sort by quality
+        thoughts.sort(key=lambda t: t.overall_quality(), reverse=True)
+
+        return thoughts[:limit]
+
+    def get_actionable_insights(self, limit: int = 10) -> list[WanderingThought]:
+        """Get actionable insights that could lead to improvements."""
+        self._init_wandering()
+
+        actionable = [t for t in self._all_thoughts if t.is_actionable]
+        actionable.sort(key=lambda t: t.overall_quality(), reverse=True)
+
+        return actionable[:limit]
+
+    def get_concept_network(self) -> dict[str, list[str]]:
+        """Get the network of concepts built through wandering."""
+        self._init_wandering()
+        return dict(self._concept_memory)
+
+    def find_related_concepts(self, concept: str, depth: int = 2) -> set[str]:
+        """
+        Find concepts related to a given concept.
+
+        Args:
+            concept: Starting concept
+            depth: How many hops to traverse
+
+        Returns:
+            Set of related concepts
+        """
+        self._init_wandering()
+
+        related = set()
+        to_visit = [(concept, 0)]
+        visited = set()
+
+        while to_visit:
+            current, current_depth = to_visit.pop(0)
+
+            if current in visited or current_depth > depth:
+                continue
+
+            visited.add(current)
+
+            if current in self._concept_memory:
+                for linked in self._concept_memory[current]:
+                    related.add(linked)
+                    if current_depth < depth:
+                        to_visit.append((linked, current_depth + 1))
+
+        return related
+
+    def get_wandering_stats(self) -> dict:
+        """Get statistics about mind-wandering activity."""
+        self._init_wandering()
+
+        if not self._wandering_sessions:
+            return {"total_sessions": 0}
+
+        total_thoughts = len(self._all_thoughts)
+        avg_quality = (
+            sum(t.overall_quality() for t in self._all_thoughts) / total_thoughts
+            if total_thoughts > 0 else 0
+        )
+
+        by_type = {}
+        for thought in self._all_thoughts:
+            by_type[thought.thought_type] = by_type.get(thought.thought_type, 0) + 1
+
+        return {
+            "total_sessions": len(self._wandering_sessions),
+            "total_thoughts": total_thoughts,
+            "insights_found": sum(s.insights_found for s in self._wandering_sessions),
+            "connections_made": sum(s.connections_made for s in self._wandering_sessions),
+            "avg_thought_quality": avg_quality,
+            "thoughts_by_type": by_type,
+            "concepts_in_network": len(self._concept_memory),
+            "actionable_count": len([t for t in self._all_thoughts if t.is_actionable]),
+            "is_currently_wandering": self._is_wandering,
+        }

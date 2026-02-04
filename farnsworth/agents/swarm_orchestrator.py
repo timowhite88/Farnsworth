@@ -9,6 +9,7 @@ Novel Approaches:
 """
 
 import asyncio
+import random
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -18,6 +19,69 @@ import uuid
 from loguru import logger
 
 from farnsworth.agents.base_agent import BaseAgent, AgentCapability, AgentStatus, TaskResult
+
+
+# =============================================================================
+# POPULATION-BASED EVOLUTION (AGI Upgrade)
+# =============================================================================
+
+@dataclass
+class AgentVariant:
+    """
+    A variant of an agent for population-based evolution.
+
+    Tracks genetic traits and fitness for natural selection.
+    """
+    variant_id: str
+    base_agent_type: str
+    generation: int = 0
+
+    # Genetic traits (can be mutated)
+    temperature: float = 0.7
+    capability_weights: dict = field(default_factory=dict)
+    prompt_style: str = "balanced"  # "concise", "detailed", "creative", "balanced"
+    confidence_threshold: float = 0.6
+
+    # Fitness tracking
+    fitness_score: float = 0.5
+    tasks_completed: int = 0
+    tasks_failed: int = 0
+    avg_confidence: float = 0.5
+    avg_execution_time: float = 0.0
+
+    # Lineage
+    parent_id: Optional[str] = None
+    mutation_history: list = field(default_factory=list)
+
+    created_at: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> dict:
+        return {
+            "variant_id": self.variant_id,
+            "base_agent_type": self.base_agent_type,
+            "generation": self.generation,
+            "fitness_score": self.fitness_score,
+            "temperature": self.temperature,
+            "prompt_style": self.prompt_style,
+            "tasks_completed": self.tasks_completed,
+            "tasks_failed": self.tasks_failed,
+        }
+
+
+@dataclass
+class EvolutionConfig:
+    """Configuration for population-based evolution."""
+    population_size: int = 10
+    generations: int = 5
+    mutation_rate: float = 0.2
+    elite_ratio: float = 0.2  # Top 20% survive unchanged
+    crossover_rate: float = 0.3
+    fitness_weights: dict = field(default_factory=lambda: {
+        "success_rate": 0.4,
+        "confidence": 0.2,
+        "speed": 0.2,
+        "handoff_efficiency": 0.2,
+    })
 
 
 class TaskStatus(Enum):
@@ -465,4 +529,360 @@ class SwarmOrchestrator:
             "total_tasks_processed": self.state.total_tasks_processed,
             "total_handoffs": self.state.total_handoffs,
             "agent_types": list(self._agent_factories.keys()),
+        }
+
+    # =========================================================================
+    # POPULATION-BASED EVOLUTION (AGI Upgrade)
+    # =========================================================================
+
+    def _init_evolution(self, config: Optional[EvolutionConfig] = None):
+        """Initialize evolution tracking."""
+        self._evolution_config = config or EvolutionConfig()
+        self._population: dict[str, AgentVariant] = {}
+        self._evolution_history: list[dict] = []
+
+    async def evolve_population(
+        self,
+        agent_type: str,
+        evaluation_tasks: list[str],
+        generations: Optional[int] = None,
+    ) -> list[AgentVariant]:
+        """
+        Run population-based evolution on a set of agent variants.
+
+        Uses genetic algorithm:
+        1. Initialize population with random variants
+        2. Evaluate fitness on test tasks
+        3. Select elite survivors
+        4. Crossover and mutate to create next generation
+        5. Repeat for N generations
+
+        Returns the final evolved population sorted by fitness.
+        """
+        if not hasattr(self, '_evolution_config'):
+            self._init_evolution()
+
+        config = self._evolution_config
+        num_generations = generations or config.generations
+
+        # Initialize population if empty
+        if not self._population:
+            for i in range(config.population_size):
+                variant = AgentVariant(
+                    variant_id=f"{agent_type}_v{i}_{uuid.uuid4().hex[:6]}",
+                    base_agent_type=agent_type,
+                    generation=0,
+                    temperature=random.uniform(0.3, 1.0),
+                    prompt_style=random.choice(["concise", "detailed", "creative", "balanced"]),
+                    confidence_threshold=random.uniform(0.4, 0.8),
+                )
+                self._population[variant.variant_id] = variant
+
+        logger.info(f"Starting evolution: {config.population_size} variants, {num_generations} generations")
+
+        # Evolution loop
+        for gen in range(num_generations):
+            logger.info(f"Generation {gen + 1}/{num_generations}")
+
+            # Evaluate all variants
+            for variant in self._population.values():
+                if variant.generation == gen:
+                    await self._evaluate_variant(variant, evaluation_tasks)
+
+            # Sort by fitness
+            sorted_variants = sorted(
+                self._population.values(),
+                key=lambda v: v.fitness_score,
+                reverse=True,
+            )
+
+            # Elite selection - top performers survive unchanged
+            elite_count = max(1, int(config.population_size * config.elite_ratio))
+            elites = sorted_variants[:elite_count]
+
+            # Create next generation
+            next_gen: list[AgentVariant] = []
+
+            # Elites pass through
+            for elite in elites:
+                next_gen.append(elite)
+
+            # Fill rest with crossover and mutation
+            while len(next_gen) < config.population_size:
+                # Tournament selection for parents
+                parent1 = self._tournament_select(sorted_variants)
+                parent2 = self._tournament_select(sorted_variants)
+
+                # Crossover
+                if random.random() < config.crossover_rate:
+                    child = self._crossover(parent1, parent2, gen + 1)
+                else:
+                    child = AgentVariant(
+                        variant_id=f"{agent_type}_v{len(next_gen)}_{uuid.uuid4().hex[:6]}",
+                        base_agent_type=agent_type,
+                        generation=gen + 1,
+                        parent_id=parent1.variant_id,
+                        temperature=parent1.temperature,
+                        prompt_style=parent1.prompt_style,
+                        confidence_threshold=parent1.confidence_threshold,
+                    )
+
+                # Mutation
+                if random.random() < config.mutation_rate:
+                    child = self._mutate_variant(child)
+
+                next_gen.append(child)
+
+            # Update population
+            self._population = {v.variant_id: v for v in next_gen}
+
+            # Record history
+            self._evolution_history.append({
+                "generation": gen + 1,
+                "best_fitness": sorted_variants[0].fitness_score,
+                "avg_fitness": sum(v.fitness_score for v in sorted_variants) / len(sorted_variants),
+                "best_variant": sorted_variants[0].variant_id,
+            })
+
+        # Return final sorted population
+        return sorted(
+            self._population.values(),
+            key=lambda v: v.fitness_score,
+            reverse=True,
+        )
+
+    async def _evaluate_variant(
+        self,
+        variant: AgentVariant,
+        evaluation_tasks: list[str],
+    ):
+        """Evaluate a variant's fitness on test tasks."""
+        config = self._evolution_config
+        start_time = datetime.now()
+
+        successes = 0
+        total_confidence = 0.0
+
+        for task_desc in evaluation_tasks:
+            try:
+                # Spawn agent with variant's traits
+                agent = await self.spawn_agent(variant.base_agent_type)
+                if not agent:
+                    continue
+
+                # Apply variant traits
+                agent.temperature = variant.temperature
+                agent.confidence_threshold = variant.confidence_threshold
+
+                # Execute task
+                result = await asyncio.wait_for(
+                    agent.execute(task_desc, {}),
+                    timeout=self.handoff_timeout,
+                )
+
+                if result.success:
+                    successes += 1
+                    variant.tasks_completed += 1
+                else:
+                    variant.tasks_failed += 1
+
+                total_confidence += result.confidence
+
+            except asyncio.TimeoutError:
+                variant.tasks_failed += 1
+            except Exception as e:
+                logger.warning(f"Evaluation error for {variant.variant_id}: {e}")
+                variant.tasks_failed += 1
+
+        # Calculate fitness components
+        total_tasks = len(evaluation_tasks)
+        success_rate = successes / total_tasks if total_tasks > 0 else 0
+        avg_confidence = total_confidence / total_tasks if total_tasks > 0 else 0.5
+        execution_time = (datetime.now() - start_time).total_seconds()
+
+        # Speed score (faster = better, max 1.0)
+        speed_score = max(0, 1 - (execution_time / (total_tasks * self.handoff_timeout)))
+
+        # Handoff efficiency (fewer handoffs = better)
+        handoff_efficiency = 1 / (1 + variant.tasks_failed * 0.1)
+
+        # Weighted fitness
+        weights = config.fitness_weights
+        variant.fitness_score = (
+            weights["success_rate"] * success_rate +
+            weights["confidence"] * avg_confidence +
+            weights["speed"] * speed_score +
+            weights["handoff_efficiency"] * handoff_efficiency
+        )
+
+        variant.avg_confidence = avg_confidence
+        variant.avg_execution_time = execution_time / total_tasks if total_tasks > 0 else 0
+
+        logger.debug(
+            f"Variant {variant.variant_id}: fitness={variant.fitness_score:.3f}, "
+            f"success={success_rate:.2f}, confidence={avg_confidence:.2f}"
+        )
+
+    def _tournament_select(
+        self,
+        population: list[AgentVariant],
+        tournament_size: int = 3,
+    ) -> AgentVariant:
+        """Select a variant using tournament selection."""
+        tournament = random.sample(
+            population,
+            min(tournament_size, len(population)),
+        )
+        return max(tournament, key=lambda v: v.fitness_score)
+
+    def _crossover(
+        self,
+        parent1: AgentVariant,
+        parent2: AgentVariant,
+        generation: int,
+    ) -> AgentVariant:
+        """Create a child variant by crossing over two parents."""
+        child = AgentVariant(
+            variant_id=f"{parent1.base_agent_type}_v{generation}_{uuid.uuid4().hex[:6]}",
+            base_agent_type=parent1.base_agent_type,
+            generation=generation,
+            parent_id=parent1.variant_id,
+            # Crossover traits
+            temperature=(parent1.temperature + parent2.temperature) / 2,
+            prompt_style=random.choice([parent1.prompt_style, parent2.prompt_style]),
+            confidence_threshold=(parent1.confidence_threshold + parent2.confidence_threshold) / 2,
+        )
+        return child
+
+    def _mutate_variant(self, variant: AgentVariant) -> AgentVariant:
+        """Apply random mutations to a variant."""
+        mutations = []
+
+        # Temperature mutation
+        if random.random() < 0.5:
+            delta = random.gauss(0, 0.1)
+            variant.temperature = max(0.1, min(1.5, variant.temperature + delta))
+            mutations.append(f"temperature:{delta:+.2f}")
+
+        # Prompt style mutation
+        if random.random() < 0.3:
+            styles = ["concise", "detailed", "creative", "balanced"]
+            old_style = variant.prompt_style
+            variant.prompt_style = random.choice(styles)
+            if variant.prompt_style != old_style:
+                mutations.append(f"style:{variant.prompt_style}")
+
+        # Confidence threshold mutation
+        if random.random() < 0.5:
+            delta = random.gauss(0, 0.05)
+            variant.confidence_threshold = max(0.3, min(0.9, variant.confidence_threshold + delta))
+            mutations.append(f"conf_thresh:{delta:+.2f}")
+
+        variant.mutation_history.extend(mutations)
+        return variant
+
+    async def gossip_state(
+        self,
+        peer_orchestrators: list["SwarmOrchestrator"],
+        share_ratio: float = 0.3,
+    ) -> dict:
+        """
+        Share evolutionary state with peer orchestrators.
+
+        Implements gossip protocol for decentralized knowledge sharing:
+        1. Select top performers to share
+        2. Send to random subset of peers
+        3. Merge received variants into local population
+
+        Returns: {sent_count, received_count, merged_count}
+        """
+        if not hasattr(self, '_population') or not self._population:
+            return {"sent_count": 0, "received_count": 0, "merged_count": 0}
+
+        # Select top variants to share
+        sorted_variants = sorted(
+            self._population.values(),
+            key=lambda v: v.fitness_score,
+            reverse=True,
+        )
+        share_count = max(1, int(len(sorted_variants) * share_ratio))
+        to_share = sorted_variants[:share_count]
+
+        sent_count = 0
+        received_count = 0
+        merged_count = 0
+
+        # Share with each peer
+        for peer in peer_orchestrators:
+            if not hasattr(peer, '_population'):
+                peer._init_evolution()
+
+            # Send our top variants
+            for variant in to_share:
+                variant_data = variant.to_dict()
+                sent_count += 1
+
+                # Check if peer should adopt this variant
+                if variant.fitness_score > 0.5:  # Only share good variants
+                    # Create new variant for peer with slightly mutated traits
+                    peer_variant = AgentVariant(
+                        variant_id=f"gossip_{variant.variant_id}_{uuid.uuid4().hex[:4]}",
+                        base_agent_type=variant.base_agent_type,
+                        generation=variant.generation,
+                        temperature=variant.temperature,
+                        prompt_style=variant.prompt_style,
+                        confidence_threshold=variant.confidence_threshold,
+                        fitness_score=variant.fitness_score * 0.9,  # Slight penalty for transferred
+                        parent_id=variant.variant_id,
+                    )
+
+                    # Only add if peer doesn't have similar variant
+                    similar_exists = any(
+                        abs(v.temperature - peer_variant.temperature) < 0.1 and
+                        v.prompt_style == peer_variant.prompt_style
+                        for v in peer._population.values()
+                    )
+
+                    if not similar_exists:
+                        peer._population[peer_variant.variant_id] = peer_variant
+                        merged_count += 1
+
+            # Receive from peer (symmetric exchange)
+            received_count += len(peer._population)
+
+        logger.info(
+            f"Gossip complete: sent={sent_count}, received={received_count}, merged={merged_count}"
+        )
+
+        return {
+            "sent_count": sent_count,
+            "received_count": received_count,
+            "merged_count": merged_count,
+        }
+
+    def get_best_variant(self, agent_type: Optional[str] = None) -> Optional[AgentVariant]:
+        """Get the best performing variant, optionally filtered by agent type."""
+        if not hasattr(self, '_population') or not self._population:
+            return None
+
+        variants = list(self._population.values())
+
+        if agent_type:
+            variants = [v for v in variants if v.base_agent_type == agent_type]
+
+        if not variants:
+            return None
+
+        return max(variants, key=lambda v: v.fitness_score)
+
+    def get_evolution_stats(self) -> dict:
+        """Get statistics about the evolution process."""
+        if not hasattr(self, '_evolution_history'):
+            return {"status": "not_initialized"}
+
+        return {
+            "population_size": len(self._population) if hasattr(self, '_population') else 0,
+            "generations_completed": len(self._evolution_history),
+            "history": self._evolution_history[-10:],  # Last 10 generations
+            "best_variant": self.get_best_variant().to_dict() if self.get_best_variant() else None,
         }

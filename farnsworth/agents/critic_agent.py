@@ -19,6 +19,90 @@ import re
 from loguru import logger
 
 
+# =============================================================================
+# COLLABORATION METRICS (AGI Upgrade)
+# =============================================================================
+
+@dataclass
+class CollaborationMetrics:
+    """
+    Metrics for evaluating multi-agent collaboration quality.
+
+    Tracks both individual contributions and emergent collective behavior.
+    """
+    collaboration_id: str
+    agents_involved: list[str] = field(default_factory=list)
+
+    # Handoff metrics
+    total_handoffs: int = 0
+    successful_handoffs: int = 0
+    failed_handoffs: int = 0
+    handoff_latency_avg_ms: float = 0.0
+
+    # Contribution metrics
+    individual_scores: dict[str, float] = field(default_factory=dict)  # agent_id -> score
+    contribution_ratios: dict[str, float] = field(default_factory=dict)  # agent_id -> % of final
+
+    # Collective metrics
+    collective_score: float = 0.0  # Final output quality
+    synergy_score: float = 0.0  # collective vs avg(individual)
+    coherence_score: float = 0.0  # Consistency across contributions
+    coverage_score: float = 0.0  # How much of the task space covered
+
+    # Emergence indicators
+    emergent_insights: list[str] = field(default_factory=list)
+    cross_pollination_count: int = 0  # Ideas that spread between agents
+    novel_combinations: int = 0  # New patterns from combining approaches
+
+    # Timestamps
+    started_at: datetime = field(default_factory=datetime.now)
+    completed_at: Optional[datetime] = None
+
+    def handoff_success_rate(self) -> float:
+        """Calculate handoff success rate."""
+        if self.total_handoffs == 0:
+            return 1.0
+        return self.successful_handoffs / self.total_handoffs
+
+    def synergy_coefficient(self) -> float:
+        """
+        Calculate synergy: positive means collective > sum of parts.
+
+        synergy = (collective_score - avg_individual) / avg_individual
+        """
+        if not self.individual_scores:
+            return 0.0
+        avg_individual = sum(self.individual_scores.values()) / len(self.individual_scores)
+        if avg_individual == 0:
+            return 0.0
+        return (self.collective_score - avg_individual) / avg_individual
+
+    def to_dict(self) -> dict:
+        return {
+            "collaboration_id": self.collaboration_id,
+            "agents_involved": self.agents_involved,
+            "handoff_success_rate": self.handoff_success_rate(),
+            "synergy_coefficient": self.synergy_coefficient(),
+            "collective_score": self.collective_score,
+            "coherence_score": self.coherence_score,
+            "coverage_score": self.coverage_score,
+            "emergent_insights_count": len(self.emergent_insights),
+        }
+
+
+@dataclass
+class HandoffEvent:
+    """Record of a handoff between agents."""
+    from_agent: str
+    to_agent: str
+    task_context: str
+    timestamp: datetime = field(default_factory=datetime.now)
+    latency_ms: float = 0.0
+    success: bool = True
+    failure_reason: Optional[str] = None
+    context_preserved_ratio: float = 1.0  # How much context was preserved
+
+
 class QualityDimension(Enum):
     """Dimensions of quality to evaluate."""
     CORRECTNESS = "correctness"      # Is it factually/logically correct?
@@ -29,6 +113,8 @@ class QualityDimension(Enum):
     SAFETY = "safety"                # Is it safe and secure?
     CREATIVITY = "creativity"        # Is it novel and creative?
     MAINTAINABILITY = "maintainability"  # Is it maintainable?
+    # New: Collaboration-specific dimension
+    COLLABORATION = "collaboration"  # How well does this fit with other contributions?
 
 
 class ReviewType(Enum):
@@ -741,4 +827,356 @@ Return JSON:
                 t.value: len([r for r in self.reviews.values() if r.artifact_type == t])
                 for t in ReviewType
             },
+        }
+
+    # =========================================================================
+    # COLLABORATION METRICS (AGI Upgrade)
+    # =========================================================================
+
+    def _init_collaboration_tracking(self):
+        """Initialize collaboration tracking state."""
+        if not hasattr(self, '_collaborations'):
+            self._collaborations: dict[str, CollaborationMetrics] = {}
+            self._handoff_log: list[HandoffEvent] = []
+            self._agent_performance: dict[str, dict] = {}  # agent_id -> stats
+
+    def start_collaboration(
+        self,
+        collaboration_id: str,
+        agents: list[str],
+    ) -> CollaborationMetrics:
+        """
+        Start tracking a new collaboration session.
+
+        Args:
+            collaboration_id: Unique identifier for this collaboration
+            agents: List of agent IDs participating
+
+        Returns:
+            CollaborationMetrics instance for tracking
+        """
+        self._init_collaboration_tracking()
+
+        metrics = CollaborationMetrics(
+            collaboration_id=collaboration_id,
+            agents_involved=agents,
+            started_at=datetime.now(),
+        )
+
+        self._collaborations[collaboration_id] = metrics
+        logger.info(f"Started collaboration tracking: {collaboration_id} with {len(agents)} agents")
+
+        return metrics
+
+    def record_handoff(
+        self,
+        collaboration_id: str,
+        from_agent: str,
+        to_agent: str,
+        task_context: str,
+        success: bool = True,
+        latency_ms: float = 0.0,
+        context_preserved_ratio: float = 1.0,
+        failure_reason: Optional[str] = None,
+    ) -> HandoffEvent:
+        """
+        Record a handoff between agents.
+
+        Args:
+            collaboration_id: The collaboration this handoff belongs to
+            from_agent: Source agent ID
+            to_agent: Target agent ID
+            task_context: Brief description of what was handed off
+            success: Whether the handoff succeeded
+            latency_ms: Time taken for handoff
+            context_preserved_ratio: How much context was preserved (0-1)
+            failure_reason: Reason if handoff failed
+
+        Returns:
+            HandoffEvent record
+        """
+        self._init_collaboration_tracking()
+
+        event = HandoffEvent(
+            from_agent=from_agent,
+            to_agent=to_agent,
+            task_context=task_context,
+            timestamp=datetime.now(),
+            latency_ms=latency_ms,
+            success=success,
+            failure_reason=failure_reason,
+            context_preserved_ratio=context_preserved_ratio,
+        )
+
+        self._handoff_log.append(event)
+
+        # Update collaboration metrics
+        if collaboration_id in self._collaborations:
+            metrics = self._collaborations[collaboration_id]
+            metrics.total_handoffs += 1
+            if success:
+                metrics.successful_handoffs += 1
+            else:
+                metrics.failed_handoffs += 1
+
+            # Update running average of latency
+            n = metrics.total_handoffs
+            metrics.handoff_latency_avg_ms = (
+                (metrics.handoff_latency_avg_ms * (n - 1) + latency_ms) / n
+            )
+
+        return event
+
+    async def record_contribution(
+        self,
+        collaboration_id: str,
+        agent_id: str,
+        contribution: str,
+        review_type: ReviewType = ReviewType.OUTPUT,
+    ) -> QualityScore:
+        """
+        Record and evaluate an individual agent's contribution.
+
+        Args:
+            collaboration_id: The collaboration this contribution belongs to
+            agent_id: The contributing agent
+            contribution: The content contributed
+            review_type: Type of contribution
+
+        Returns:
+            QualityScore for this contribution
+        """
+        self._init_collaboration_tracking()
+
+        # Review the contribution
+        review = await self.review(contribution, review_type)
+
+        # Store individual score
+        if collaboration_id in self._collaborations:
+            self._collaborations[collaboration_id].individual_scores[agent_id] = review.overall_score
+
+        # Update agent performance tracking
+        if agent_id not in self._agent_performance:
+            self._agent_performance[agent_id] = {
+                "total_contributions": 0,
+                "avg_score": 0.0,
+                "scores": [],
+            }
+
+        stats = self._agent_performance[agent_id]
+        stats["total_contributions"] += 1
+        stats["scores"].append(review.overall_score)
+        stats["avg_score"] = sum(stats["scores"]) / len(stats["scores"])
+
+        logger.debug(f"Agent {agent_id} contribution score: {review.overall_score:.2f}")
+
+        return QualityScore(
+            dimension=QualityDimension.COLLABORATION,
+            score=review.overall_score,
+            confidence=0.8,
+            feedback=review.summary,
+            suggestions=review.improvement_priorities,
+        )
+
+    async def evaluate_collective_output(
+        self,
+        collaboration_id: str,
+        collective_output: str,
+        individual_contributions: Optional[dict[str, str]] = None,
+        review_type: ReviewType = ReviewType.OUTPUT,
+    ) -> CollaborationMetrics:
+        """
+        Evaluate the collective output and calculate synergy.
+
+        Args:
+            collaboration_id: The collaboration being evaluated
+            collective_output: The final combined output
+            individual_contributions: Optional dict of agent_id -> contribution
+            review_type: Type of output
+
+        Returns:
+            Updated CollaborationMetrics with synergy scores
+        """
+        self._init_collaboration_tracking()
+
+        if collaboration_id not in self._collaborations:
+            self.start_collaboration(collaboration_id, [])
+
+        metrics = self._collaborations[collaboration_id]
+
+        # Review collective output
+        collective_review = await self.review(collective_output, review_type)
+        metrics.collective_score = collective_review.overall_score
+
+        # Review individual contributions if provided
+        if individual_contributions:
+            for agent_id, contribution in individual_contributions.items():
+                if agent_id not in metrics.individual_scores:
+                    await self.record_contribution(
+                        collaboration_id, agent_id, contribution, review_type
+                    )
+
+        # Calculate synergy
+        metrics.synergy_score = metrics.synergy_coefficient()
+
+        # Evaluate coherence (consistency across contributions)
+        if len(metrics.individual_scores) > 1:
+            scores = list(metrics.individual_scores.values())
+            mean_score = sum(scores) / len(scores)
+            variance = sum((s - mean_score) ** 2 for s in scores) / len(scores)
+            # Coherence is inverse of variance (high coherence = low variance)
+            metrics.coherence_score = max(0, 1 - (variance * 4))  # Scale variance
+
+        # Calculate contribution ratios
+        total_chars = sum(
+            len(c) for c in (individual_contributions or {}).values()
+        )
+        if total_chars > 0 and individual_contributions:
+            for agent_id, contribution in individual_contributions.items():
+                metrics.contribution_ratios[agent_id] = len(contribution) / total_chars
+
+        # Check for emergent insights (collective better than best individual)
+        if metrics.individual_scores:
+            best_individual = max(metrics.individual_scores.values())
+            if metrics.collective_score > best_individual * 1.1:  # 10% better
+                metrics.emergent_insights.append(
+                    f"Collective ({metrics.collective_score:.2f}) exceeded best "
+                    f"individual ({best_individual:.2f}) by "
+                    f"{((metrics.collective_score / best_individual) - 1) * 100:.1f}%"
+                )
+
+        # Mark completion
+        metrics.completed_at = datetime.now()
+
+        logger.info(
+            f"Collaboration {collaboration_id} evaluated: "
+            f"collective={metrics.collective_score:.2f}, "
+            f"synergy={metrics.synergy_score:+.2f}"
+        )
+
+        return metrics
+
+    async def detect_cross_pollination(
+        self,
+        collaboration_id: str,
+        agent_outputs: dict[str, list[str]],
+    ) -> int:
+        """
+        Detect ideas that spread between agents (cross-pollination).
+
+        Args:
+            collaboration_id: The collaboration
+            agent_outputs: Dict of agent_id -> list of outputs over time
+
+        Returns:
+            Count of cross-pollinated ideas detected
+        """
+        self._init_collaboration_tracking()
+
+        if collaboration_id not in self._collaborations:
+            return 0
+
+        metrics = self._collaborations[collaboration_id]
+        cross_pollination_count = 0
+
+        # Extract key phrases from each agent's outputs
+        agent_phrases: dict[str, set[str]] = {}
+
+        for agent_id, outputs in agent_outputs.items():
+            phrases = set()
+            for output in outputs:
+                # Simple phrase extraction (could use NLP in production)
+                words = output.lower().split()
+                # Extract 2-3 word phrases
+                for i in range(len(words) - 1):
+                    if len(words[i]) > 3 and len(words[i + 1]) > 3:
+                        phrases.add(f"{words[i]} {words[i + 1]}")
+            agent_phrases[agent_id] = phrases
+
+        # Find phrases that appear in multiple agents' later outputs
+        agents = list(agent_outputs.keys())
+        for i, agent1 in enumerate(agents):
+            for agent2 in agents[i + 1:]:
+                # Check for shared phrases
+                shared = agent_phrases[agent1] & agent_phrases[agent2]
+                cross_pollination_count += len(shared)
+
+        metrics.cross_pollination_count = cross_pollination_count
+
+        logger.debug(
+            f"Collaboration {collaboration_id}: "
+            f"{cross_pollination_count} cross-pollinated concepts detected"
+        )
+
+        return cross_pollination_count
+
+    def get_collaboration_metrics(self, collaboration_id: str) -> Optional[CollaborationMetrics]:
+        """Get metrics for a specific collaboration."""
+        self._init_collaboration_tracking()
+        return self._collaborations.get(collaboration_id)
+
+    def get_agent_collaboration_stats(self, agent_id: str) -> dict:
+        """Get collaboration statistics for a specific agent."""
+        self._init_collaboration_tracking()
+
+        if agent_id not in self._agent_performance:
+            return {"agent_id": agent_id, "total_contributions": 0}
+
+        stats = self._agent_performance[agent_id]
+
+        # Calculate handoff stats for this agent
+        handoffs_initiated = sum(
+            1 for h in self._handoff_log if h.from_agent == agent_id
+        )
+        handoffs_received = sum(
+            1 for h in self._handoff_log if h.to_agent == agent_id
+        )
+        handoff_success_rate = (
+            sum(1 for h in self._handoff_log if h.from_agent == agent_id and h.success)
+            / handoffs_initiated if handoffs_initiated > 0 else 1.0
+        )
+
+        return {
+            "agent_id": agent_id,
+            "total_contributions": stats["total_contributions"],
+            "avg_contribution_score": stats["avg_score"],
+            "handoffs_initiated": handoffs_initiated,
+            "handoffs_received": handoffs_received,
+            "handoff_success_rate": handoff_success_rate,
+            "recent_scores": stats["scores"][-5:],  # Last 5 scores
+        }
+
+    def get_collaboration_summary(self) -> dict:
+        """Get summary of all collaborations."""
+        self._init_collaboration_tracking()
+
+        if not self._collaborations:
+            return {"total_collaborations": 0}
+
+        all_metrics = list(self._collaborations.values())
+        completed = [m for m in all_metrics if m.completed_at]
+
+        avg_synergy = (
+            sum(m.synergy_score for m in completed) / len(completed)
+            if completed else 0.0
+        )
+        avg_collective = (
+            sum(m.collective_score for m in completed) / len(completed)
+            if completed else 0.0
+        )
+
+        return {
+            "total_collaborations": len(all_metrics),
+            "completed_collaborations": len(completed),
+            "avg_synergy_score": avg_synergy,
+            "avg_collective_score": avg_collective,
+            "total_handoffs": len(self._handoff_log),
+            "handoff_success_rate": (
+                sum(1 for h in self._handoff_log if h.success)
+                / len(self._handoff_log) if self._handoff_log else 1.0
+            ),
+            "agents_tracked": len(self._agent_performance),
+            "emergent_insights_total": sum(
+                len(m.emergent_insights) for m in all_metrics
+            ),
         }

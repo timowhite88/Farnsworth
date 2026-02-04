@@ -19,6 +19,95 @@ import json
 from loguru import logger
 
 
+# =============================================================================
+# DYNAMIC REPLANNING (AGI Upgrade)
+# =============================================================================
+
+@dataclass
+class ReplanTrigger:
+    """
+    Conditions that trigger automatic replanning.
+
+    Dynamic replanning allows plans to adapt to changing circumstances,
+    new information, or unexpected failures.
+    """
+    trigger_id: str
+    name: str
+    description: str
+
+    # Detection parameters
+    condition_type: str  # "failure_rate", "timeout", "drift", "external", "opportunity"
+    threshold: float = 0.5
+    check_interval_seconds: float = 30.0
+
+    # Response
+    replan_strategy: str = "partial"  # "partial", "full", "abort"
+    max_replans: int = 3
+
+    # State
+    is_active: bool = True
+    trigger_count: int = 0
+    last_triggered: Optional[datetime] = None
+
+
+@dataclass
+class ReplanEvent:
+    """Record of a replanning event."""
+    event_id: str
+    plan_id: str
+    trigger_id: str
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    # What changed
+    reason: str = ""
+    affected_tasks: list[str] = field(default_factory=list)
+    original_task_count: int = 0
+    new_task_count: int = 0
+
+    # Outcome
+    strategy_used: str = ""
+    tasks_added: list[str] = field(default_factory=list)
+    tasks_removed: list[str] = field(default_factory=list)
+    tasks_modified: list[str] = field(default_factory=list)
+    success: bool = True
+    error_message: Optional[str] = None
+
+
+@dataclass
+class PlanHealth:
+    """Health metrics for a plan."""
+    plan_id: str
+    measured_at: datetime = field(default_factory=datetime.now)
+
+    # Progress metrics
+    progress_ratio: float = 0.0
+    velocity: float = 0.0  # Tasks/hour
+    estimated_completion: Optional[datetime] = None
+
+    # Health indicators
+    failure_rate: float = 0.0  # Failed / Total attempted
+    retry_rate: float = 0.0  # Retries / Attempts
+    blocked_ratio: float = 0.0  # Blocked / Pending
+
+    # Risk assessment
+    critical_path_health: float = 1.0  # 1.0 = healthy, 0.0 = blocked
+    bottleneck_tasks: list[str] = field(default_factory=list)
+    at_risk_tasks: list[str] = field(default_factory=list)
+
+    # Drift detection
+    scope_drift: float = 0.0  # How much has scope changed
+    time_drift: float = 0.0  # Behind/ahead of schedule
+
+    def overall_health(self) -> float:
+        """Calculate overall plan health score."""
+        return (
+            (1 - self.failure_rate) * 0.3 +
+            (1 - self.blocked_ratio) * 0.2 +
+            self.critical_path_health * 0.3 +
+            (1 - min(1, abs(self.time_drift))) * 0.2
+        )
+
+
 class TaskStatus(Enum):
     PENDING = "pending"
     READY = "ready"  # All dependencies satisfied
@@ -27,6 +116,7 @@ class TaskStatus(Enum):
     FAILED = "failed"
     BLOCKED = "blocked"  # Waiting on dependencies
     CANCELLED = "cancelled"
+    REPLANNING = "replanning"  # AGI: Being reconsidered
 
 
 class TaskPriority(Enum):
@@ -686,4 +776,701 @@ Return empty array [] if no alternatives are viable."""
             "total_tasks": total_tasks,
             "completed_tasks": completed_tasks,
             "success_rate": completed_tasks / total_tasks if total_tasks > 0 else 0,
+        }
+
+    # =========================================================================
+    # DYNAMIC REPLANNING (AGI Upgrade)
+    # =========================================================================
+
+    def _init_replanning(self):
+        """Initialize dynamic replanning state."""
+        if not hasattr(self, '_replan_triggers'):
+            self._replan_triggers: list[ReplanTrigger] = []
+            self._replan_history: list[ReplanEvent] = []
+            self._health_history: dict[str, list[PlanHealth]] = {}  # plan_id -> history
+            self._replan_callbacks: list[Callable] = []
+
+            # Register default triggers
+            self._register_default_replan_triggers()
+
+    def _register_default_replan_triggers(self):
+        """Register default replanning triggers."""
+        self._replan_triggers = [
+            ReplanTrigger(
+                trigger_id="high_failure_rate",
+                name="High Failure Rate",
+                description="Too many tasks failing consecutively",
+                condition_type="failure_rate",
+                threshold=0.3,  # 30% failure rate
+                replan_strategy="partial",
+            ),
+            ReplanTrigger(
+                trigger_id="timeout_risk",
+                name="Timeout Risk",
+                description="Plan at risk of exceeding time budget",
+                condition_type="timeout",
+                threshold=0.8,  # 80% of time used, <50% complete
+                replan_strategy="partial",
+            ),
+            ReplanTrigger(
+                trigger_id="scope_drift",
+                name="Scope Drift",
+                description="Plan scope has drifted significantly",
+                condition_type="drift",
+                threshold=0.5,  # 50% scope change
+                replan_strategy="full",
+            ),
+            ReplanTrigger(
+                trigger_id="blocked_cascade",
+                name="Blocked Cascade",
+                description="Many tasks blocked due to failures",
+                condition_type="failure_rate",
+                threshold=0.4,  # 40% blocked
+                replan_strategy="partial",
+            ),
+            ReplanTrigger(
+                trigger_id="opportunity_detected",
+                name="Opportunity Detected",
+                description="New information suggests better approach",
+                condition_type="opportunity",
+                threshold=0.7,  # High confidence opportunity
+                replan_strategy="partial",
+            ),
+        ]
+
+    def add_replan_trigger(self, trigger: ReplanTrigger):
+        """Add a custom replanning trigger."""
+        self._init_replanning()
+        self._replan_triggers.append(trigger)
+        logger.info(f"Added replan trigger: {trigger.name}")
+
+    def on_replan(self, callback: Callable[[ReplanEvent], None]):
+        """Register a callback for replan events."""
+        self._init_replanning()
+        self._replan_callbacks.append(callback)
+
+    async def assess_plan_health(self, plan_id: str) -> PlanHealth:
+        """
+        Assess the current health of a plan.
+
+        Args:
+            plan_id: The plan to assess
+
+        Returns:
+            PlanHealth metrics
+        """
+        self._init_replanning()
+
+        if plan_id not in self.plans:
+            raise ValueError(f"Unknown plan: {plan_id}")
+
+        plan = self.plans[plan_id]
+        health = PlanHealth(plan_id=plan_id)
+
+        # Progress metrics
+        health.progress_ratio = plan.get_progress()
+
+        # Calculate velocity (tasks per hour)
+        if plan.started_at:
+            elapsed_hours = (datetime.now() - plan.started_at).total_seconds() / 3600
+            if elapsed_hours > 0:
+                health.velocity = plan.completed_tasks / elapsed_hours
+
+                # Estimate completion
+                remaining = plan.total_tasks - plan.completed_tasks
+                if health.velocity > 0:
+                    remaining_hours = remaining / health.velocity
+                    from datetime import timedelta
+                    health.estimated_completion = datetime.now() + timedelta(hours=remaining_hours)
+
+        # Failure rate
+        attempted = plan.completed_tasks + plan.failed_tasks
+        if attempted > 0:
+            health.failure_rate = plan.failed_tasks / attempted
+
+        # Retry rate
+        total_retries = sum(t.retry_count for t in plan.tasks.values())
+        if attempted > 0:
+            health.retry_rate = total_retries / attempted
+
+        # Blocked ratio
+        pending_tasks = [t for t in plan.tasks.values() if t.status in (TaskStatus.PENDING, TaskStatus.BLOCKED)]
+        blocked_tasks = [t for t in plan.tasks.values() if t.status == TaskStatus.BLOCKED]
+        if pending_tasks:
+            health.blocked_ratio = len(blocked_tasks) / len(pending_tasks)
+
+        # Critical path analysis
+        health.critical_path_health, health.bottleneck_tasks = self._analyze_critical_path(plan)
+
+        # At-risk tasks (high retry count, complex, or blocked)
+        health.at_risk_tasks = [
+            t.id for t in plan.tasks.values()
+            if (t.retry_count >= 2 or
+                t.estimated_complexity >= 4 or
+                t.status == TaskStatus.BLOCKED)
+        ]
+
+        # Scope drift (new tasks added vs original)
+        if plan_id in self._health_history and self._health_history[plan_id]:
+            initial_count = self._health_history[plan_id][0].progress_ratio * plan.total_tasks
+            if initial_count > 0:
+                health.scope_drift = abs(plan.total_tasks - initial_count) / initial_count
+
+        # Time drift
+        if plan.started_at and health.estimated_completion:
+            # Assume original estimate was 2x the elapsed time per task
+            original_estimate = plan.started_at + (datetime.now() - plan.started_at) * (plan.total_tasks / max(1, plan.completed_tasks))
+            time_diff = (health.estimated_completion - original_estimate).total_seconds()
+            original_duration = (original_estimate - plan.started_at).total_seconds()
+            if original_duration > 0:
+                health.time_drift = time_diff / original_duration
+
+        # Store health history
+        if plan_id not in self._health_history:
+            self._health_history[plan_id] = []
+        self._health_history[plan_id].append(health)
+
+        # Keep only recent history (last 20)
+        if len(self._health_history[plan_id]) > 20:
+            self._health_history[plan_id] = self._health_history[plan_id][-20:]
+
+        return health
+
+    def _analyze_critical_path(self, plan: Plan) -> tuple[float, list[str]]:
+        """
+        Analyze the critical path of the plan.
+
+        Returns:
+            Tuple of (health_score, bottleneck_task_ids)
+        """
+        if not plan.tasks:
+            return 1.0, []
+
+        # Find longest path (critical path)
+        def get_path_length(task_id: str, visited: set) -> int:
+            if task_id in visited or task_id not in plan.tasks:
+                return 0
+            visited.add(task_id)
+            task = plan.tasks[task_id]
+            if not task.blocks:
+                return 1
+            return 1 + max(get_path_length(b, visited.copy()) for b in task.blocks)
+
+        # Find critical path from root tasks
+        max_length = 0
+        critical_path_root = None
+        for root_id in plan.root_task_ids:
+            length = get_path_length(root_id, set())
+            if length > max_length:
+                max_length = length
+                critical_path_root = root_id
+
+        if not critical_path_root:
+            return 1.0, []
+
+        # Trace critical path and find bottlenecks
+        bottlenecks = []
+        current = critical_path_root
+        health_score = 1.0
+
+        while current and current in plan.tasks:
+            task = plan.tasks[current]
+
+            # Check if this task is a bottleneck
+            if task.status == TaskStatus.FAILED:
+                health_score *= 0.5
+                bottlenecks.append(current)
+            elif task.status == TaskStatus.BLOCKED:
+                health_score *= 0.7
+                bottlenecks.append(current)
+            elif task.retry_count >= 2:
+                health_score *= 0.8
+                bottlenecks.append(current)
+
+            # Move to next task in critical path
+            if task.blocks:
+                # Choose the blocking task with highest complexity
+                next_task = max(
+                    task.blocks,
+                    key=lambda t_id: plan.tasks.get(t_id, SubTask(id="", title="", description="")).estimated_complexity
+                )
+                current = next_task
+            else:
+                break
+
+        return max(0.1, health_score), bottlenecks
+
+    async def check_replan_triggers(self, plan_id: str) -> list[ReplanEvent]:
+        """
+        Check all replan triggers against current plan health.
+
+        Args:
+            plan_id: The plan to check
+
+        Returns:
+            List of triggered replan events (may trigger replanning)
+        """
+        self._init_replanning()
+
+        health = await self.assess_plan_health(plan_id)
+        triggered_events = []
+
+        for trigger in self._replan_triggers:
+            if not trigger.is_active:
+                continue
+            if trigger.trigger_count >= trigger.max_replans:
+                continue
+
+            should_trigger = False
+
+            if trigger.condition_type == "failure_rate":
+                should_trigger = health.failure_rate >= trigger.threshold
+
+            elif trigger.condition_type == "timeout":
+                # Check if running out of time with low progress
+                if health.progress_ratio < 0.5 and health.time_drift > trigger.threshold:
+                    should_trigger = True
+
+            elif trigger.condition_type == "drift":
+                should_trigger = health.scope_drift >= trigger.threshold
+
+            elif trigger.condition_type == "blocked_cascade":
+                should_trigger = health.blocked_ratio >= trigger.threshold
+
+            if should_trigger:
+                event = await self._execute_replan(plan_id, trigger, health)
+                triggered_events.append(event)
+
+                trigger.trigger_count += 1
+                trigger.last_triggered = datetime.now()
+
+                logger.info(f"Replan triggered: {trigger.name} for plan {plan_id}")
+
+        return triggered_events
+
+    async def _execute_replan(
+        self,
+        plan_id: str,
+        trigger: ReplanTrigger,
+        health: PlanHealth,
+    ) -> ReplanEvent:
+        """
+        Execute a replanning based on the trigger.
+
+        Args:
+            plan_id: The plan to replan
+            trigger: The trigger that fired
+            health: Current health metrics
+
+        Returns:
+            ReplanEvent record
+        """
+        plan = self.plans[plan_id]
+
+        event = ReplanEvent(
+            event_id=f"replan_{len(self._replan_history) + 1}_{int(datetime.now().timestamp())}",
+            plan_id=plan_id,
+            trigger_id=trigger.trigger_id,
+            reason=trigger.description,
+            original_task_count=plan.total_tasks,
+            strategy_used=trigger.replan_strategy,
+        )
+
+        try:
+            if trigger.replan_strategy == "partial":
+                await self._partial_replan(plan, event, health)
+            elif trigger.replan_strategy == "full":
+                await self._full_replan(plan, event)
+            elif trigger.replan_strategy == "abort":
+                await self._abort_plan(plan, event)
+
+            event.new_task_count = plan.total_tasks
+            event.success = True
+
+        except Exception as e:
+            event.success = False
+            event.error_message = str(e)
+            logger.error(f"Replan failed: {e}")
+
+        self._replan_history.append(event)
+
+        # Notify callbacks
+        for callback in self._replan_callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(event)
+                else:
+                    callback(event)
+            except Exception as e:
+                logger.error(f"Replan callback error: {e}")
+
+        return event
+
+    async def _partial_replan(self, plan: Plan, event: ReplanEvent, health: PlanHealth):
+        """
+        Partial replan: fix problem areas while preserving working parts.
+        """
+        # Identify tasks to reconsider
+        problem_tasks = set(health.bottleneck_tasks + health.at_risk_tasks)
+
+        # Mark them for replanning
+        for task_id in problem_tasks:
+            if task_id in plan.tasks:
+                task = plan.tasks[task_id]
+                if task.status in (TaskStatus.PENDING, TaskStatus.BLOCKED, TaskStatus.FAILED):
+                    task.status = TaskStatus.REPLANNING
+                    event.affected_tasks.append(task_id)
+
+        # Use LLM to suggest alternatives for problem tasks
+        if self.llm_fn and event.affected_tasks:
+            await self._generate_alternative_tasks(plan, event)
+
+    async def _generate_alternative_tasks(self, plan: Plan, event: ReplanEvent):
+        """Generate alternative tasks for problematic ones."""
+        problem_descriptions = []
+        for task_id in event.affected_tasks:
+            task = plan.tasks.get(task_id)
+            if task:
+                problem_descriptions.append(
+                    f"- {task.title}: {task.description} (Error: {task.error or 'blocked/at-risk'})"
+                )
+
+        if not problem_descriptions:
+            return
+
+        prompt = f"""Several tasks in a plan are having problems. Suggest alternatives or simplifications.
+
+PLAN GOAL: {plan.goal}
+
+PROBLEMATIC TASKS:
+{chr(10).join(problem_descriptions)}
+
+REQUIREMENTS:
+1. Suggest simpler alternatives that achieve the same outcomes
+2. Consider breaking complex tasks into smaller steps
+3. Identify if any tasks can be skipped or merged
+4. Provide dependencies based on existing successful tasks
+
+Return JSON array:
+[
+  {{"original_task_id": "...", "action": "replace|simplify|skip|split", "new_tasks": [{{"title": "...", "description": "...", "agent_type": "...", "complexity": 1-5}}], "reasoning": "..."}}
+]
+
+Return only necessary changes. Empty array if no good alternatives exist."""
+
+        try:
+            if asyncio.iscoroutinefunction(self.llm_fn):
+                response = await self.llm_fn(prompt)
+            else:
+                response = self.llm_fn(prompt)
+
+            json_str = self._extract_json(response)
+            alternatives = json.loads(json_str)
+
+            for alt in alternatives:
+                original_id = alt.get("original_task_id")
+                action = alt.get("action", "skip")
+                new_task_defs = alt.get("new_tasks", [])
+
+                if original_id not in plan.tasks:
+                    continue
+
+                original_task = plan.tasks[original_id]
+
+                if action == "skip":
+                    # Remove task and its dependents
+                    original_task.status = TaskStatus.CANCELLED
+                    event.tasks_removed.append(original_id)
+
+                elif action == "replace" or action == "simplify":
+                    # Create new tasks to replace
+                    for new_def in new_task_defs:
+                        new_task = await self._create_task(
+                            title=new_def.get("title", "Recovery task"),
+                            description=new_def.get("description", ""),
+                            agent_type=new_def.get("agent_type", "general"),
+                            complexity=new_def.get("complexity", 2.0),
+                        )
+
+                        # Inherit dependencies
+                        new_task.depends_on = [
+                            d for d in original_task.depends_on
+                            if plan.tasks.get(d, SubTask(id="", title="", description="")).status == TaskStatus.COMPLETED
+                        ]
+                        new_task.blocks = original_task.blocks.copy()
+
+                        plan.tasks[new_task.id] = new_task
+                        plan.total_tasks += 1
+                        event.tasks_added.append(new_task.id)
+
+                        # Update dependencies of blocked tasks
+                        for blocked_id in new_task.blocks:
+                            if blocked_id in plan.tasks:
+                                blocked_task = plan.tasks[blocked_id]
+                                blocked_task.depends_on = [
+                                    d if d != original_id else new_task.id
+                                    for d in blocked_task.depends_on
+                                ]
+
+                    # Mark original as cancelled
+                    original_task.status = TaskStatus.CANCELLED
+                    event.tasks_removed.append(original_id)
+
+                elif action == "split":
+                    # Split into multiple smaller tasks
+                    prev_task_id = None
+                    for i, new_def in enumerate(new_task_defs):
+                        new_task = await self._create_task(
+                            title=new_def.get("title", f"Split task {i+1}"),
+                            description=new_def.get("description", ""),
+                            agent_type=new_def.get("agent_type", "general"),
+                            complexity=new_def.get("complexity", 1.0),
+                        )
+
+                        # Chain dependencies
+                        if i == 0:
+                            new_task.depends_on = original_task.depends_on.copy()
+                        else:
+                            new_task.depends_on = [prev_task_id] if prev_task_id else []
+
+                        if i == len(new_task_defs) - 1:
+                            new_task.blocks = original_task.blocks.copy()
+
+                        plan.tasks[new_task.id] = new_task
+                        plan.total_tasks += 1
+                        event.tasks_added.append(new_task.id)
+                        prev_task_id = new_task.id
+
+                    original_task.status = TaskStatus.CANCELLED
+                    event.tasks_removed.append(original_id)
+
+                event.tasks_modified.append(original_id)
+
+        except Exception as e:
+            logger.error(f"Alternative task generation failed: {e}")
+
+    async def _full_replan(self, plan: Plan, event: ReplanEvent):
+        """
+        Full replan: regenerate the entire plan from scratch.
+        """
+        # Preserve completed task results
+        completed_results = {
+            task.id: task.result
+            for task in plan.tasks.values()
+            if task.status == TaskStatus.COMPLETED
+        }
+
+        # Cancel all non-completed tasks
+        for task in plan.tasks.values():
+            if task.status not in (TaskStatus.COMPLETED,):
+                task.status = TaskStatus.CANCELLED
+                event.tasks_removed.append(task.id)
+
+        # Create new plan with same goal
+        if self.llm_fn:
+            # Include completed work in context
+            completed_summary = "\n".join([
+                f"- {plan.tasks[tid].title}: COMPLETED"
+                for tid in completed_results.keys()
+                if tid in plan.tasks
+            ])
+
+            context = f"Previously completed work:\n{completed_summary}\n\nContinue from here."
+
+            new_tasks = await self._decompose_goal(plan.goal, context, None)
+
+            for task in new_tasks:
+                # Don't duplicate completed work
+                if not any(
+                    t.title.lower() == task.title.lower()
+                    for t in plan.tasks.values()
+                    if t.status == TaskStatus.COMPLETED
+                ):
+                    plan.tasks[task.id] = task
+                    plan.total_tasks += 1
+                    event.tasks_added.append(task.id)
+
+                    if not task.depends_on:
+                        plan.root_task_ids.append(task.id)
+
+            self._build_dependency_graph(plan)
+
+    async def _abort_plan(self, plan: Plan, event: ReplanEvent):
+        """
+        Abort plan: cancel all remaining tasks.
+        """
+        for task in plan.tasks.values():
+            if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                task.status = TaskStatus.CANCELLED
+                event.tasks_removed.append(task.id)
+
+        plan.status = TaskStatus.CANCELLED
+
+    async def trigger_opportunity_replan(
+        self,
+        plan_id: str,
+        opportunity_description: str,
+        confidence: float = 0.8,
+    ) -> Optional[ReplanEvent]:
+        """
+        Manually trigger a replan based on new information/opportunity.
+
+        Args:
+            plan_id: The plan to potentially replan
+            opportunity_description: What new information or opportunity was found
+            confidence: How confident we are this is worth replanning for
+
+        Returns:
+            ReplanEvent if replanning was triggered, None otherwise
+        """
+        self._init_replanning()
+
+        if plan_id not in self.plans:
+            return None
+
+        # Find opportunity trigger
+        opportunity_trigger = next(
+            (t for t in self._replan_triggers if t.condition_type == "opportunity"),
+            None
+        )
+
+        if not opportunity_trigger or confidence < opportunity_trigger.threshold:
+            return None
+
+        health = await self.assess_plan_health(plan_id)
+
+        # Create a modified event for opportunity-based replan
+        event = ReplanEvent(
+            event_id=f"replan_opp_{len(self._replan_history) + 1}_{int(datetime.now().timestamp())}",
+            plan_id=plan_id,
+            trigger_id="opportunity_manual",
+            reason=opportunity_description,
+            original_task_count=self.plans[plan_id].total_tasks,
+            strategy_used="partial",
+        )
+
+        # Use LLM to determine how to incorporate the opportunity
+        if self.llm_fn:
+            plan = self.plans[plan_id]
+
+            prompt = f"""A new opportunity or information has been discovered that may improve this plan.
+
+PLAN GOAL: {plan.goal}
+
+CURRENT TASKS:
+{json.dumps([t.to_dict() for t in plan.tasks.values() if t.status in (TaskStatus.PENDING, TaskStatus.READY)], indent=2)}
+
+NEW OPPORTUNITY:
+{opportunity_description}
+
+INSTRUCTIONS:
+1. Determine if this opportunity should change the plan
+2. Suggest specific task modifications or additions
+3. Consider if any pending tasks should be reprioritized or skipped
+
+Return JSON:
+{{
+    "should_replan": true/false,
+    "reasoning": "why or why not",
+    "task_changes": [
+        {{"action": "add|modify|remove|reprioritize", "task_id": "..." (for modify/remove), "new_task": {{...}} (for add/modify), "new_priority": 1-5 (for reprioritize)}}
+    ]
+}}"""
+
+            try:
+                if asyncio.iscoroutinefunction(self.llm_fn):
+                    response = await self.llm_fn(prompt)
+                else:
+                    response = self.llm_fn(prompt)
+
+                # Extract JSON
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start >= 0 and end > start:
+                    data = json.loads(response[start:end])
+
+                    if not data.get("should_replan", False):
+                        return None
+
+                    # Apply changes
+                    for change in data.get("task_changes", []):
+                        action = change.get("action")
+
+                        if action == "add":
+                            new_def = change.get("new_task", {})
+                            new_task = await self._create_task(
+                                title=new_def.get("title", "New task"),
+                                description=new_def.get("description", ""),
+                                agent_type=new_def.get("agent_type", "general"),
+                                complexity=new_def.get("complexity", 2.0),
+                            )
+                            plan.tasks[new_task.id] = new_task
+                            plan.total_tasks += 1
+                            event.tasks_added.append(new_task.id)
+
+                        elif action == "remove":
+                            task_id = change.get("task_id")
+                            if task_id in plan.tasks:
+                                plan.tasks[task_id].status = TaskStatus.CANCELLED
+                                event.tasks_removed.append(task_id)
+
+                        elif action == "reprioritize":
+                            task_id = change.get("task_id")
+                            new_priority = change.get("new_priority", 3)
+                            if task_id in plan.tasks:
+                                plan.tasks[task_id].priority = TaskPriority(new_priority)
+                                event.tasks_modified.append(task_id)
+
+                    event.success = True
+                    event.new_task_count = plan.total_tasks
+
+            except Exception as e:
+                logger.error(f"Opportunity replan failed: {e}")
+                event.success = False
+                event.error_message = str(e)
+
+        self._replan_history.append(event)
+
+        # Notify callbacks
+        for callback in self._replan_callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(event)
+                else:
+                    callback(event)
+            except Exception as e:
+                logger.error(f"Replan callback error: {e}")
+
+        return event
+
+    def get_replan_history(self, plan_id: Optional[str] = None, limit: int = 20) -> list[ReplanEvent]:
+        """Get replanning history, optionally filtered by plan."""
+        self._init_replanning()
+
+        events = self._replan_history
+        if plan_id:
+            events = [e for e in events if e.plan_id == plan_id]
+
+        return events[-limit:]
+
+    def get_replan_stats(self) -> dict:
+        """Get replanning statistics."""
+        self._init_replanning()
+
+        if not self._replan_history:
+            return {"total_replans": 0}
+
+        successful = sum(1 for e in self._replan_history if e.success)
+        by_strategy = {}
+        for event in self._replan_history:
+            by_strategy[event.strategy_used] = by_strategy.get(event.strategy_used, 0) + 1
+
+        return {
+            "total_replans": len(self._replan_history),
+            "successful_replans": successful,
+            "success_rate": successful / len(self._replan_history),
+            "by_strategy": by_strategy,
+            "total_tasks_added": sum(len(e.tasks_added) for e in self._replan_history),
+            "total_tasks_removed": sum(len(e.tasks_removed) for e in self._replan_history),
+            "active_triggers": len([t for t in self._replan_triggers if t.is_active]),
         }
