@@ -1,7 +1,7 @@
 {
   "session_id": "opus-2026-02-01",
   "created_at": "2026-02-01T01:30:00Z",
-  "last_updated": "2026-02-02T23:45:00Z",
+  "last_updated": "2026-02-04T01:45:00Z",
 
   "ssh_command": "ssh root@194.68.245.145 -p 22046 -i ~/.ssh/runpod_key",
 
@@ -443,6 +443,53 @@
     "Test VTuber streaming to Twitter with stream key",
     "Configure VTuber avatar image for Borg Farnsworth"
   ],
+
+  "did_streaming_system": {
+    "status": "LIVE - HLS MODE",
+    "hls_playlist_url": "https://ai.farnsworth.cloud/static/hls/stream.m3u8",
+    "hls_script": "scripts/start_did_hls_stream.py",
+    "description": "D-ID Avatar + ElevenLabs TTS for AI avatar video streaming",
+    "env_vars_required": [
+      "DID_API_KEY",
+      "DID_AVATAR_URL",
+      "ELEVENLABS_API_KEY",
+      "ELEVENLABS_VOICE_FARNSWORTH"
+    ],
+    "note": "API keys stored in .env on server - see .env.example for setup",
+    "avatar_image": "C:/Fawnsworth/assets/farnsworth_avatar.jpg (uploaded to D-ID S3)",
+    "files_created": {
+      "d_id_avatar.py": "farnsworth/integration/vtuber/d_id_avatar.py - Core D-ID integration",
+      "start_did_stream_pipe.py": "scripts/start_did_stream_pipe.py - RTMP pipe streaming",
+      "start_did_stream_persistent.py": "scripts/start_did_stream_persistent.py - Batch concat streaming",
+      "start_did_stream_continuous.py": "scripts/start_did_stream_continuous.py - Holding video fallback",
+      "start_did_stream_v3.py": "scripts/start_did_stream_v3.py - Batch concatenation"
+    },
+    "video_pipeline": [
+      "1. Generate text content (research topics, opening, etc.)",
+      "2. ElevenLabs TTS -> MP3 audio with Farnsworth voice",
+      "3. Upload audio to D-ID (required - D-ID needs HTTPS URL, not base64)",
+      "4. D-ID creates talk with avatar lip sync (512x512)",
+      "5. Download video, process to 1920x1080 with stereo audio",
+      "6. Stream to Twitter via RTMP or HLS"
+    ],
+    "video_processing": {
+      "scale": "1920x1080 (D-ID outputs 512x512)",
+      "audio": "Stereo 2-channel (D-ID outputs mono)",
+      "format": "libx264 high profile, 6Mbps, 3-sec keyframes",
+      "padding": "Dark background 0x1a1a2e"
+    },
+    "research_topics": [
+      "Jeffrey Epstein flight logs",
+      "Ghislaine Maxwell trial",
+      "Epstein black book contacts",
+      "Prince Andrew case details",
+      "JP Morgan Epstein banking",
+      "Les Wexner connection"
+    ],
+    "content_filter": ["trump", "elon", "musk"],
+    "parallel_generation": "3 videos simultaneously = ~3.7s effective per segment",
+    "d_id_credits": "514/720 remaining as of 2026-02-04"
+  },
 
   "vtuber_system": {
     "status": "IMPLEMENTED - READY FOR TESTING",

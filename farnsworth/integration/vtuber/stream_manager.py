@@ -227,6 +227,12 @@ class StreamManager:
         self._temp_audio_dir.mkdir(parents=True, exist_ok=True)
         self._audio_restarting = False  # Flag to prevent monitor conflicts
 
+        # Audio pipe for seamless audio (no FFmpeg restarts)
+        self._audio_fifo_path: Optional[str] = None
+        self._audio_pipe_thread = None
+        self._audio_pipe_queue = None  # Queue to send audio data to pipe thread
+        self._use_audio_pipe = True  # Use pipe for seamless audio
+
         # Frame buffer for async writing
         self._frame_queue: asyncio.Queue = asyncio.Queue(maxsize=30)
         self._audio_queue: asyncio.Queue = asyncio.Queue(maxsize=60)
@@ -251,6 +257,7 @@ class StreamManager:
             '-threads', '4',
 
             # Video input (raw frames from pipe)
+            '-thread_queue_size', '512',  # Large queue to prevent blocking
             '-f', 'rawvideo',
             '-pix_fmt', 'bgra',
             '-s', f'{self.config.width}x{self.config.height}',
@@ -258,38 +265,45 @@ class StreamManager:
             '-i', 'pipe:0',
         ])
 
-        # Audio input - use file if provided, otherwise generate silence
-        if audio_file and os.path.exists(audio_file):
-            # Use the audio file (play once, then we'll restart with silence)
+        # Audio input - use FIFO pipe for seamless audio (no restarts needed)
+        if self._use_audio_pipe and self._audio_fifo_path:
+            # Read raw PCM from named pipe - audio thread writes to it
+            # Use large thread_queue_size to prevent blocking (default 8 is too small)
+            cmd.extend([
+                '-thread_queue_size', '1024',  # Large queue to prevent blocking during long TTS
+                '-f', 's16le',
+                '-ar', '44100',
+                '-ac', '2',
+                '-i', self._audio_fifo_path,
+            ])
+        elif audio_file and os.path.exists(audio_file):
+            # Fallback: Use the audio file (requires FFmpeg restart)
             cmd.extend([
                 '-i', audio_file,
             ])
         else:
-            # Use lavfi to generate silence (anullsrc)
+            # Fallback: Use lavfi to generate silence
             cmd.extend([
                 '-f', 'lavfi',
                 '-i', f'anullsrc=channel_layout=stereo:sample_rate=44100',
             ])
 
-        # Video encoding - Twitter Media Studio specs
-        gop_size = self.config.fps * self.config.keyframe_interval  # 3 sec keyframes
+        # Video encoding - CPU optimized for stability (GPU used by AI models)
+        gop_size = self.config.fps * self.config.keyframe_interval  # 2 sec keyframes
         cmd.extend([
-            '-c:v', self.config.encoder,
-            '-preset', 'medium',  # Better quality
-            '-tune', 'zerolatency',
-            '-profile:v', 'high',  # High profile for better compression
-            '-level', '4.2',
-            # CBR-like encoding for consistent bitrate
+            '-c:v', 'libx264',  # Force CPU encoding (not GPU)
+            '-preset', 'veryfast',  # Fast CPU encoding - good balance of speed/quality
+            '-tune', 'zerolatency',  # Low latency for streaming
+            '-profile:v', 'main',  # Main profile - less CPU than high
+            '-level', '4.1',
+            # CBR encoding for consistent bitrate
             '-b:v', f'{self.config.video_bitrate}k',
-            '-minrate', f'{self.config.video_bitrate}k',  # Force minimum = target
-            '-maxrate', f'{self.config.video_bitrate}k',  # Force maximum = target
-            '-bufsize', f'{self.config.video_bitrate * 2}k',  # 2 second buffer for stability
-            '-g', str(gop_size),  # Keyframe interval (3 sec = 90 frames at 30fps)
-            '-keyint_min', str(gop_size),  # Force exact keyframe interval
+            '-maxrate', f'{int(self.config.video_bitrate * 1.2)}k',  # Allow 20% headroom
+            '-bufsize', f'{self.config.video_bitrate * 2}k',  # 2 second buffer
+            '-g', str(gop_size),  # Keyframe interval
+            '-keyint_min', str(gop_size),
             '-sc_threshold', '0',  # Disable scene change detection
             '-pix_fmt', 'yuv420p',
-            '-flags', '+cgop',  # Closed GOP for better streaming
-            '-x264opts', f'keyint={gop_size}:min-keyint={gop_size}:no-scenecut',
         ])
 
         # Audio encoding - Twitter optimized with volume boost
@@ -317,13 +331,9 @@ class StreamManager:
                 str(hls_dir / 'stream.m3u8')
             ])
         else:
-            # RTMP/RTMPS output
-            if audio_file and os.path.exists(audio_file):
-                # When using audio file, stop when audio ends
-                cmd.extend([
-                    '-shortest',
-                ])
-
+            # RTMP/RTMPS output - do NOT use -shortest flag
+            # We want FFmpeg to keep running even when audio ends
+            # so it can receive more audio through the pipe
             cmd.extend([
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
@@ -343,7 +353,21 @@ class StreamManager:
             if self.config.platform != StreamPlatform.TWITTER_HLS and not self.config.stream_key:
                 raise ValueError("Stream key is required")
 
-            # Build and start FFmpeg process (with silence initially)
+            # Setup audio pipe for seamless audio (no FFmpeg restarts)
+            import queue
+            import threading
+            if self._use_audio_pipe:
+                self._audio_fifo_path = str(self._temp_audio_dir / 'audio_pipe.pcm')
+                self._audio_pipe_queue = queue.Queue(maxsize=100)
+
+                # Remove old pipe if exists
+                if os.path.exists(self._audio_fifo_path):
+                    os.remove(self._audio_fifo_path)
+                os.mkfifo(self._audio_fifo_path)
+                logger.info(f"Created audio FIFO: {self._audio_fifo_path}")
+
+            # Build and start FFmpeg process FIRST
+            # (FFmpeg will block waiting for audio pipe data)
             cmd = self._build_ffmpeg_command(self._current_audio_file)
             logger.info(f"Starting FFmpeg: {' '.join(cmd[:10])}...")
 
@@ -357,6 +381,34 @@ class StreamManager:
             self._running = True
             self._start_time = time.time()
             self.stats.status = "connecting"
+
+            # Start audio pipe writer thread AFTER FFmpeg starts
+            # (FFmpeg opens read end, thread opens write end - both unblock)
+            if self._use_audio_pipe and self._audio_fifo_path:
+                def audio_pipe_writer():
+                    """Thread that writes audio to FIFO continuously with auto-restart"""
+                    silence = np.zeros((4410, 2), dtype=np.int16).tobytes()  # 100ms
+                    while self._running:
+                        try:
+                            with open(self._audio_fifo_path, 'wb', buffering=0) as pipe:
+                                logger.info("Audio pipe opened - seamless audio enabled (no restarts)")
+                                while self._running:
+                                    try:
+                                        data = self._audio_pipe_queue.get(timeout=0.05)
+                                        pipe.write(data)
+                                    except queue.Empty:
+                                        pipe.write(silence)
+                        except (BrokenPipeError, OSError) as e:
+                            logger.warning(f"Audio pipe broken: {e} - will retry when FFmpeg restarts")
+                            # Wait for FFmpeg to restart before reopening pipe
+                            time.sleep(2)
+                        except Exception as e:
+                            logger.error(f"Audio pipe error: {e}")
+                            time.sleep(1)
+
+                self._audio_pipe_thread = threading.Thread(target=audio_pipe_writer, daemon=True)
+                self._audio_pipe_thread.start()
+                time.sleep(0.2)  # Brief wait for pipe to open
 
             # Start background tasks
             asyncio.create_task(self._frame_writer_loop())
@@ -516,9 +568,11 @@ class StreamManager:
                 try:
                     self._ffmpeg_process.stdin.write(frame.tobytes())
                     self._ffmpeg_process.stdin.flush()
-                except (BrokenPipeError, OSError):
-                    # Pipe closed during audio restart, just skip
-                    await asyncio.sleep(0.1)
+                except (BrokenPipeError, OSError) as e:
+                    # Pipe closed - FFmpeg died, need to reconnect
+                    logger.error(f"FFmpeg pipe broken: {e} - triggering reconnect")
+                    self._ffmpeg_process = None  # This will trigger _monitor_ffmpeg to reconnect
+                    await asyncio.sleep(1)
                     continue
 
                 # Update stats
@@ -539,7 +593,8 @@ class StreamManager:
 
     async def _audio_writer_loop(self):
         """Background task to handle audio files for TTS playback"""
-        # Process queued audio files and restart FFmpeg with them
+        import wave
+
         while self._running:
             try:
                 try:
@@ -553,26 +608,55 @@ class StreamManager:
                         logger.info(f"Switching to TTS audio: {audio_file}")
                         self._current_audio_file = audio_file
 
-                        # Restart FFmpeg with the new audio file
-                        await self._restart_with_audio(audio_file)
+                        # Use audio pipe (seamless) or restart FFmpeg (fallback)
+                        if self._use_audio_pipe and self._audio_pipe_queue:
+                            # Stream audio through pipe - NO FFmpeg restart!
+                            try:
+                                with wave.open(audio_file, 'rb') as wf:
+                                    frames = wf.getnframes()
+                                    rate = wf.getframerate()
+                                    channels = wf.getnchannels()
+                                    duration = frames / rate
+                                    logger.info(f"Audio duration: {duration:.1f}s (seamless pipe)")
 
-                        # Get audio duration and wait for it to finish
-                        try:
-                            import wave
-                            with wave.open(audio_file, 'rb') as wf:
-                                frames = wf.getnframes()
-                                rate = wf.getframerate()
-                                duration = frames / rate
-                                logger.info(f"Audio duration: {duration:.1f}s")
-                                await asyncio.sleep(duration + 0.5)
-                        except Exception as e:
-                            logger.debug(f"Could not get audio duration: {e}")
-                            await asyncio.sleep(5)  # Default wait
+                                    # Read and queue audio in chunks
+                                    chunk_size = 4410  # 100ms at 44.1kHz
+                                    while True:
+                                        data = wf.readframes(chunk_size)
+                                        if not data:
+                                            break
+                                        # Convert mono to stereo if needed
+                                        if channels == 1:
+                                            samples = np.frombuffer(data, dtype=np.int16)
+                                            stereo = np.column_stack((samples, samples))
+                                            data = stereo.tobytes()
+                                        # Put in queue for pipe thread
+                                        try:
+                                            self._audio_pipe_queue.put_nowait(data)
+                                        except:
+                                            pass  # Queue full, skip
+                                        await asyncio.sleep(0.08)  # Pace the writes
+                            except Exception as e:
+                                logger.error(f"Audio pipe write error: {e}")
+                        else:
+                            # Fallback: Restart FFmpeg with the new audio file
+                            await self._restart_with_audio(audio_file)
+                            try:
+                                with wave.open(audio_file, 'rb') as wf:
+                                    frames = wf.getnframes()
+                                    rate = wf.getframerate()
+                                    duration = frames / rate
+                                    logger.info(f"Audio duration: {duration:.1f}s")
+                                    await asyncio.sleep(duration + 0.5)
+                            except Exception as e:
+                                logger.debug(f"Could not get audio duration: {e}")
+                                await asyncio.sleep(5)
 
-                        # Return to silence after audio finishes
+                            # Return to silence
+                            await self._restart_with_audio(None)
+                            logger.info("Returned to silence")
+
                         self._current_audio_file = None
-                        await self._restart_with_audio(None)
-                        logger.info("Returned to silence")
 
                         # Clean up old temp files (keep last 5)
                         try:
@@ -644,14 +728,13 @@ class StreamManager:
                 continue
 
             if not self._ffmpeg_process or self._ffmpeg_process.poll() is not None:
-                # Skip if audio handler is managing the restart
-                if self._current_audio_file:
-                    # Audio file playback ended normally, let audio handler restart
+                # Only skip if audio handler is actively restarting (not just playing audio)
+                if self._audio_restarting:
                     await asyncio.sleep(1)
                     continue
 
-                # Process ended or not running
-                if self._ffmpeg_process:
+                # Process ended or not running - need to reconnect
+                if self._ffmpeg_process and self._ffmpeg_process.poll() is not None:
                     stderr = self._ffmpeg_process.stderr.read() if self._ffmpeg_process.stderr else b""
                     error_msg = stderr.decode() if stderr else "Unknown error"
                     logger.error(f"FFmpeg process ended: {error_msg[:200]}")
