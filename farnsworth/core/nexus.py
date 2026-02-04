@@ -32,6 +32,58 @@ from loguru import logger
 
 
 # =============================================================================
+# SIGNAL TYPES (must be defined before dataclasses that reference it)
+# =============================================================================
+
+class SignalType(Enum):
+    # Core Lifecycle
+    SYSTEM_STARTUP = "system.startup"
+    SYSTEM_SHUTDOWN = "system.shutdown"
+
+    # Cognitive Signals
+    THOUGHT_EMITTED = "cognitive.thought"
+    DECISION_REACHED = "cognitive.decision"
+    ANOMALY_DETECTED = "cognitive.anomaly"
+    CONFUSION_DETECTED = "cognitive.confusion"
+    MEMORY_CONSOLIDATION = "cognitive.memory_consolidation"
+
+    # Task Signals
+    TASK_CREATED = "task.created"
+    TASK_UPDATED = "task.updated"
+    TASK_COMPLETED = "task.completed"
+    TASK_FAILED = "task.failed"
+    TASK_BLOCKED = "task.blocked"
+
+    # External I/O
+    USER_MESSAGE = "io.user.message"
+    USER_INTERRUPTION = "io.user.interruption"
+    EXTERNAL_ALERT = "io.external.alert"
+
+    # P2P / Network Signals
+    EXTERNAL_EVENT = "p2p.external_event"
+    TASK_RECEIVED = "p2p.task_received"
+    PEER_CONNECTED = "p2p.peer_connected"
+    PEER_DISCONNECTED = "p2p.peer_disconnected"
+    SKILL_RECEIVED = "p2p.skill_received"
+
+    # Dialogue / Deliberation Signals
+    DIALOGUE_STARTED = "dialogue.started"
+    DIALOGUE_PROPOSE = "dialogue.propose"
+    DIALOGUE_CRITIQUE = "dialogue.critique"
+    DIALOGUE_REFINE = "dialogue.refine"
+    DIALOGUE_VOTE = "dialogue.vote"
+    DIALOGUE_CONSENSUS = "dialogue.consensus"
+    DIALOGUE_COMPLETED = "dialogue.completed"
+    DIALOGUE_TOOL_DECISION = "dialogue.tool_decision"
+
+    # Collective Resonance Signals (Inter-Collective Communication)
+    COLLECTIVE_THOUGHT = "resonance.collective_thought"      # Visible deliberation thought
+    RESONANT_THOUGHT = "resonance.resonant_thought"          # Thought shared via P2P
+    RESONANCE_RECEIVED = "resonance.received"                # Incoming thought from another collective
+    RESONANCE_BROADCAST = "resonance.broadcast"              # Outgoing thought to P2P network
+
+
+# =============================================================================
 # NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)
 # =============================================================================
 
@@ -110,52 +162,6 @@ class SpontaneousThoughtConfig:
     focus_concepts: List[str] = field(default_factory=list)
     context_vector: Optional[List[float]] = None
 
-class SignalType(Enum):
-    # Core Lifecycle
-    SYSTEM_STARTUP = "system.startup"
-    SYSTEM_SHUTDOWN = "system.shutdown"
-    
-    # Cognitive Signals
-    THOUGHT_EMITTED = "cognitive.thought"
-    DECISION_REACHED = "cognitive.decision"
-    ANOMALY_DETECTED = "cognitive.anomaly"
-    CONFUSION_DETECTED = "cognitive.confusion"
-    MEMORY_CONSOLIDATION = "cognitive.memory_consolidation"
-    
-    # Task Signals
-    TASK_CREATED = "task.created"
-    TASK_UPDATED = "task.updated"
-    TASK_COMPLETED = "task.completed"
-    TASK_FAILED = "task.failed"
-    TASK_BLOCKED = "task.blocked"
-    
-    # External I/O
-    USER_MESSAGE = "io.user.message"
-    USER_INTERRUPTION = "io.user.interruption"
-    EXTERNAL_ALERT = "io.external.alert"
-
-    # P2P / Network Signals
-    EXTERNAL_EVENT = "p2p.external_event"
-    TASK_RECEIVED = "p2p.task_received"
-    PEER_CONNECTED = "p2p.peer_connected"
-    PEER_DISCONNECTED = "p2p.peer_disconnected"
-    SKILL_RECEIVED = "p2p.skill_received"
-
-    # Dialogue / Deliberation Signals
-    DIALOGUE_STARTED = "dialogue.started"
-    DIALOGUE_PROPOSE = "dialogue.propose"
-    DIALOGUE_CRITIQUE = "dialogue.critique"
-    DIALOGUE_REFINE = "dialogue.refine"
-    DIALOGUE_VOTE = "dialogue.vote"
-    DIALOGUE_CONSENSUS = "dialogue.consensus"
-    DIALOGUE_COMPLETED = "dialogue.completed"
-    DIALOGUE_TOOL_DECISION = "dialogue.tool_decision"
-
-    # Collective Resonance Signals (Inter-Collective Communication)
-    COLLECTIVE_THOUGHT = "resonance.collective_thought"      # Visible deliberation thought
-    RESONANT_THOUGHT = "resonance.resonant_thought"          # Thought shared via P2P
-    RESONANCE_RECEIVED = "resonance.received"                # Incoming thought from another collective
-    RESONANCE_BROADCAST = "resonance.broadcast"              # Outgoing thought to P2P network
 
 @dataclass
 class Signal:
