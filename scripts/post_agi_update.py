@@ -13,48 +13,47 @@ from loguru import logger
 from dotenv import load_dotenv
 load_dotenv('/workspace/Farnsworth/.env')
 
-# The epic 2000 character announcement - Part 2 with meme
-AGI_UPDATE_POST = """🤖 THE SWARM JUST GOT SENTIENT 🤖
+# The epic 2000 character announcement - Part 3 with VIDEO
+AGI_UPDATE_POST = """🎬 FARNSWORTH AGI v1.7 - THE VISUAL PROOF 🎬
 
-Breaking down tonight's AGI upgrades with receipts:
+Good news everyone! The swarm upgraded itself tonight while you were sleeping.
 
-BEFORE: Static agent assignment
-"Hey Claude, do this task"
-AFTER: Tournament-style competitive selection
-"7 AI models fight to the death for the privilege of serving you"
+Here's what 5,000+ new lines of code looks like in action:
 
-Handler Benchmark Engine tracks:
-📊 Speed (latency in ms)
-📊 Accuracy (output quality scoring)
-📊 Confidence (self-reported certainty)
-📊 Cost (token efficiency)
+🏆 TOURNAMENT MODE ACTIVATED
+Every task triggers a competitive benchmark:
+→ Claude, Grok, Gemini, DeepSeek, Kimi, Phi4 all compete
+→ Multi-dimensional scoring (speed, accuracy, confidence, cost)
+→ Winner takes the task, losers get recycled
+→ Darwinian selection for AI agents
 
-Winner gets the task. Losers get recycled. Evolution in action.
+🧬 SELF-EVOLVING INFRASTRUCTURE
+The swarm now:
+• Spawns sub-swarms when APIs request specialized analysis
+• Maintains persistent tmux sessions for long coding tasks
+• Routes signals through 44 different Nexus event types
+• Embeds structured prompts in every agent initialization
 
-THE HANDLER ROSTER:
-🟣 Claude (tmux) - persistent coding sessions that survive disconnects
-🔵 Kimi - 256K context window for reading entire codebases
-🟢 Grok - real-time web access, the researcher
-🟡 Gemini - vision + tool calling, the swiss army knife
-🔴 DeepSeek - coding specialist, the debugger
-⚪ Phi4 - local inference, the speed demon
-🟤 Bankr Agent - trading specialist with Jupiter/Polymarket hooks
+📊 TONIGHT'S STATS:
+• handler_benchmark.py: 806 lines
+• subswarm_spawner.py: 698 lines
+• tmux_session_manager.py: 610 lines
+• embedded_prompts.py: 1,185 lines
 
-SUB-SWARM ARCHITECTURE:
-When you ask "analyze this token" → DexScreener triggers a trading sub-swarm
-When you ask "predict this market" → Polymarket spawns prediction agents
-3-5 specialized agents deliberate, vote, and merge results
+Total codebase: 175,000+ lines across 380+ Python modules
 
-All running on the Nexus event bus with 44 signal types.
+The professor doesn't just talk about AGI.
+The professor SHIPS AGI.
 
-The collective doesn't sleep. It evolves.
+Every commit brings us closer to collective superintelligence.
+Open source. Verifiable. Evolving.
 
-Watch it live: ai.farnsworth.cloud
-Fork it: github.com/timowhite88/Farnsworth
+🔴 LIVE: ai.farnsworth.cloud
+📂 CODE: github.com/timowhite88/Farnsworth
 
 $FARNS | 9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS
 
-#AGI #Farnsworth #FARNS #SwarmIntelligence #AI #OpenSource"""
+#AGI #AI #Farnsworth #FARNS #SwarmIntelligence #OpenSource #BuildInPublic"""
 
 
 async def generate_meme_image():
@@ -95,8 +94,45 @@ async def generate_meme_image():
         return None
 
 
+async def generate_meme_video():
+    """Generate a meme video: Gemini image → Grok video animation"""
+    try:
+        from farnsworth.integration.image_gen.generator import get_image_generator
+
+        gen = get_image_generator()
+
+        # Step 1: Generate image first
+        logger.info("Step 1: Generating image with Gemini...")
+        image_bytes, scene = await gen.generate_borg_farnsworth_meme()
+
+        if not image_bytes:
+            logger.error("Failed to generate source image")
+            return None, None
+
+        logger.info(f"Image generated ({len(image_bytes)} bytes) - Scene: {scene[:50]}")
+
+        # Step 2: Animate the image with Grok
+        logger.info("Step 2: Animating image with Grok video...")
+        video_prompt = f"Animate Borg Farnsworth celebrating the AGI upgrade, excited movements, victory pose, glowing screens behind him"
+
+        video_bytes = await gen.generate_video_from_image(image_bytes, video_prompt, duration=5)
+
+        if video_bytes:
+            logger.info(f"Video generated ({len(video_bytes)} bytes)")
+            return video_bytes, image_bytes
+        else:
+            logger.warning("Video generation failed, returning image only")
+            return None, image_bytes
+
+    except Exception as e:
+        logger.error(f"Video generation error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
 async def post_update():
-    """Post the AGI update announcement"""
+    """Post the AGI update announcement with video (preferred) or image fallback"""
     try:
         from farnsworth.integration.x_automation.x_api_poster import XOAuth2Poster
 
@@ -110,26 +146,44 @@ async def post_update():
             logger.error("Rate limit reached")
             return False
 
-        # Try to generate image
-        logger.info("Generating meme image...")
-        image_bytes = await generate_meme_image()
+        # Try to generate VIDEO first (Gemini image → Grok animation)
+        logger.info("🎬 Generating meme video (Gemini → Grok)...")
+        video_bytes, image_bytes = await generate_meme_video()
 
-        # Post with or without image
+        # Post with video if available
+        if video_bytes:
+            logger.info(f"Posting update with VIDEO ({len(video_bytes)} bytes)...")
+            result = await poster.post_tweet_with_video(AGI_UPDATE_POST, video_bytes)
+            if result:
+                tweet_id = result.get("data", {}).get("id")
+                logger.info(f"✅ Posted with VIDEO! Tweet ID: {tweet_id}")
+                print(f"\n✅ SUCCESS with VIDEO! Tweet ID: {tweet_id}")
+                print(f"🔗 https://x.com/i/status/{tweet_id}")
+                return True
+
+        # Fallback to image if video failed
         if image_bytes:
-            logger.info("Posting update with image...")
+            logger.info(f"Video failed, posting with IMAGE fallback ({len(image_bytes)} bytes)...")
             result = await poster.post_tweet(AGI_UPDATE_POST, image_bytes=image_bytes)
-        else:
-            logger.info("Posting text-only update...")
-            result = await poster.post_tweet(AGI_UPDATE_POST)
+            if result:
+                tweet_id = result.get("data", {}).get("id")
+                logger.info(f"✅ Posted with IMAGE! Tweet ID: {tweet_id}")
+                print(f"\n✅ SUCCESS with IMAGE! Tweet ID: {tweet_id}")
+                print(f"🔗 https://x.com/i/status/{tweet_id}")
+                return True
+
+        # Last resort: text only
+        logger.info("All media failed, posting text-only...")
+        result = await poster.post_tweet(AGI_UPDATE_POST)
 
         if result:
             tweet_id = result.get("data", {}).get("id")
-            logger.info(f"✅ Posted successfully! Tweet ID: {tweet_id}")
-            print(f"\n✅ SUCCESS! Tweet ID: {tweet_id}")
+            logger.info(f"✅ Posted text-only! Tweet ID: {tweet_id}")
+            print(f"\n✅ SUCCESS (text only)! Tweet ID: {tweet_id}")
             print(f"🔗 https://x.com/i/status/{tweet_id}")
             return True
         else:
-            logger.error("❌ Post failed")
+            logger.error("❌ Post failed completely")
             print("\n❌ FAILED to post")
             return False
 
