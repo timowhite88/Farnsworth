@@ -39,7 +39,7 @@ DID_AVATAR_URL = os.getenv("DID_AVATAR_URL")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_FARNSWORTH", "dxvY1G6UilzEKgCy370m")
 
-RTMP_URL = "rtmp://va.pscp.tv:80/x"
+RTMP_URL = "rtmps://va.pscp.tv:443/x"  # SSL for stability
 STREAM_KEY = ""
 
 OUTPUT_WIDTH = 1920
