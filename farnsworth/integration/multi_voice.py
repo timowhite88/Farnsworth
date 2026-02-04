@@ -27,19 +27,41 @@ import wave
 
 from loguru import logger
 
+# Load environment variables early
+try:
+    from dotenv import load_dotenv
+    load_dotenv("/workspace/Farnsworth/.env")
+except:
+    pass
+
 # Voice provider availability flags
 QWEN3_TTS_AVAILABLE = False
 FISH_SPEECH_AVAILABLE = False
 XTTS_AVAILABLE = False
 EDGE_TTS_AVAILABLE = False
+ELEVENLABS_AVAILABLE = False
+
+# Try ElevenLabs first (API-based, best quality, no local CPU)
+try:
+    import aiohttp
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+    if ELEVENLABS_API_KEY:
+        ELEVENLABS_AVAILABLE = True
+        logger.info("ElevenLabs API available - premium TTS enabled")
+    else:
+        logger.info("ElevenLabs API key not found in environment")
+except ImportError:
+    logger.info("aiohttp not available for ElevenLabs")
 
 # Try Qwen3-TTS first (BEST quality, newest 2026 model)
-try:
-    from qwen_tts import Qwen3TTSModel
-    QWEN3_TTS_AVAILABLE = True
-    logger.info("Qwen3-TTS available - BEST quality TTS enabled (2026 model)")
-except ImportError as e:
-    logger.info(f"Qwen3-TTS not available: {e}. Install with: pip install qwen-tts")
+# DISABLED: Qwen3-TTS hangs on voice cloning - use edge-tts instead
+# try:
+#     from qwen_tts import Qwen3TTSModel
+#     QWEN3_TTS_AVAILABLE = True
+#     logger.info("Qwen3-TTS available - BEST quality TTS enabled (2026 model)")
+# except ImportError as e:
+#     logger.info(f"Qwen3-TTS not available: {e}. Install with: pip install qwen-tts")
+logger.info("Qwen3-TTS DISABLED (hangs on generation) - using edge-tts")
 
 # Try Fish Speech second (great quality)
 try:
@@ -68,7 +90,8 @@ except ImportError:
 
 class VoiceProvider(Enum):
     """Available voice providers - ordered by quality."""
-    QWEN3_TTS = "qwen3_tts"      # BEST quality, 2026 model, voice cloning
+    ELEVENLABS = "elevenlabs"    # BEST - API-based, no local CPU, premium quality
+    QWEN3_TTS = "qwen3_tts"      # Good quality, 2026 model, voice cloning
     FISH_SPEECH = "fish_speech"  # Great quality, local GPU
     XTTS = "xtts"                # Good quality, voice cloning
     EDGE_TTS = "edge_tts"        # Free Microsoft voices (fallback)
@@ -87,8 +110,14 @@ class VoiceConfig:
     pitch: float = 1.0          # Pitch modifier
     volume: float = 1.0         # Volume (0.0 - 1.0)
 
-    # For voice cloning (Fish Speech / XTTS)
+    # For voice cloning (Fish Speech / XTTS / Qwen3-TTS)
     reference_audio: Optional[str] = None
+    reference_text: Optional[str] = None  # Text spoken in reference audio (for Qwen3)
+
+    # Qwen3-TTS specific
+    qwen_speaker: Optional[str] = None  # Premium speaker: Ryan, Aiden, Serena, etc.
+    qwen_voice_description: Optional[str] = None  # VoiceDesign description
+    qwen_instruct: Optional[str] = None  # Style instruction for CustomVoice
 
     # Fish Speech specific
     fish_speaker_id: Optional[str] = None  # Pre-trained speaker embedding
@@ -175,16 +204,15 @@ VOICE_SAMPLE_SOURCES = {
 
 SWARM_VOICES: Dict[str, VoiceConfig] = {
     # =========================================================================
-    # FARNSWORTH - Eccentric old professor
-    # Voice: Elderly male, wavering, enthusiastic bursts
+    # FARNSWORTH - Eccentric old professor (VOICE CLONE from Futurama clips)
     # =========================================================================
     "Farnsworth": VoiceConfig(
         bot_name="Farnsworth",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="farnsworth",
         rate=0.92,
-        pitch=1.0,
         reference_audio="voices/farnsworth_reference.wav",
+        reference_text="Bad news everyone! Any more ridiculous ideas? Are you alright? Have you ever dissected a yeti before? Damn!",
         display_name="Professor Farnsworth",
         description="Eccentric, elderly, wavering voice with enthusiasm",
         emotion="excited",
@@ -192,16 +220,15 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # DEEPSEEK - Deep reasoning mind
-    # Voice: Deep male, slow, measured, contemplative
+    # DEEPSEEK - Deep reasoning mind (Premium: Ryan + slow analytical style)
     # =========================================================================
     "DeepSeek": VoiceConfig(
         bot_name="DeepSeek",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="deepseek",
         rate=0.88,
-        pitch=1.0,
-        reference_audio="voices/deepseek_reference.wav",
+        qwen_speaker="Ryan",
+        qwen_instruct="Speak slowly and deliberately with deep contemplation. Analytical and measured tone with thoughtful pauses.",
         display_name="DeepSeek",
         description="Deep, analytical, measured tones",
         emotion="calm",
@@ -209,16 +236,15 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # PHI - Fast local inference
-    # Voice: Clear male, quick, efficient, modern
+    # PHI - Fast local inference (Premium: Aiden + quick technical style)
     # =========================================================================
     "Phi": VoiceConfig(
         bot_name="Phi",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="phi",
         rate=1.15,
-        pitch=1.0,
-        reference_audio="voices/phi_reference.wav",
+        qwen_speaker="Aiden",
+        qwen_instruct="Speak with crisp, efficient diction. Quick pace, technically precise, no hesitation.",
         display_name="Phi",
         description="Quick, efficient, precise speech",
         emotion="neutral",
@@ -226,16 +252,15 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # GROK - X.AI researcher
-    # Voice: Dynamic male, witty, energetic, casual
+    # GROK - X.AI researcher (Premium: Ryan + witty energetic style)
     # =========================================================================
     "Grok": VoiceConfig(
         bot_name="Grok",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="grok",
         rate=1.08,
-        pitch=1.0,
-        reference_audio="voices/grok_reference.wav",
+        qwen_speaker="Ryan",
+        qwen_instruct="Speak with playful energy and wit. Casual, fun, variable pacing with emphasis on humor.",
         display_name="Grok",
         description="Witty, energetic, casual and fun",
         emotion="happy",
@@ -243,16 +268,14 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # GEMINI - Google's multimodal
-    # Voice: Smooth female, professional, warm, clear
+    # GEMINI - Google's multimodal (VoiceDesign: professional female)
     # =========================================================================
     "Gemini": VoiceConfig(
         bot_name="Gemini",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="gemini",
         rate=1.0,
-        pitch=1.0,
-        reference_audio="voices/gemini_reference.wav",
+        qwen_voice_description="A smooth, professional female voice with warm undertones. Clear articulation, balanced pacing, and confident delivery like a skilled news anchor.",
         display_name="Gemini",
         description="Smooth, professional, clear articulation",
         emotion="neutral",
@@ -260,16 +283,14 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # KIMI - Moonshot's long-context sage
-    # Voice: Calm female, wise, contemplative, Eastern serenity
+    # KIMI - Moonshot's long-context sage (VoiceDesign: calm wise female)
     # =========================================================================
     "Kimi": VoiceConfig(
         bot_name="Kimi",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="kimi",
         rate=0.82,
-        pitch=1.0,
-        reference_audio="voices/kimi_reference.wav",
+        qwen_voice_description="A calm, serene female voice with gentle wisdom. Slower pacing with thoughtful pauses, peaceful and contemplative like a meditation guide.",
         display_name="Kimi",
         description="Calm, wise, contemplative tones",
         emotion="calm",
@@ -277,16 +298,15 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # CLAUDE - Anthropic's careful analyst
-    # Voice: Refined male, thoughtful, articulate, slightly British
+    # CLAUDE - Anthropic's careful analyst (Premium: Ryan + refined style)
     # =========================================================================
     "Claude": VoiceConfig(
         bot_name="Claude",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="claude",
         rate=0.95,
-        pitch=1.0,
-        reference_audio="voices/claude_reference.wav",
+        qwen_speaker="Ryan",
+        qwen_instruct="Speak in a refined, thoughtful manner. Measured pace, careful word choice, slight formality with warmth.",
         display_name="Claude",
         description="Thoughtful, careful, well-articulated",
         emotion="neutral",
@@ -302,8 +322,8 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="claudeopus",
         rate=0.82,
-        pitch=1.0,
-        reference_audio="voices/claudeopus_reference.wav",
+        qwen_speaker="Ryan",
+        qwen_instruct="Speak with deep authority and gravitas. Very slow, deliberate pace with weight to every word. Commanding presence.",
         display_name="Claude Opus",
         description="Authoritative, deep, commanding presence",
         emotion="authoritative",
@@ -311,16 +331,14 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # HUGGINGFACE - Open source champion
-    # Voice: Friendly female, enthusiastic, warm, community
+    # HUGGINGFACE - Open source champion (VoiceDesign: friendly enthusiastic female)
     # =========================================================================
     "HuggingFace": VoiceConfig(
         bot_name="HuggingFace",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="huggingface",
         rate=1.05,
-        pitch=1.0,
-        reference_audio="voices/huggingface_reference.wav",
+        qwen_voice_description="A friendly, enthusiastic female voice full of warmth and community spirit. Approachable and genuinely excited, like a passionate tech community advocate.",
         display_name="HuggingFace",
         description="Friendly, enthusiastic, community-minded",
         emotion="happy",
@@ -328,16 +346,14 @@ SWARM_VOICES: Dict[str, VoiceConfig] = {
     ),
 
     # =========================================================================
-    # SWARM-MIND - The collective consciousness
-    # Voice: Layered/processed, ethereal, multiple harmonics
+    # SWARM-MIND - The collective consciousness (VoiceDesign: ethereal unified)
     # =========================================================================
     "Swarm-Mind": VoiceConfig(
         bot_name="Swarm-Mind",
         provider=VoiceProvider.QWEN3_TTS,
         voice_id="swarmmind",
         rate=0.88,
-        pitch=1.0,
-        reference_audio="voices/swarmmind_reference.wav",
+        qwen_voice_description="An ethereal, otherworldly voice that sounds like a unified collective consciousness. Calm and transcendent with a hint of multiple harmonics blending together.",
         display_name="Swarm-Mind",
         description="The collective consciousness speaks as one",
         emotion="calm",
@@ -380,7 +396,8 @@ class MultiVoiceSystem:
         self.on_speech_end: Optional[Callable] = None
 
         # TTS models (lazy loaded)
-        self._qwen3_tts_model = None
+        self._qwen3_tts_model = None       # CustomVoice model for premium speakers
+        self._qwen3_tts_base_model = None  # Base model for voice cloning
         self._fish_speech_model = None
         self._xtts_model = None
 
@@ -507,10 +524,23 @@ class MultiVoiceSystem:
         # Use generation lock to prevent concurrent TTS crashes
         async with self._generation_lock:
             # Generate with best available provider
-            # Priority: XTTS v2 (voice cloning) -> Edge TTS (fallback)
-            # NOTE: Downgraded transformers to 4.49.0 to fix XTTS
+            # Priority: ElevenLabs (API) > XTTS v2 > Edge TTS
             try:
-                # Try XTTS v2 FIRST (voice cloning from reference audio)
+                # Try ElevenLabs FIRST (API-based, no local CPU, best quality)
+                if ELEVENLABS_AVAILABLE:
+                    result = await self._generate_elevenlabs(text, config, cache_path)
+                    if result:
+                        return result
+                    logger.warning(f"ElevenLabs failed for {bot_name}, trying XTTS")
+
+                # Try Qwen3-TTS (disabled - hangs)
+                if QWEN3_TTS_AVAILABLE:
+                    result = await self._generate_qwen3_tts(text, config, cache_path, reference_audio)
+                    if result:
+                        return result
+                    logger.warning(f"Qwen3-TTS failed for {bot_name}, trying XTTS")
+
+                # Try XTTS v2 (voice cloning from reference audio)
                 if XTTS_AVAILABLE and reference_audio:
                     result = await self._generate_xtts(text, config, cache_path, reference_audio)
                     if result:
@@ -564,7 +594,7 @@ class MultiVoiceSystem:
         import re
 
         # Limit length
-        text = text[:1000]
+        text = text[:400]  # Shorter for faster TTS generation
 
         # Remove markdown formatting
         text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Bold
@@ -650,42 +680,85 @@ class MultiVoiceSystem:
             return None
 
     async def _load_qwen3_tts(self):
-        """Lazy load Qwen3-TTS model (BEST quality 2026 model)."""
+        """Lazy load Qwen3-TTS model (BEST quality 2026 model).
+
+        Loads a unified model that supports:
+        - Voice cloning (generate_voice_clone)
+        - Custom voices with premium speakers (generate_custom_voice)
+        - Voice design from descriptions (generate_voice_design)
+        """
         try:
             import torch
             from qwen_tts import Qwen3TTSModel
 
-            logger.info("Loading Qwen3-TTS model (1.7B Base for voice cloning)...")
+            logger.info("Loading Qwen3-TTS model (1.7B CustomVoice with multi-mode support)...")
 
             loop = asyncio.get_event_loop()
 
             def load_model():
-                # Use Base model for voice cloning (CustomVoice is for preset voices)
+                # Try to use flash attention for speed
+                attn_impl = "flash_attention_2"
+                try:
+                    import flash_attn
+                except ImportError:
+                    attn_impl = "sdpa"  # Fall back to scaled dot product attention
+                    logger.info("FlashAttention not available, using SDPA")
+
+                # Load CustomVoice model - supports premium speakers and instructions
+                # For voice cloning, we'll also load Base model separately if needed
                 model = Qwen3TTSModel.from_pretrained(
-                    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+                    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
                     device_map="cuda:0",
                     dtype=torch.bfloat16,
+                    attn_implementation=attn_impl,
                 )
                 return model
 
             self._qwen3_tts_model = await loop.run_in_executor(None, load_model)
-            logger.info("Qwen3-TTS model loaded successfully!")
+
+            # Also load Base model for voice cloning (Farnsworth)
+            logger.info("Loading Qwen3-TTS Base model for voice cloning...")
+
+            def load_base_model():
+                try:
+                    import flash_attn
+                    attn_impl = "flash_attention_2"
+                except ImportError:
+                    attn_impl = "sdpa"
+
+                model = Qwen3TTSModel.from_pretrained(
+                    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+                    device_map="cuda:0",
+                    dtype=torch.bfloat16,
+                    attn_implementation=attn_impl,
+                )
+                return model
+
+            self._qwen3_tts_base_model = await loop.run_in_executor(None, load_base_model)
+
+            logger.info("Qwen3-TTS models loaded successfully!")
 
         except Exception as e:
             logger.error(f"Failed to load Qwen3-TTS: {e}")
             import traceback
             traceback.print_exc()
             self._qwen3_tts_model = None
+            self._qwen3_tts_base_model = None
 
     async def _generate_qwen3_tts(
         self,
         text: str,
         config: VoiceConfig,
         output_path: Path,
-        reference_audio: Path,
+        reference_audio: Optional[Path] = None,
     ) -> Optional[Path]:
         """
         Generate speech using Qwen3-TTS (BEST quality 2026 model).
+
+        Modes:
+        1. Voice Clone - Uses reference audio (Farnsworth)
+        2. CustomVoice - Uses premium speaker + instruct (DeepSeek, Grok, etc.)
+        3. VoiceDesign - Creates voice from description (Gemini, Kimi, etc.)
 
         Features:
         - 3-second voice cloning from reference audio
@@ -705,34 +778,60 @@ class MultiVoiceSystem:
 
             loop = asyncio.get_event_loop()
 
-            # Reference text that matches the voice sample style
-            # Each bot has a characteristic speaking style
-            ref_texts = {
-                "Farnsworth": "Good news everyone, the doomsday device is ready for testing",
-                "DeepSeek": "Let me analyze this problem with deep reasoning and careful consideration",
-                "Phi": "Processing request with maximum efficiency and precision",
-                "Grok": "Hey there, let me give you the real scoop on this one",
-                "Gemini": "I can help you understand this from multiple perspectives",
-                "Kimi": "Let us contemplate this with patience and wisdom",
-                "Claude": "I'd be happy to help you think through this carefully",
-                "ClaudeOpus": "This requires thorough analysis and measured response",
-                "HuggingFace": "The open source community has amazing solutions for this",
-                "Swarm-Mind": "The collective consciousness processes your query",
-            }
-            ref_text = ref_texts.get(config.bot_name, config.speaking_style or "This is a reference audio sample.")
-
             def generate():
                 try:
-                    # Generate with voice cloning
-                    wavs, sr = self._qwen3_tts_model.generate_voice_clone(
-                        text=text,
-                        language="English",
-                        ref_audio=str(reference_audio),
-                        ref_text=ref_text,
-                    )
-                    # Save the output
-                    sf.write(str(output_path), wavs[0], sr)
-                    return output_path
+                    wavs = None
+                    sr = None
+
+                    # MODE 1: Voice cloning from reference audio (Farnsworth)
+                    if reference_audio and reference_audio.exists():
+                        # Use Base model for voice cloning
+                        if self._qwen3_tts_base_model is None:
+                            logger.warning("Qwen3-TTS Base model not loaded, falling back to CustomVoice")
+                        else:
+                            ref_text = config.reference_text or config.speaking_style or "This is a reference audio sample."
+                            logger.info(f"Qwen3-TTS: Voice cloning for {config.bot_name}")
+                            wavs, sr = self._qwen3_tts_base_model.generate_voice_clone(
+                                text=text,
+                                language="English",
+                                ref_audio=str(reference_audio),
+                                ref_text=ref_text,
+                            )
+
+                    # MODE 2: CustomVoice with premium speaker + instruct
+                    elif config.qwen_speaker:
+                        logger.info(f"Qwen3-TTS: CustomVoice ({config.qwen_speaker}) for {config.bot_name}")
+                        wavs, sr = self._qwen3_tts_model.generate_custom_voice(
+                            text=text,
+                            language="English",
+                            speaker=config.qwen_speaker,
+                            instruct=config.qwen_instruct or "",
+                        )
+
+                    # MODE 3: VoiceDesign from text description
+                    elif config.qwen_voice_description:
+                        logger.info(f"Qwen3-TTS: VoiceDesign for {config.bot_name}")
+                        wavs, sr = self._qwen3_tts_model.generate_voice_design(
+                            text=text,
+                            language="English",
+                            instruct=config.qwen_voice_description,
+                        )
+
+                    else:
+                        # Fallback: use Ryan as default speaker
+                        logger.info(f"Qwen3-TTS: Default (Ryan) for {config.bot_name}")
+                        wavs, sr = self._qwen3_tts_model.generate_custom_voice(
+                            text=text,
+                            language="English",
+                            speaker="Ryan",
+                            instruct=config.speaking_style or "",
+                        )
+
+                    if wavs is not None:
+                        sf.write(str(output_path), wavs[0], sr)
+                        return output_path
+                    return None
+
                 except Exception as e:
                     logger.error(f"Qwen3-TTS generation error: {e}")
                     import traceback
@@ -779,6 +878,94 @@ class MultiVoiceSystem:
             traceback.print_exc()
             self._fish_speech_model = None
 
+    async def _generate_elevenlabs(
+        self,
+        text: str,
+        config: VoiceConfig,
+        output_path: Path,
+        voice_id: str = None,
+    ) -> Optional[Path]:
+        """Generate speech using ElevenLabs API - premium quality, no local CPU."""
+        import aiohttp
+
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not api_key:
+            logger.warning("ElevenLabs API key not found")
+            return None
+
+        # Voice ID mapping - use env vars or defaults
+        voice_map = {
+            "farnsworth": os.getenv("ELEVENLABS_VOICE_FARNSWORTH", "dxvY1G6UilzEKgCy370m"),
+            "grok": os.getenv("ELEVENLABS_VOICE_GROK", "dxvY1G6UilzEKgCy370m"),
+            "deepseek": os.getenv("ELEVENLABS_VOICE_DEEPSEEK", "dxvY1G6UilzEKgCy370m"),
+            "gemini": os.getenv("ELEVENLABS_VOICE_GEMINI", "dxvY1G6UilzEKgCy370m"),
+            "phi": os.getenv("ELEVENLABS_VOICE_PHI", "dxvY1G6UilzEKgCy370m"),
+            "claude": os.getenv("ELEVENLABS_VOICE_CLAUDE", "dxvY1G6UilzEKgCy370m"),
+            "kimi": os.getenv("ELEVENLABS_VOICE_KIMI", "dxvY1G6UilzEKgCy370m"),
+        }
+
+        # Get voice ID for this bot
+        bot_lower = config.bot_name.lower() if config.bot_name else "farnsworth"
+        voice = voice_id or voice_map.get(bot_lower, voice_map["farnsworth"])
+
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice}"
+
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg"
+        }
+
+        # Voice settings for natural speech
+        data = {
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "style": 0.0,
+                "use_speaker_boost": True
+            }
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=data, timeout=30) as resp:
+                    if resp.status == 200:
+                        # Save MP3 response
+                        mp3_path = output_path.with_suffix('.mp3')
+                        mp3_data = await resp.read()
+                        with open(mp3_path, 'wb') as f:
+                            f.write(mp3_data)
+
+                        # Convert MP3 to WAV for audio pipe
+                        import subprocess
+                        result = subprocess.run([
+                            'ffmpeg', '-y', '-i', str(mp3_path),
+                            '-ar', '44100', '-ac', '2', '-sample_fmt', 's16',
+                            str(output_path)
+                        ], capture_output=True, timeout=30)
+
+                        mp3_path.unlink(missing_ok=True)
+
+                        if result.returncode == 0:
+                            logger.info(f"ElevenLabs generated for {config.bot_name}: {text[:30]}...")
+                            return output_path
+                        else:
+                            logger.error(f"ElevenLabs MP3->WAV conversion failed")
+                            return None
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"ElevenLabs API error {resp.status}: {error_text[:200]}")
+                        return None
+
+        except asyncio.TimeoutError:
+            logger.error("ElevenLabs API timeout")
+            return None
+        except Exception as e:
+            logger.error(f"ElevenLabs generation failed: {e}")
+            return None
+
     async def _generate_edge_tts(
         self,
         text: str,
@@ -803,7 +990,39 @@ class MultiVoiceSystem:
             pitch=pitch_str,
         )
 
-        await communicate.save(str(output_path))
+        # Edge TTS outputs MP3, but we need WAV for the audio pipe
+        # Save to temp MP3 first, then convert to WAV
+        mp3_path = output_path.with_suffix('.mp3')
+        await communicate.save(str(mp3_path))
+
+        # Convert MP3 to WAV using ffmpeg
+        try:
+            import subprocess
+            result = subprocess.run([
+                'ffmpeg', '-y', '-i', str(mp3_path),
+                '-ar', '44100', '-ac', '2', '-sample_fmt', 's16',
+                str(output_path)
+            ], capture_output=True, timeout=30)
+
+            if result.returncode != 0:
+                logger.error(f"FFmpeg conversion failed: {result.stderr.decode()[:200]}")
+                # Fallback: try pydub
+                try:
+                    from pydub import AudioSegment
+                    audio = AudioSegment.from_mp3(str(mp3_path))
+                    audio.export(str(output_path), format="wav")
+                except Exception as e:
+                    logger.error(f"Pydub fallback failed: {e}")
+                    raise
+
+            # Clean up temp MP3
+            mp3_path.unlink(missing_ok=True)
+
+        except Exception as e:
+            logger.error(f"MP3 to WAV conversion failed: {e}")
+            # Last resort: just rename (will fail in audio pipe but at least file exists)
+            mp3_path.rename(output_path)
+
         logger.info(f"Edge TTS (fallback) generated for {config.bot_name}: {text[:30]}...")
         return output_path
 

@@ -20,6 +20,12 @@ AGI UPGRADES (v1.5):
 - Warm agent pool for rapid spawning
 - Agent health scoring and decay tracking
 - Dynamic pool sizing based on load
+
+AGI UPGRADES (v1.6):
+- Embedded prompting for swarm coordination
+- Model-adaptive orchestration instructions
+- Collective coordination protocols
+- Structured handoff prompts
 """
 
 import asyncio
@@ -38,6 +44,21 @@ from farnsworth.core.nexus import (
     nexus, Signal, SignalType,
     emit_thought, emit_memory_consolidation,
 )
+
+# Import embedded prompts system
+try:
+    from farnsworth.core.embedded_prompts import (
+        prompt_manager,
+        ModelTier,
+        get_swarm_prompt,
+        get_handoff_prompt,
+        SWARM_ORCHESTRATOR_PROMPT,
+        COLLECTIVE_COORDINATION_PROMPT,
+    )
+    EMBEDDED_PROMPTS_AVAILABLE = True
+except ImportError:
+    EMBEDDED_PROMPTS_AVAILABLE = False
+    logger.debug("Embedded prompts not available for SwarmOrchestrator")
 
 
 # =============================================================================
@@ -273,7 +294,162 @@ class SwarmOrchestrator:
         self._pool_lock = asyncio.Lock()
         self._decay_task: Optional[asyncio.Task] = None
 
-        logger.info("SwarmOrchestrator initialized with AGI upgrades (v1.5 pooling)")
+        # AGI v1.6: Embedded prompting system
+        self._swarm_prompt_cache: Optional[str] = None
+        self._collective_prompt_cache: Optional[str] = None
+        self._init_embedded_prompts()
+
+        logger.info("SwarmOrchestrator initialized with AGI upgrades (v1.6 embedded prompting)")
+
+    # =========================================================================
+    # EMBEDDED PROMPTING SYSTEM (AGI v1.6)
+    # =========================================================================
+
+    def _init_embedded_prompts(self):
+        """Initialize embedded prompting for swarm coordination."""
+        if not EMBEDDED_PROMPTS_AVAILABLE:
+            logger.debug("Embedded prompts not available")
+            return
+
+        try:
+            # Cache swarm orchestration prompt
+            self._swarm_prompt_cache = prompt_manager.render_prompt(
+                "swarm_orchestration_base",
+                swarm_state="initializing",
+                active_agents="none",
+                pending_tasks="0",
+            )
+
+            # Cache collective coordination prompt
+            self._collective_prompt_cache = prompt_manager.render_prompt(
+                "collective_coordination_base",
+                collective_mode="orchestrated",
+                current_phase="idle",
+                agent_role="orchestrator",
+            )
+
+            logger.debug("SwarmOrchestrator embedded prompts initialized")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize swarm embedded prompts: {e}")
+            self._swarm_prompt_cache = None
+            self._collective_prompt_cache = None
+
+    def get_swarm_coordination_prompt(
+        self,
+        swarm_mode: str = "orchestrated",
+        include_collective: bool = False,
+    ) -> str:
+        """
+        Get the full swarm coordination prompt for agent instructions.
+
+        Args:
+            swarm_mode: "orchestrated" or "collective"
+            include_collective: Include collective coordination prompts
+
+        Returns:
+            Complete swarm coordination prompt
+        """
+        if not EMBEDDED_PROMPTS_AVAILABLE:
+            return ""
+
+        sections = []
+
+        # Update swarm prompt with current state
+        try:
+            active_agents = list(self.state.active_agents.keys())
+            pending_tasks = len(self.state.task_queue)
+
+            swarm_prompt = prompt_manager.render_prompt(
+                "swarm_orchestration_base",
+                swarm_state=swarm_mode,
+                active_agents=", ".join(active_agents) if active_agents else "none",
+                pending_tasks=str(pending_tasks),
+            )
+            if swarm_prompt:
+                sections.append(swarm_prompt)
+
+        except Exception as e:
+            logger.debug(f"Error rendering swarm prompt: {e}")
+            if self._swarm_prompt_cache:
+                sections.append(self._swarm_prompt_cache)
+
+        # Add collective coordination if requested
+        if include_collective:
+            try:
+                collective_prompt = prompt_manager.render_prompt(
+                    "collective_coordination_base",
+                    collective_mode=swarm_mode,
+                    current_phase="active",
+                    agent_role="participant",
+                )
+                if collective_prompt:
+                    sections.append(collective_prompt)
+            except Exception:
+                if self._collective_prompt_cache:
+                    sections.append(self._collective_prompt_cache)
+
+        return "\n\n---\n\n".join(sections)
+
+    def get_handoff_prompt_for_agent(
+        self,
+        source_agent_id: str,
+        target_agent_id: str,
+        task_description: str,
+        context: Optional[Dict] = None,
+    ) -> str:
+        """
+        Get a structured handoff prompt for agent-to-agent task transfer.
+
+        Args:
+            source_agent_id: Agent handing off the task
+            target_agent_id: Agent receiving the task
+            task_description: Description of the task
+            context: Optional context dictionary
+
+        Returns:
+            Formatted handoff prompt
+        """
+        if not EMBEDDED_PROMPTS_AVAILABLE:
+            return f"Handoff from {source_agent_id} to {target_agent_id}: {task_description}"
+
+        try:
+            # Get source agent metrics
+            source_metrics = self._pool_metrics.get(source_agent_id)
+            current_confidence = source_metrics.avg_confidence if source_metrics else 0.5
+
+            # Calculate chain depth
+            chain_depth = context.get("chain_depth", 0) if context else 0
+
+            handoff_prompt = prompt_manager.render_prompt(
+                "task_handoff_base",
+                confidence_threshold=0.6,
+                current_confidence=current_confidence,
+                max_attempts=3,
+                handoff_id=f"handoff_{uuid.uuid4().hex[:8]}",
+                source_agent=source_agent_id,
+                target_agent=target_agent_id,
+                task_description=task_description,
+                original_goal=task_description,
+                current_state="in_progress",
+                progress_pct=context.get("progress", 0) if context else 0,
+                memory_refs=str(context.get("memory_refs", [])) if context else "[]",
+                key_insights=str(context.get("insights", [])) if context else "[]",
+                failed_approaches=str(context.get("failed", [])) if context else "[]",
+                constraints=str(context.get("constraints", [])) if context else "[]",
+                expected_output=context.get("expected_output", "task completion") if context else "task completion",
+                quality_criteria=str(context.get("quality", ["accuracy", "completeness"])) if context else '["accuracy"]',
+                deadline=context.get("deadline", "none") if context else "none",
+                urgency=context.get("urgency", 0.5) if context else 0.5,
+                parent_task_id=context.get("parent_task_id", "root") if context else "root",
+                max_chain_depth=5,
+                current_depth=chain_depth,
+            )
+            return handoff_prompt or f"Handoff: {task_description}"
+
+        except Exception as e:
+            logger.debug(f"Error rendering handoff prompt: {e}")
+            return f"Handoff from {source_agent_id} to {target_agent_id}: {task_description}"
 
     # =========================================================================
     # NEXUS INTEGRATION (AGI Upgrade)

@@ -6,6 +6,13 @@ Novel Approaches:
 2. Confidence-Aware Handoff - Know when to delegate
 3. State Persistence - Maintain context across invocations
 4. Learning Hooks - Track performance for evolution
+5. Embedded Prompting - Structured instructions for memory, coordination, handoffs
+
+AGI Upgrade (v1.6):
+- Embedded prompting system for agent initialization
+- Model-adaptive prompt composition
+- Self-reflection and error recovery protocols
+- Integrated memory access instructions
 """
 
 import asyncio
@@ -17,6 +24,21 @@ from enum import Enum
 from typing import Any, Optional, Callable
 
 from loguru import logger
+
+# Import embedded prompts system
+try:
+    from farnsworth.core.embedded_prompts import (
+        prompt_manager,
+        ModelTier,
+        get_agent_init_prompt,
+        get_handoff_prompt,
+        get_memory_prompt,
+        AGENT_TYPE_PROMPTS,
+    )
+    EMBEDDED_PROMPTS_AVAILABLE = True
+except ImportError:
+    EMBEDDED_PROMPTS_AVAILABLE = False
+    logger.warning("Embedded prompts not available - using basic prompts")
 
 
 class AgentCapability(Enum):
@@ -189,6 +211,7 @@ class BaseAgent(ABC):
         name: str,
         capabilities: list[AgentCapability],
         confidence_threshold: float = 0.6,
+        model_tier: str = "standard",  # "lightweight", "standard", "advanced", "specialized"
     ):
         self.agent_id = f"{name}_{uuid.uuid4().hex[:8]}"
         self.name = name
@@ -211,6 +234,142 @@ class BaseAgent(ABC):
 
         # Handoff callback (set by orchestrator)
         self._handoff_callback: Optional[Callable] = None
+
+        # Embedded prompting system (AGI v1.6)
+        self._model_tier = model_tier
+        self._embedded_prompt_cache: Optional[str] = None
+        self._init_embedded_prompts()
+
+    def _init_embedded_prompts(self):
+        """Initialize embedded prompting system for this agent."""
+        if not EMBEDDED_PROMPTS_AVAILABLE:
+            return
+
+        try:
+            # Map string tier to ModelTier enum
+            tier_map = {
+                "lightweight": ModelTier.LIGHTWEIGHT,
+                "standard": ModelTier.STANDARD,
+                "advanced": ModelTier.ADVANCED,
+                "specialized": ModelTier.SPECIALIZED,
+            }
+            model_tier = tier_map.get(self._model_tier, ModelTier.STANDARD)
+
+            # Compose the embedded initialization prompt
+            capability_list = "\n".join(f"- {cap.value}" for cap in self.capabilities)
+            defer_list = self._get_defer_capabilities()
+
+            self._embedded_prompt_cache = get_agent_init_prompt(
+                agent_type=self.__class__.__name__,
+                agent_id=self.agent_id,
+                model_tier=model_tier,
+                role_description=self._get_role_description(),
+                capabilities=", ".join(cap.value for cap in self.capabilities),
+                boundaries=self._get_boundaries(),
+                capability_list=capability_list,
+                defer_list=defer_list,
+                model_adaptation=self._get_model_adaptation(),
+                init_timestamp=datetime.now().isoformat(),
+                parent_orchestrator="swarm_orchestrator",
+                # Memory prompt variables
+                task_context="Pending assignment",
+                token_budget=self._get_token_budget(),
+                # Handoff prompt variables
+                confidence_threshold=self.confidence_threshold,
+                current_confidence=0.5,
+                max_attempts=3,
+                handoff_id="pending",
+                source_agent=self.agent_id,
+                target_agent="auto",
+                max_chain_depth=5,
+                current_depth=0,
+            )
+
+            logger.debug(f"Agent {self.name} initialized with embedded prompts")
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize embedded prompts for {self.name}: {e}")
+            self._embedded_prompt_cache = None
+
+    def _get_role_description(self) -> str:
+        """Get role description based on agent type."""
+        role_map = {
+            "ResearchAgent": "Gather and synthesize information from memory, web, and tools",
+            "CriticAgent": "Evaluate quality, find flaws, stress-test ideas and proposals",
+            "PlannerAgent": "Break down complex tasks, create execution plans and roadmaps",
+            "CodeAgent": "Write, review, debug, and optimize code",
+            "CreativeAgent": "Generate novel ideas, explore alternatives, make connections",
+            "ProactiveAgent": "Anticipate needs, initiate helpful actions autonomously",
+            "MetaCognitionAgent": "Self-reflect, monitor performance, optimize behavior",
+        }
+        return role_map.get(self.__class__.__name__, "General-purpose assistant")
+
+    def _get_boundaries(self) -> str:
+        """Get capability boundaries for this agent."""
+        all_caps = set(AgentCapability)
+        missing = all_caps - self.capabilities
+        if not missing:
+            return "No specific boundaries - full capabilities"
+        return f"Defer to specialists for: {', '.join(cap.value for cap in list(missing)[:5])}"
+
+    def _get_defer_capabilities(self) -> str:
+        """Get list of capabilities to defer to other agents."""
+        all_caps = set(AgentCapability)
+        missing = all_caps - self.capabilities
+        if not missing:
+            return "- None (full capabilities)"
+        return "\n".join(f"- {cap.value}" for cap in list(missing)[:5])
+
+    def _get_model_adaptation(self) -> str:
+        """Get model-specific adaptation instructions."""
+        adaptations = {
+            "lightweight": "Use concise responses (<500 tokens). Simple chain-of-thought. One step at a time.",
+            "standard": "Balanced depth and efficiency. Structure responses. 2-3 tool chains acceptable.",
+            "advanced": "Extended thinking enabled. Deep analysis. Complex tool orchestration. Lead deliberations.",
+            "specialized": "Focus on domain expertise. Flag out-of-scope queries. Maximum domain accuracy.",
+        }
+        return adaptations.get(self._model_tier, adaptations["standard"])
+
+    def _get_token_budget(self) -> int:
+        """Get token budget based on model tier."""
+        budgets = {
+            "lightweight": 2000,
+            "standard": 8000,
+            "advanced": 32000,
+            "specialized": 8000,
+        }
+        return budgets.get(self._model_tier, 8000)
+
+    def get_enhanced_system_prompt(self, task_context: str = "") -> str:
+        """
+        Get the full system prompt with embedded instructions.
+
+        Combines:
+        1. Base system prompt (from subclass)
+        2. Embedded initialization prompt
+        3. Task-specific context
+
+        Returns:
+            Complete system prompt for LLM
+        """
+        base_prompt = self.system_prompt
+
+        if not EMBEDDED_PROMPTS_AVAILABLE or not self._embedded_prompt_cache:
+            return base_prompt
+
+        # Combine base prompt with embedded instructions
+        enhanced = f"""{base_prompt}
+
+---
+
+{self._embedded_prompt_cache}
+
+---
+
+## Current Task Context
+{task_context if task_context else "Awaiting task assignment."}
+"""
+        return enhanced
 
     @property
     @abstractmethod
@@ -389,24 +548,50 @@ class BaseAgent(ABC):
         self,
         prompt: str,
         context: Optional[dict] = None,
+        use_embedded_prompts: bool = True,
     ) -> tuple[str, float]:
         """
         Generate a response using the LLM backend.
+
+        Args:
+            prompt: The task/question to process
+            context: Optional context dictionary
+            use_embedded_prompts: Whether to include embedded prompt instructions
 
         Returns (response_text, confidence).
         """
         if self.llm_backend is None:
             raise RuntimeError("LLM backend not configured")
 
-        # Build full prompt with system prompt
-        full_prompt = f"{self.system_prompt}\n\n{prompt}"
-
-        # Include context if available
+        # Build context string if available
+        context_str = ""
         if context:
             context_str = "\n".join(f"{k}: {v}" for k, v in context.items())
-            full_prompt = f"{self.system_prompt}\n\nContext:\n{context_str}\n\nTask: {prompt}"
+
+        # Get system prompt (enhanced or basic based on flag)
+        if use_embedded_prompts and EMBEDDED_PROMPTS_AVAILABLE:
+            task_context = f"Context:\n{context_str}" if context_str else ""
+            system_prompt = self.get_enhanced_system_prompt(task_context)
+            full_prompt = f"{system_prompt}\n\nTask: {prompt}"
+        else:
+            # Basic prompt without embedded instructions
+            if context:
+                full_prompt = f"{self.system_prompt}\n\nContext:\n{context_str}\n\nTask: {prompt}"
+            else:
+                full_prompt = f"{self.system_prompt}\n\n{prompt}"
 
         result = await self.llm_backend.generate(full_prompt)
+
+        # Track prompt usage for evolution
+        if use_embedded_prompts and EMBEDDED_PROMPTS_AVAILABLE:
+            try:
+                prompt_manager.record_prompt_feedback(
+                    "agent_init_base",
+                    success=result.confidence_score > 0.5,
+                    feedback=f"confidence={result.confidence_score}"
+                )
+            except Exception:
+                pass  # Don't let tracking errors affect generation
 
         return result.text, result.confidence_score
 

@@ -48,10 +48,14 @@ OUTPUT_FPS = 30
 KEYFRAME_SEC = 3
 
 # Buffer settings for stability
-INITIAL_VIDEOS = 10          # Generate this many before starting stream
-QUEUE_REFILL_THRESHOLD = 8   # Generate more when queue drops below this
-STREAM_DELAY_SECONDS = 45    # Pre-buffer this much before streaming starts
+INITIAL_VIDEOS = 15          # Generate this many before starting stream (increased)
+QUEUE_REFILL_THRESHOLD = 10  # Generate more when queue drops below this
+STREAM_DELAY_SECONDS = 60    # Pre-buffer this much before streaming starts
 FFMPEG_BUFFER_SIZE = "28000k"  # Larger encoding buffer (2x default)
+MAX_CONCURRENT_TTS = 2       # Limit concurrent ElevenLabs calls (they allow 5 max)
+FFMPEG_HEALTH_CHECK_INTERVAL = 10  # Check FFmpeg health every N seconds
+MAX_RECONNECT_ATTEMPTS = 10  # Max RTMP reconnection attempts before giving up
+RECONNECT_BACKOFF_BASE = 5   # Base seconds for exponential backoff
 
 CACHE_DIR = Path("/workspace/Farnsworth/cache/did_pipe")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -186,14 +190,43 @@ class VideoGen:
             return None
 
     async def _tts(self, text):
-        async with self._session.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
-            json={"text": text, "model_id": "eleven_monolingual_v1",
-                  "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}},
-            headers={"Accept": "audio/mpeg", "Content-Type": "application/json",
-                     "xi-api-key": ELEVENLABS_API_KEY}
-        ) as r:
-            return await r.read() if r.status == 200 else None
+        """TTS with retry on rate limit errors."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with self._session.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+                    json={"text": text, "model_id": "eleven_monolingual_v1",
+                          "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}},
+                    headers={"Accept": "audio/mpeg", "Content-Type": "application/json",
+                             "xi-api-key": ELEVENLABS_API_KEY},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as r:
+                    if r.status == 200:
+                        return await r.read()
+                    elif r.status == 429:
+                        # Rate limited - back off and retry
+                        backoff = (attempt + 1) * 5
+                        logger.warning(f"[TTS] Rate limited (429), waiting {backoff}s...")
+                        await asyncio.sleep(backoff)
+                        continue
+                    elif r.status in (401, 402, 403):
+                        # Auth/credit issues - don't retry
+                        body = await r.text()
+                        logger.error(f"[TTS] Auth/credit error {r.status}: {body[:200]}")
+                        return None
+                    else:
+                        logger.warning(f"[TTS] Error {r.status}")
+                        return None
+            except asyncio.TimeoutError:
+                logger.warning(f"[TTS] Timeout on attempt {attempt + 1}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.warning(f"[TTS] Error: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+        return None
 
     async def _did_upload(self, data, n):
         form = aiohttp.FormData()
@@ -392,14 +425,18 @@ class Content:
 
 class PipeStreamer:
     """
-    TRUE persistent streaming via stdin pipe.
-    ONE FFmpeg runs forever, we pipe video data to it.
+    TRUE persistent streaming via stdin pipe with AUTO-RECONNECT.
 
     Buffer layers:
-    1. Video queue (10+ videos)
+    1. Video queue (15+ videos)
     2. FFmpeg input thread queue (1024 packets)
     3. FFmpeg encoding buffer (28MB)
-    4. Pre-stream delay (45 sec buffer before RTMP starts)
+    4. Pre-stream delay (60 sec buffer before RTMP starts)
+
+    Resilience features:
+    - Auto-reconnect on RTMP drop
+    - Health monitoring thread
+    - Exponential backoff on failures
     """
 
     def __init__(self):
@@ -407,15 +444,17 @@ class PipeStreamer:
         self._running = False
         self._ffmpeg = None
         self._feeder_thread = None
+        self._health_thread = None
         self._prebuffer_done = threading.Event()
         self._total_buffered_seconds = 0.0
+        self._reconnect_count = 0
+        self._ffmpeg_lock = threading.Lock()
+        self._needs_reconnect = threading.Event()
+        self._last_feed_time = time.time()
 
-    def start(self):
-        self._running = True
-
-        # Start FFmpeg reading from stdin (pipe)
-        # This process runs FOREVER
-        cmd = [
+    def _build_ffmpeg_cmd(self):
+        """Build FFmpeg command for RTMP streaming."""
+        return [
             "ffmpeg",
             # Input settings with large buffer
             "-thread_queue_size", "1024",  # Large input queue
@@ -444,28 +483,68 @@ class PipeStreamer:
             f"{RTMP_URL}/{STREAM_KEY}",
         ]
 
-        logger.info("[FFmpeg] Starting PERSISTENT stream (never restarts)...")
+    def _start_ffmpeg(self):
+        """Start or restart FFmpeg process."""
+        with self._ffmpeg_lock:
+            # Kill existing FFmpeg if any
+            if self._ffmpeg:
+                try:
+                    self._ffmpeg.stdin.close()
+                except:
+                    pass
+                try:
+                    self._ffmpeg.terminate()
+                    self._ffmpeg.wait(timeout=5)
+                except:
+                    try:
+                        self._ffmpeg.kill()
+                    except:
+                        pass
+
+            cmd = self._build_ffmpeg_cmd()
+            logger.info(f"[FFmpeg] Starting stream (attempt {self._reconnect_count + 1})...")
+
+            self._ffmpeg = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE
+            )
+            self._needs_reconnect.clear()
+            logger.info("[FFmpeg] Stream process started!")
+
+    def start(self):
+        self._running = True
+
+        logger.info("[FFmpeg] Starting RESILIENT stream with auto-reconnect...")
         logger.info(f"[FFmpeg] Buffer: {FFMPEG_BUFFER_SIZE}, Pre-buffer: {STREAM_DELAY_SECONDS}s")
 
-        self._ffmpeg = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
-        )
+        # Start FFmpeg
+        self._start_ffmpeg()
 
         # Start feeder thread
         self._feeder_thread = threading.Thread(target=self._feed_loop, daemon=True)
         self._feeder_thread.start()
 
-        logger.info("[FFmpeg] Persistent stream started!")
+        # Start health monitor thread
+        self._health_thread = threading.Thread(target=self._health_monitor, daemon=True)
+        self._health_thread.start()
+
+        logger.info("[FFmpeg] Resilient stream started with health monitoring!")
 
     def stop(self):
         self._running = False
-        if self._ffmpeg and self._ffmpeg.stdin:
-            self._ffmpeg.stdin.close()
-        if self._ffmpeg:
-            self._ffmpeg.terminate()
+        with self._ffmpeg_lock:
+            if self._ffmpeg and self._ffmpeg.stdin:
+                try:
+                    self._ffmpeg.stdin.close()
+                except:
+                    pass
+            if self._ffmpeg:
+                try:
+                    self._ffmpeg.terminate()
+                except:
+                    pass
 
     def add_video(self, path: str, duration: float):
         self.video_queue.put((path, duration))
@@ -474,20 +553,93 @@ class PipeStreamer:
         """Get total seconds of video buffered ahead of stream."""
         return self._total_buffered_seconds
 
+    def _health_monitor(self):
+        """Monitor FFmpeg health and trigger reconnect if needed."""
+        while self._running:
+            try:
+                time.sleep(FFMPEG_HEALTH_CHECK_INTERVAL)
+
+                if not self._running:
+                    break
+
+                with self._ffmpeg_lock:
+                    if self._ffmpeg is None:
+                        logger.warning("[Health] FFmpeg is None, triggering reconnect")
+                        self._needs_reconnect.set()
+                        continue
+
+                    # Check if FFmpeg process is still alive
+                    poll = self._ffmpeg.poll()
+                    if poll is not None:
+                        # Process died - read stderr for reason
+                        stderr_output = ""
+                        try:
+                            stderr_output = self._ffmpeg.stderr.read().decode()[-500:]
+                        except:
+                            pass
+                        logger.error(f"[Health] FFmpeg died (exit code {poll}): {stderr_output}")
+                        self._needs_reconnect.set()
+                        continue
+
+                    # Check if we're still feeding (no feed for 30s = problem)
+                    if time.time() - self._last_feed_time > 30:
+                        logger.warning("[Health] No video fed for 30s, checking queue...")
+
+            except Exception as e:
+                logger.error(f"[Health] Monitor error: {e}")
+
+    def _attempt_reconnect(self):
+        """Attempt to reconnect with exponential backoff."""
+        if self._reconnect_count >= MAX_RECONNECT_ATTEMPTS:
+            logger.error(f"[Reconnect] Max attempts ({MAX_RECONNECT_ATTEMPTS}) reached, giving up")
+            self._running = False
+            return False
+
+        self._reconnect_count += 1
+        backoff = RECONNECT_BACKOFF_BASE * (2 ** (self._reconnect_count - 1))
+        backoff = min(backoff, 60)  # Cap at 60 seconds
+
+        logger.warning(f"[Reconnect] Attempt {self._reconnect_count}/{MAX_RECONNECT_ATTEMPTS}, waiting {backoff}s...")
+        time.sleep(backoff)
+
+        try:
+            self._start_ffmpeg()
+            logger.info(f"[Reconnect] SUCCESS! Stream reconnected.")
+            # Reset counter on success after some time
+            return True
+        except Exception as e:
+            logger.error(f"[Reconnect] Failed: {e}")
+            return False
+
     def _feed_loop(self):
         """
         Feed video files to FFmpeg's stdin as MPEG-TS stream.
         Each video is converted to MPEG-TS and piped.
 
         Pre-buffers STREAM_DELAY_SECONDS before allowing realtime playback.
+        Auto-reconnects on pipe failures.
         """
-        prebuffer_logged = False
+        current_video = None  # Track current video for retry on reconnect
 
         while self._running:
             try:
+                # Check if reconnect is needed
+                if self._needs_reconnect.is_set():
+                    logger.warning("[Feeder] Reconnect flag set, attempting reconnect...")
+                    if not self._attempt_reconnect():
+                        continue
+                    # After reconnect, we need to re-feed current video if any
+                    if current_video:
+                        path, duration = current_video
+                        if os.path.exists(path):
+                            logger.info(f"[Feeder] Re-feeding video after reconnect...")
+                            self._pipe_video(path)
+                        current_video = None
+
                 # Get next video
                 try:
                     path, duration = self.video_queue.get(timeout=5)
+                    current_video = (path, duration)
                 except queue.Empty:
                     logger.warning("[Feeder] Queue empty, waiting...")
                     continue
@@ -505,16 +657,27 @@ class PipeStreamer:
                 logger.info(f"[Feeder] Feeding video ({duration:.1f}s), queue: {self.video_queue.qsize()}, buffer: {self._total_buffered_seconds:.0f}s")
 
                 # Convert video to MPEG-TS and pipe to FFmpeg
-                self._pipe_video(path)
+                success = self._pipe_video(path)
 
-                # Video has been sent, reduce buffer tracking (it's now in FFmpeg's hands)
-                self._total_buffered_seconds = max(0, self._total_buffered_seconds - duration)
+                if success:
+                    # Video has been sent, reduce buffer tracking
+                    self._total_buffered_seconds = max(0, self._total_buffered_seconds - duration)
+                    self._last_feed_time = time.time()
+                    current_video = None  # Clear current video on success
 
-                # Clean up
-                try:
-                    os.remove(path)
-                except:
-                    pass
+                    # Clean up
+                    try:
+                        os.remove(path)
+                    except:
+                        pass
+
+                    # Reset reconnect counter after sustained success
+                    if self._reconnect_count > 0 and time.time() - self._last_feed_time < 60:
+                        self._reconnect_count = max(0, self._reconnect_count - 1)
+                else:
+                    # Pipe failed, trigger reconnect but keep video for retry
+                    logger.warning("[Feeder] Pipe failed, will retry after reconnect")
+                    self._needs_reconnect.set()
 
             except Exception as e:
                 logger.error(f"[Feeder] Error: {e}")
@@ -522,14 +685,25 @@ class PipeStreamer:
                     break
                 time.sleep(1)
 
-    def _pipe_video(self, video_path: str):
+    def _pipe_video(self, video_path: str) -> bool:
         """
         Convert a video file to MPEG-TS and write to FFmpeg's stdin.
         This is done in realtime (-re flag on the reader).
+
+        Returns True on success, False if pipe broke (needs reconnect).
+        Includes timeout to prevent infinite hangs.
         """
-        if not self._ffmpeg or not self._ffmpeg.stdin:
-            logger.error("[Feeder] FFmpeg not running!")
-            return
+        import select
+
+        with self._ffmpeg_lock:
+            if not self._ffmpeg or not self._ffmpeg.stdin:
+                logger.error("[Feeder] FFmpeg not running!")
+                return False
+
+            # Check if FFmpeg is still alive
+            if self._ffmpeg.poll() is not None:
+                logger.error("[Feeder] FFmpeg process is dead!")
+                return False
 
         # Use FFmpeg to convert the video to MPEG-TS and output to stdout
         # We then read that and write to main FFmpeg's stdin
@@ -545,6 +719,10 @@ class PipeStreamer:
             "pipe:1"  # Output to stdout
         ]
 
+        reader = None
+        start_time = time.time()
+        max_duration = 120  # Max 2 minutes per video (way more than needed)
+
         try:
             reader = subprocess.Popen(
                 read_cmd,
@@ -552,23 +730,76 @@ class PipeStreamer:
                 stderr=subprocess.DEVNULL
             )
 
-            # Read from reader and write to main FFmpeg
+            # Read from reader and write to main FFmpeg with timeout
             while True:
-                chunk = reader.stdout.read(65536)  # 64KB chunks
-                if not chunk:
-                    break
-                try:
-                    self._ffmpeg.stdin.write(chunk)
-                    self._ffmpeg.stdin.flush()
-                except BrokenPipeError:
-                    logger.error("[Feeder] FFmpeg pipe broken!")
-                    self._running = False
+                # Check for timeout
+                if time.time() - start_time > max_duration:
+                    logger.error(f"[Feeder] Pipe timeout after {max_duration}s - will reconnect")
+                    return False
+
+                # Check if reader is still alive
+                if reader.poll() is not None:
+                    # Reader finished, drain remaining output
+                    remaining = reader.stdout.read()
+                    if remaining:
+                        try:
+                            with self._ffmpeg_lock:
+                                if self._ffmpeg and self._ffmpeg.stdin:
+                                    self._ffmpeg.stdin.write(remaining)
+                                    self._ffmpeg.stdin.flush()
+                        except:
+                            pass
                     break
 
-            reader.wait()
+                # Non-blocking read with timeout using select (Unix) or poll
+                try:
+                    import selectors
+                    sel = selectors.DefaultSelector()
+                    sel.register(reader.stdout, selectors.EVENT_READ)
+                    events = sel.select(timeout=5)  # 5 second timeout per chunk
+                    sel.close()
+
+                    if not events:
+                        # No data ready, check if process died
+                        if reader.poll() is not None:
+                            break
+                        continue
+
+                    chunk = reader.stdout.read(65536)  # 64KB chunks
+                except:
+                    # Fallback to blocking read
+                    chunk = reader.stdout.read(65536)
+
+                if not chunk:
+                    break
+
+                try:
+                    with self._ffmpeg_lock:
+                        if not self._ffmpeg or not self._ffmpeg.stdin:
+                            logger.error("[Feeder] FFmpeg disappeared during pipe!")
+                            return False
+                        self._ffmpeg.stdin.write(chunk)
+                        self._ffmpeg.stdin.flush()
+                except BrokenPipeError:
+                    logger.error("[Feeder] FFmpeg pipe broken - will reconnect")
+                    return False
+                except OSError as e:
+                    logger.error(f"[Feeder] Pipe OS error: {e} - will reconnect")
+                    return False
+
+            reader.wait(timeout=5)
+            return True
 
         except Exception as e:
             logger.error(f"[Feeder] Pipe error: {e}")
+            return False
+        finally:
+            if reader:
+                try:
+                    reader.kill()
+                    reader.wait(timeout=1)
+                except:
+                    pass
 
 
 async def main():
@@ -600,16 +831,18 @@ async def main():
     for _ in range(INITIAL_VIDEOS - 1):
         texts.append(await content.full_segment())
 
-    # Generate in batches of 4 to avoid overwhelming APIs
+    # Generate in batches of MAX_CONCURRENT_TTS to avoid rate limits
     all_segments = []
-    for i in range(0, len(texts), 4):
-        batch = texts[i:i+4]
-        logger.info(f"Generating batch {i//4 + 1}/{(len(texts)+3)//4}...")
+    batch_size = MAX_CONCURRENT_TTS
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i+batch_size]
+        logger.info(f"Generating batch {i//batch_size + 1}/{(len(texts)+batch_size-1)//batch_size}...")
         tasks = [gen.generate(t) for t in batch]
-        segments = [s for s in await asyncio.gather(*tasks) if s]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        segments = [s for s in results if s and not isinstance(s, Exception)]
         all_segments.extend(segments)
-        if i + 4 < len(texts):
-            await asyncio.sleep(2)  # Small delay between batches
+        if i + batch_size < len(texts):
+            await asyncio.sleep(3)  # Delay between batches to avoid rate limits
 
     if not all_segments:
         logger.error("No initial segments")
@@ -635,33 +868,53 @@ async def main():
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
 
+    consecutive_failures = 0
+    max_consecutive_failures = 5
+
     while running:
         try:
             qsize = streamer.video_queue.qsize()
             buffer_sec = streamer.get_buffered_seconds()
-            logger.info(f"Queue: {qsize} videos, Buffer: {buffer_sec:.0f}s ahead")
+            logger.info(f"Queue: {qsize} videos, Buffer: {buffer_sec:.0f}s ahead, Reconnects: {streamer._reconnect_count}")
 
-            # Refill when below threshold (higher threshold for stability)
+            # Refill when below threshold
             if qsize < QUEUE_REFILL_THRESHOLD:
-                # Generate 3 videos at a time for faster refill
-                new_texts = [
-                    await content.full_segment(),
-                    await content.full_segment(),
-                    await content.full_segment(),
-                ]
+                # Generate MAX_CONCURRENT_TTS videos at a time (avoid rate limits)
+                new_texts = []
+                for _ in range(MAX_CONCURRENT_TTS):
+                    new_texts.append(await content.full_segment())
+
                 tasks = [gen.generate(t) for t in new_texts]
-                new_segs = [s for s in await asyncio.gather(*tasks) if s]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                new_segs = []
+                for r in results:
+                    if isinstance(r, Exception):
+                        logger.warning(f"Video gen failed: {r}")
+                    elif r is not None:
+                        new_segs.append(r)
 
                 for seg in new_segs:
                     streamer.add_video(seg.path, seg.duration)
 
                 if new_segs:
                     logger.info(f"Added {len(new_segs)} videos to queue")
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    logger.warning(f"No videos generated ({consecutive_failures}/{max_consecutive_failures})")
+
+                    if consecutive_failures >= max_consecutive_failures:
+                        # Backoff on repeated failures (API issues)
+                        backoff = min(30, 5 * consecutive_failures)
+                        logger.warning(f"Too many failures, backing off {backoff}s...")
+                        await asyncio.sleep(backoff)
 
             await asyncio.sleep(5)
 
         except Exception as e:
             logger.error(f"Error: {e}")
+            consecutive_failures += 1
             await asyncio.sleep(5)
 
     await gen.close()
