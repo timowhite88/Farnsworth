@@ -9,15 +9,106 @@ UPDATES:
 - Added Middleware pipeline support
 - Added Priority Queues (via urgency sort)
 - Added 'Signal Black Box' for debugging
+
+AGI UPGRADES (v1.4):
+- Priority queue with urgency-based ordering
+- Semantic/vector-based subscription (neural routing)
+- Self-evolving middleware (dynamic subscriber modification)
+- Spontaneous thought generator (idle creativity)
+- Signal persistence and collective memory recall
+- Backpressure handling and rate limiting
 """
 
 import asyncio
+import random
+import math
 import uuid
+import json
 from enum import Enum
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Callable, Any, Optional, Awaitable
+from datetime import datetime, timedelta
+from typing import Dict, List, Callable, Any, Optional, Awaitable, Tuple, Set
 from loguru import logger
+
+
+# =============================================================================
+# NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)
+# =============================================================================
+
+@dataclass
+class SemanticSubscription:
+    """
+    A subscription based on semantic similarity rather than exact SignalType.
+
+    Enables emergent routing where signals find handlers based on
+    context_vector similarity, not hardcoded types.
+    """
+    subscription_id: str
+    handler: Callable[["Signal"], Awaitable[None]]
+    target_vector: List[float]  # The semantic space this handler is interested in
+    similarity_threshold: float = 0.85  # Minimum cosine similarity to trigger
+    signal_types: Optional[Set[SignalType]] = None  # Optional type filter
+
+    # Performance tracking for evolution
+    invocations: int = 0
+    successful_invocations: int = 0
+    avg_processing_time: float = 0.0
+    fitness_score: float = 0.5  # Used by evolution middleware
+
+    created_at: datetime = field(default_factory=datetime.now)
+    last_invoked: Optional[datetime] = None
+
+
+@dataclass
+class SubscriptionFitness:
+    """Tracks fitness of subscriptions for evolutionary optimization."""
+    subscription_id: str
+    signal_type: Optional[SignalType]
+    handler_name: str
+
+    # Fitness metrics
+    invocation_count: int = 0
+    success_rate: float = 1.0
+    avg_latency_ms: float = 0.0
+    relevance_score: float = 0.5  # How relevant were handled signals
+
+    # Evolution state
+    fitness: float = 0.5
+    generation: int = 0
+    mutations: List[str] = field(default_factory=list)
+
+
+@dataclass
+class SignalBatch:
+    """A batch of signals for efficient processing."""
+    signals: List["Signal"]
+    created_at: datetime = field(default_factory=datetime.now)
+    priority: float = 0.5  # Average urgency
+
+
+@dataclass
+class BackpressureState:
+    """Tracks backpressure for rate limiting."""
+    queue_depth: int = 0
+    max_queue_depth: int = 1000
+    signals_per_second: float = 0.0
+    max_signals_per_second: float = 100.0
+    is_throttling: bool = False
+    dropped_signals: int = 0
+    last_measured: datetime = field(default_factory=datetime.now)
+    recent_counts: List[int] = field(default_factory=list)  # Per-second counts
+
+
+@dataclass
+class SpontaneousThoughtConfig:
+    """Configuration for spontaneous thought generation."""
+    enabled: bool = True
+    min_idle_seconds: float = 30.0  # Minimum idle time before thinking
+    max_idle_seconds: float = 180.0  # Maximum wait between thoughts
+    creativity_temperature: float = 0.7  # 0=analytical, 1=highly creative
+    thought_probability: float = 0.3  # Chance of generating thought when triggered
+    focus_concepts: List[str] = field(default_factory=list)
+    context_vector: Optional[List[float]] = None
 
 class SignalType(Enum):
     # Core Lifecycle
@@ -80,45 +171,356 @@ class Signal:
     semantic_tags: List[str] = field(default_factory=list)
 
 MiddlewareFunc = Callable[[Signal], bool] # Returns True to continue, False to block
+EvolutionMiddlewareFunc = Callable[[Signal, "Nexus"], bool]  # Can modify Nexus
+
 
 class Nexus:
     """
     The central event bus with Neural Routing and Middleware.
+
+    AGI UPGRADES:
+    - Priority queue for urgency-based processing
+    - Semantic subscription for vector-based routing
+    - Self-evolving middleware that modifies handler graphs
+    - Spontaneous thought generation during idle periods
+    - Signal persistence for collective memory
+    - Backpressure handling for stability
     """
     _instance = None
-    
+
     def __init__(self):
+        # Core subscription registry
         self._subscribers: Dict[SignalType, List[Callable[[Signal], Awaitable[None]]]] = {}
         self._history: List[Signal] = []  # Black Box
         self._middleware: List[MiddlewareFunc] = []
         self._lock = asyncio.Lock()
-        
+
+        # AGI Upgrades
+        self._priority_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._semantic_subscriptions: List[SemanticSubscription] = []
+        self._subscription_fitness: Dict[str, SubscriptionFitness] = {}
+        self._evolution_middleware: List[EvolutionMiddlewareFunc] = []
+        self._backpressure = BackpressureState()
+
+        # Spontaneous thought system
+        self._thought_config = SpontaneousThoughtConfig()
+        self._thought_generator_task: Optional[asyncio.Task] = None
+        self._last_activity: datetime = datetime.now()
+        self._thought_llm_fn: Optional[Callable] = None
+
+        # Signal persistence
+        self._persistent_history: List[Dict] = []  # Serializable history
+        self._max_persistent_history: int = 10000
+        self._archival_callback: Optional[Callable] = None
+
+        # Processing worker
+        self._worker_task: Optional[asyncio.Task] = None
+        self._is_running: bool = False
+
+        # Evolution tracking
+        self._evolution_generation: int = 0
+        self._evolution_history: List[Dict] = []
+
+        logger.info("Nexus initialized with AGI upgrades")
+
     @classmethod
     def get_instance(cls):
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
-    def subscribe(self, signal_type: SignalType, handler: Callable[[Signal], Awaitable[None]]):
+    # =========================================================================
+    # CORE SUBSCRIPTION (Original + Enhanced)
+    # =========================================================================
+
+    def subscribe(
+        self,
+        signal_type: SignalType,
+        handler: Callable[[Signal], Awaitable[None]],
+        track_fitness: bool = True,
+    ):
         """Connect a synapse (handler) to a specific signal type."""
         if signal_type not in self._subscribers:
             self._subscribers[signal_type] = []
         self._subscribers[signal_type].append(handler)
 
+        # Track fitness for evolution
+        if track_fitness:
+            handler_name = getattr(handler, '__name__', str(handler))
+            fitness_id = f"{signal_type.value}:{handler_name}"
+            self._subscription_fitness[fitness_id] = SubscriptionFitness(
+                subscription_id=fitness_id,
+                signal_type=signal_type,
+                handler_name=handler_name,
+            )
+
+    def unsubscribe(self, signal_type: SignalType, handler: Callable):
+        """Remove a handler from a signal type."""
+        if signal_type in self._subscribers:
+            try:
+                self._subscribers[signal_type].remove(handler)
+            except ValueError:
+                pass
+
+    # =========================================================================
+    # SEMANTIC SUBSCRIPTION (AGI Upgrade)
+    # =========================================================================
+
+    def subscribe_semantic(
+        self,
+        handler: Callable[[Signal], Awaitable[None]],
+        target_vector: List[float],
+        similarity_threshold: float = 0.85,
+        signal_types: Optional[Set[SignalType]] = None,
+    ) -> str:
+        """
+        Subscribe based on semantic similarity of context_vector.
+
+        Enables emergent routing where signals find handlers based on
+        meaning, not just hardcoded types.
+
+        Args:
+            handler: Async function to call when similarity threshold met
+            target_vector: The semantic space this handler is interested in
+            similarity_threshold: Minimum cosine similarity to trigger (0-1)
+            signal_types: Optional filter to specific signal types
+
+        Returns:
+            subscription_id for later unsubscription
+        """
+        subscription_id = f"semantic_{uuid.uuid4().hex[:8]}"
+
+        subscription = SemanticSubscription(
+            subscription_id=subscription_id,
+            handler=handler,
+            target_vector=target_vector,
+            similarity_threshold=similarity_threshold,
+            signal_types=signal_types,
+        )
+
+        self._semantic_subscriptions.append(subscription)
+        logger.debug(f"Nexus: Added semantic subscription {subscription_id}")
+
+        return subscription_id
+
+    def unsubscribe_semantic(self, subscription_id: str) -> bool:
+        """Remove a semantic subscription."""
+        for i, sub in enumerate(self._semantic_subscriptions):
+            if sub.subscription_id == subscription_id:
+                self._semantic_subscriptions.pop(i)
+                return True
+        return False
+
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        if not vec1 or not vec2 or len(vec1) != len(vec2):
+            return 0.0
+
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        norm1 = math.sqrt(sum(a * a for a in vec1))
+        norm2 = math.sqrt(sum(b * b for b in vec2))
+
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+
+        return dot_product / (norm1 * norm2)
+
+    async def _dispatch_semantic(self, signal: Signal) -> int:
+        """
+        Dispatch signal to semantic subscribers based on context_vector similarity.
+
+        Returns number of handlers invoked.
+        """
+        if not signal.context_vector or not self._semantic_subscriptions:
+            return 0
+
+        invoked = 0
+        tasks = []
+
+        for sub in self._semantic_subscriptions:
+            # Optional type filter
+            if sub.signal_types and signal.type not in sub.signal_types:
+                continue
+
+            # Compute similarity
+            similarity = self._cosine_similarity(signal.context_vector, sub.target_vector)
+
+            if similarity >= sub.similarity_threshold:
+                # Track for evolution
+                sub.invocations += 1
+                sub.last_invoked = datetime.now()
+
+                async def invoke_with_tracking(handler, subscription, sig):
+                    import time
+                    start = time.time()
+                    try:
+                        await handler(sig)
+                        subscription.successful_invocations += 1
+                        latency = (time.time() - start) * 1000
+                        # Update rolling average
+                        n = subscription.invocations
+                        subscription.avg_processing_time = (
+                            (subscription.avg_processing_time * (n - 1) + latency) / n
+                        )
+                    except Exception as e:
+                        logger.error(f"Nexus: Semantic handler error: {e}")
+
+                tasks.append(invoke_with_tracking(sub.handler, sub, signal))
+                invoked += 1
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        return invoked
+
+    # =========================================================================
+    # MIDDLEWARE (Original + Evolution)
+    # =========================================================================
+
     def add_middleware(self, func: MiddlewareFunc):
         """Add a middleware function that runs on every signal."""
         self._middleware.append(func)
 
+    def add_evolution_middleware(self, func: EvolutionMiddlewareFunc):
+        """Add middleware that can modify the Nexus (self-evolving)."""
+        self._evolution_middleware.append(func)
+
+    def remove_middleware(self, func: MiddlewareFunc) -> bool:
+        """Remove a middleware function."""
+        try:
+            self._middleware.remove(func)
+            return True
+        except ValueError:
+            return False
+
+    # =========================================================================
+    # PRIORITY QUEUE PROCESSING (AGI Upgrade)
+    # =========================================================================
+
+    async def start(self):
+        """Start the priority queue worker and spontaneous thought generator."""
+        if self._is_running:
+            return
+
+        self._is_running = True
+        self._worker_task = asyncio.create_task(self._process_queue())
+
+        if self._thought_config.enabled:
+            self._thought_generator_task = asyncio.create_task(self._spontaneous_thought_loop())
+
+        logger.info("Nexus started (priority queue + thought generator)")
+
+    async def stop(self):
+        """Stop the Nexus processing."""
+        self._is_running = False
+
+        if self._worker_task:
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._thought_generator_task:
+            self._thought_generator_task.cancel()
+            try:
+                await self._thought_generator_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info("Nexus stopped")
+
+    async def _process_queue(self):
+        """Worker task that processes signals by priority."""
+        while self._is_running:
+            try:
+                # Get highest priority signal (negative urgency for max-heap behavior)
+                neg_urgency, timestamp, signal = await asyncio.wait_for(
+                    self._priority_queue.get(),
+                    timeout=1.0,
+                )
+
+                # Update backpressure
+                self._backpressure.queue_depth = self._priority_queue.qsize()
+
+                # Dispatch to handlers
+                await self._dispatch_signal(signal)
+
+                self._priority_queue.task_done()
+
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Nexus: Queue processing error: {e}")
+
+    async def _dispatch_signal(self, signal: Signal):
+        """Dispatch signal to all relevant handlers."""
+        import time
+        start_time = time.time()
+
+        # 1. Type-based handlers
+        handlers = self._subscribers.get(signal.type, [])
+        if handlers:
+            results = await asyncio.gather(
+                *[h(signal) for h in handlers],
+                return_exceptions=True
+            )
+
+            # Track fitness
+            for i, result in enumerate(results):
+                handler = handlers[i]
+                handler_name = getattr(handler, '__name__', str(handler))
+                fitness_id = f"{signal.type.value}:{handler_name}"
+
+                if fitness_id in self._subscription_fitness:
+                    fitness = self._subscription_fitness[fitness_id]
+                    fitness.invocation_count += 1
+                    latency = (time.time() - start_time) * 1000
+                    n = fitness.invocation_count
+                    fitness.avg_latency_ms = (fitness.avg_latency_ms * (n - 1) + latency) / n
+
+                    if isinstance(result, Exception):
+                        fitness.success_rate = (
+                            (fitness.success_rate * (n - 1)) / n
+                        )
+                    else:
+                        fitness.success_rate = (
+                            (fitness.success_rate * (n - 1) + 1) / n
+                        )
+
+        # 2. Semantic handlers (context_vector based)
+        await self._dispatch_semantic(signal)
+
     async def broadcast(self, signal: Signal):
         """
         Propagate a signal through the Nexus with priority and safety checks.
+
+        If priority queue is running, enqueues for ordered processing.
+        Otherwise processes immediately (backwards compatible).
         """
+        self._last_activity = datetime.now()
+
         # 1. Store in Black Box (Circular Buffer)
         self._history.append(signal)
         if len(self._history) > 1000:
             self._history.pop(0)
 
-        # 2. Run Middleware (Logging, Safety, Filtering)
+        # Store in persistent history (serializable)
+        self._store_persistent(signal)
+
+        # 2. Backpressure check
+        if self._backpressure.queue_depth >= self._backpressure.max_queue_depth:
+            self._backpressure.is_throttling = True
+            if signal.urgency < 0.7:  # Only drop low-urgency signals
+                self._backpressure.dropped_signals += 1
+                logger.warning(f"Nexus: Dropped low-priority signal due to backpressure")
+                return
+        else:
+            self._backpressure.is_throttling = False
+
+        # 3. Run Middleware (Logging, Safety, Filtering)
         for mw in self._middleware:
             try:
                 if not mw(signal):
@@ -128,26 +530,52 @@ class Nexus:
                 logger.error(f"Nexus: Middleware error: {e}")
                 return
 
-        # 3. Neural Routing
-        handlers = self._subscribers.get(signal.type, [])
-        if not handlers:
-            return
+        # 4. Run Evolution Middleware (can modify Nexus)
+        for em in self._evolution_middleware:
+            try:
+                if not em(signal, self):
+                    logger.debug(f"Nexus: Signal blocked by evolution middleware")
+                    return
+            except Exception as e:
+                logger.error(f"Nexus: Evolution middleware error: {e}")
 
-        # 4. Asynchronous Propagation
-        # Note: In a threaded environment, we might use a PriorityQueue here.
-        # For asyncio, we just spawn tasks.
-        try:
-            await asyncio.gather(*[h(signal) for h in handlers], return_exceptions=True)
-        except Exception as e:
-            logger.error(f"Nexus: Critical propagation failure: {e}")
+        # 5. Priority Queue or Immediate Processing
+        if self._is_running and self._worker_task:
+            # Enqueue with priority (negative urgency for max-heap)
+            await self._priority_queue.put((
+                -signal.urgency,
+                signal.timestamp.timestamp(),
+                signal,
+            ))
+        else:
+            # Immediate processing (backwards compatible)
+            handlers = self._subscribers.get(signal.type, [])
+            if handlers:
+                try:
+                    await asyncio.gather(*[h(signal) for h in handlers], return_exceptions=True)
+                except Exception as e:
+                    logger.error(f"Nexus: Critical propagation failure: {e}")
 
-    async def emit(self, type: SignalType, payload: Dict[str, Any], source: str, urgency: float = 0.5):
+            # Also dispatch to semantic handlers
+            await self._dispatch_semantic(signal)
+
+    async def emit(
+        self,
+        type: SignalType,
+        payload: Dict[str, Any],
+        source: str,
+        urgency: float = 0.5,
+        context_vector: Optional[List[float]] = None,
+        semantic_tags: Optional[List[str]] = None,
+    ):
         """Helper to create and broadcast a signal."""
         signal = Signal(
             type=type,
             payload=payload,
             source_id=source,
-            urgency=urgency
+            urgency=urgency,
+            context_vector=context_vector,
+            semantic_tags=semantic_tags or [],
         )
         await self.broadcast(signal)
 
@@ -155,15 +583,502 @@ class Nexus:
         """Retrieve recent signals for debugging/introspection."""
         return self._history[-last_n:]
 
+    # =========================================================================
+    # SPONTANEOUS THOUGHT GENERATOR (AGI Upgrade)
+    # =========================================================================
+
+    def configure_spontaneous_thoughts(
+        self,
+        enabled: bool = True,
+        min_idle_seconds: float = 30.0,
+        max_idle_seconds: float = 180.0,
+        creativity_temperature: float = 0.7,
+        thought_probability: float = 0.3,
+        llm_fn: Optional[Callable] = None,
+    ):
+        """Configure the spontaneous thought generator."""
+        self._thought_config.enabled = enabled
+        self._thought_config.min_idle_seconds = min_idle_seconds
+        self._thought_config.max_idle_seconds = max_idle_seconds
+        self._thought_config.creativity_temperature = creativity_temperature
+        self._thought_config.thought_probability = thought_probability
+        self._thought_llm_fn = llm_fn
+
+    async def _spontaneous_thought_loop(self):
+        """Background task that generates thoughts during idle periods."""
+        while self._is_running:
+            try:
+                # Random wait based on config
+                wait_time = random.uniform(
+                    self._thought_config.min_idle_seconds,
+                    self._thought_config.max_idle_seconds,
+                )
+                await asyncio.sleep(wait_time)
+
+                if not self._thought_config.enabled:
+                    continue
+
+                # Check if system has been idle
+                idle_duration = (datetime.now() - self._last_activity).total_seconds()
+                if idle_duration < self._thought_config.min_idle_seconds:
+                    continue
+
+                # Probabilistic thought generation
+                if random.random() > self._thought_config.thought_probability:
+                    continue
+
+                # Generate thought
+                thought = await self._generate_spontaneous_thought()
+                if thought:
+                    await self.emit(
+                        type=SignalType.THOUGHT_EMITTED,
+                        payload=thought,
+                        source="spontaneous_cognition",
+                        urgency=0.3,  # Low urgency for spontaneous thoughts
+                        context_vector=self._thought_config.context_vector,
+                    )
+                    logger.debug(f"Nexus: Spontaneous thought emitted")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Nexus: Spontaneous thought error: {e}")
+
+    async def _generate_spontaneous_thought(self) -> Optional[Dict]:
+        """Generate a spontaneous thought using LLM or heuristics."""
+        # Gather recent context from history
+        recent_signals = self._history[-20:]
+        recent_types = [s.type.value for s in recent_signals]
+        recent_sources = list(set(s.source_id for s in recent_signals))
+
+        if self._thought_llm_fn:
+            try:
+                prompt = f"""You are an AI system in "mind-wandering" mode - a creative thinking state.
+
+RECENT ACTIVITY:
+- Signal types: {recent_types[-5:]}
+- Active sources: {recent_sources[-5:]}
+- Creativity level: {self._thought_config.creativity_temperature:.1f}
+
+Generate ONE spontaneous thought. This could be:
+- A creative connection between recent activities
+- A question about the system state
+- An insight about patterns observed
+- A novel idea for improvement
+
+Return JSON:
+{{"thought_type": "connection|question|insight|idea", "content": "your thought", "relevance": 0.0-1.0}}
+
+Return ONLY the JSON:"""
+
+                if asyncio.iscoroutinefunction(self._thought_llm_fn):
+                    response = await self._thought_llm_fn(prompt)
+                else:
+                    response = self._thought_llm_fn(prompt)
+
+                # Parse JSON
+                start = response.find('{')
+                end = response.rfind('}') + 1
+                if start >= 0 and end > start:
+                    return json.loads(response[start:end])
+
+            except Exception as e:
+                logger.debug(f"LLM thought generation failed: {e}")
+
+        # Heuristic fallback
+        thought_templates = [
+            {"thought_type": "connection", "content": f"Pattern observed: {random.choice(recent_types) if recent_types else 'idle'} activity correlates with system state"},
+            {"thought_type": "question", "content": "What if we optimized the signal routing based on recent patterns?"},
+            {"thought_type": "insight", "content": f"The {random.choice(recent_sources) if recent_sources else 'system'} component shows interesting behavior"},
+            {"thought_type": "idea", "content": "Consider pre-caching frequently accessed context vectors"},
+        ]
+
+        thought = random.choice(thought_templates)
+        thought["relevance"] = random.uniform(0.3, 0.7)
+        return thought
+
+    # =========================================================================
+    # SIGNAL PERSISTENCE AND RECALL (AGI Upgrade)
+    # =========================================================================
+
+    def _store_persistent(self, signal: Signal):
+        """Store signal in persistent history (serializable format)."""
+        serialized = {
+            "id": signal.id,
+            "type": signal.type.value,
+            "payload": signal.payload,
+            "source_id": signal.source_id,
+            "timestamp": signal.timestamp.isoformat(),
+            "urgency": signal.urgency,
+            "semantic_tags": signal.semantic_tags,
+            "has_context_vector": signal.context_vector is not None,
+        }
+
+        self._persistent_history.append(serialized)
+
+        # Maintain max size
+        if len(self._persistent_history) > self._max_persistent_history:
+            # Archive old signals if callback set
+            if self._archival_callback:
+                to_archive = self._persistent_history[:1000]
+                asyncio.create_task(self._archive_signals(to_archive))
+            self._persistent_history = self._persistent_history[-self._max_persistent_history:]
+
+    async def _archive_signals(self, signals: List[Dict]):
+        """Archive old signals to persistent storage."""
+        if self._archival_callback:
+            try:
+                if asyncio.iscoroutinefunction(self._archival_callback):
+                    await self._archival_callback(signals)
+                else:
+                    self._archival_callback(signals)
+            except Exception as e:
+                logger.error(f"Nexus: Signal archival failed: {e}")
+
+    def set_archival_callback(self, callback: Callable[[List[Dict]], None]):
+        """Set callback for archiving old signals to persistent storage."""
+        self._archival_callback = callback
+
+    def query_history(
+        self,
+        signal_type: Optional[SignalType] = None,
+        source_id: Optional[str] = None,
+        since: Optional[datetime] = None,
+        limit: int = 100,
+    ) -> List[Dict]:
+        """
+        Query persistent signal history.
+
+        Args:
+            signal_type: Filter by signal type
+            source_id: Filter by source
+            since: Filter by timestamp
+            limit: Maximum results
+
+        Returns:
+            List of serialized signals matching criteria
+        """
+        results = []
+
+        for sig in reversed(self._persistent_history):
+            if len(results) >= limit:
+                break
+
+            if signal_type and sig["type"] != signal_type.value:
+                continue
+
+            if source_id and sig["source_id"] != source_id:
+                continue
+
+            if since:
+                sig_time = datetime.fromisoformat(sig["timestamp"])
+                if sig_time < since:
+                    continue
+
+            results.append(sig)
+
+        return results
+
+    def get_signal_patterns(
+        self,
+        window_seconds: float = 300.0,
+    ) -> Dict:
+        """
+        Analyze recent signal patterns for emergence detection.
+
+        Returns:
+            Dict with pattern statistics
+        """
+        cutoff = datetime.now() - timedelta(seconds=window_seconds)
+
+        type_counts: Dict[str, int] = {}
+        source_counts: Dict[str, int] = {}
+        urgency_sum = 0.0
+        count = 0
+
+        for sig in self._persistent_history:
+            sig_time = datetime.fromisoformat(sig["timestamp"])
+            if sig_time < cutoff:
+                continue
+
+            type_counts[sig["type"]] = type_counts.get(sig["type"], 0) + 1
+            source_counts[sig["source_id"]] = source_counts.get(sig["source_id"], 0) + 1
+            urgency_sum += sig["urgency"]
+            count += 1
+
+        return {
+            "total_signals": count,
+            "signals_per_second": count / window_seconds if window_seconds > 0 else 0,
+            "avg_urgency": urgency_sum / count if count > 0 else 0.5,
+            "type_distribution": type_counts,
+            "source_distribution": source_counts,
+            "most_active_type": max(type_counts, key=type_counts.get) if type_counts else None,
+            "most_active_source": max(source_counts, key=source_counts.get) if source_counts else None,
+        }
+
+    # =========================================================================
+    # EVOLUTION SYSTEM (AGI Upgrade)
+    # =========================================================================
+
+    def evolve_subscriptions(self, fitness_threshold: float = 0.3):
+        """
+        Evolve subscription graph based on fitness scores.
+
+        Low-fitness handlers are candidates for removal.
+        High-fitness handlers are prioritized.
+        """
+        self._evolution_generation += 1
+        changes = []
+
+        # Calculate fitness for all subscriptions
+        for fitness_id, fitness in self._subscription_fitness.items():
+            # Compute fitness score
+            fitness.fitness = (
+                fitness.success_rate * 0.4 +
+                (1 / (1 + fitness.avg_latency_ms / 100)) * 0.3 +  # Faster is better
+                min(1.0, fitness.invocation_count / 100) * 0.3  # Usage matters
+            )
+
+            fitness.generation = self._evolution_generation
+
+            if fitness.fitness < fitness_threshold:
+                changes.append({
+                    "action": "flagged_low_fitness",
+                    "subscription_id": fitness_id,
+                    "fitness": fitness.fitness,
+                })
+
+        # Similarly for semantic subscriptions
+        for sub in self._semantic_subscriptions:
+            if sub.invocations > 0:
+                sub.fitness_score = sub.successful_invocations / sub.invocations
+            else:
+                sub.fitness_score = 0.5
+
+        # Log evolution event
+        self._evolution_history.append({
+            "generation": self._evolution_generation,
+            "timestamp": datetime.now().isoformat(),
+            "changes": changes,
+            "total_subscriptions": len(self._subscription_fitness),
+            "semantic_subscriptions": len(self._semantic_subscriptions),
+        })
+
+        logger.info(
+            f"Nexus: Evolution generation {self._evolution_generation} - "
+            f"{len(changes)} low-fitness handlers flagged"
+        )
+
+        return changes
+
+    def get_fitness_report(self) -> Dict:
+        """Get fitness report for all subscriptions."""
+        type_fitness = {}
+        semantic_fitness = []
+
+        for fitness_id, fitness in self._subscription_fitness.items():
+            type_fitness[fitness_id] = {
+                "fitness": fitness.fitness,
+                "invocations": fitness.invocation_count,
+                "success_rate": fitness.success_rate,
+                "avg_latency_ms": fitness.avg_latency_ms,
+            }
+
+        for sub in self._semantic_subscriptions:
+            semantic_fitness.append({
+                "subscription_id": sub.subscription_id,
+                "fitness": sub.fitness_score,
+                "invocations": sub.invocations,
+                "successful": sub.successful_invocations,
+                "threshold": sub.similarity_threshold,
+            })
+
+        return {
+            "generation": self._evolution_generation,
+            "type_subscriptions": type_fitness,
+            "semantic_subscriptions": semantic_fitness,
+            "evolution_history": self._evolution_history[-10:],
+        }
+
+    # =========================================================================
+    # STATUS AND DIAGNOSTICS
+    # =========================================================================
+
+    def get_status(self) -> Dict:
+        """Get comprehensive Nexus status."""
+        return {
+            "is_running": self._is_running,
+            "queue_depth": self._priority_queue.qsize() if self._is_running else 0,
+            "history_size": len(self._history),
+            "persistent_history_size": len(self._persistent_history),
+            "type_subscriptions": {
+                st.value: len(handlers)
+                for st, handlers in self._subscribers.items()
+            },
+            "semantic_subscriptions": len(self._semantic_subscriptions),
+            "middleware_count": len(self._middleware),
+            "evolution_middleware_count": len(self._evolution_middleware),
+            "backpressure": {
+                "queue_depth": self._backpressure.queue_depth,
+                "is_throttling": self._backpressure.is_throttling,
+                "dropped_signals": self._backpressure.dropped_signals,
+            },
+            "spontaneous_thoughts": {
+                "enabled": self._thought_config.enabled,
+                "creativity": self._thought_config.creativity_temperature,
+            },
+            "evolution_generation": self._evolution_generation,
+        }
+
 # Global accessor
 nexus = Nexus.get_instance()
 
-# Default Middleware: Logger
+
+# =============================================================================
+# DEFAULT MIDDLEWARE
+# =============================================================================
+
 def logging_middleware(signal: Signal) -> bool:
+    """Log signals with urgency-based levels."""
     if signal.urgency > 0.7:
         logger.warning(f"🚨 [URGENT] {signal.type.value} from {signal.source_id}")
     else:
         logger.debug(f"⚡ {signal.type.value} from {signal.source_id}")
     return True
 
+
+def rate_limit_middleware(signal: Signal) -> bool:
+    """Basic rate limiting based on urgency."""
+    # Always allow high-urgency signals
+    if signal.urgency >= 0.8:
+        return True
+
+    # Check backpressure
+    if nexus._backpressure.is_throttling:
+        if signal.urgency < 0.5:
+            return False  # Block low-priority during throttling
+
+    return True
+
+
+# =============================================================================
+# EVOLUTION MIDDLEWARE (AGI)
+# =============================================================================
+
+def anomaly_evolution_middleware(signal: Signal, nexus_instance: Nexus) -> bool:
+    """
+    Evolution middleware that responds to anomalies.
+
+    When anomalies are detected, this can:
+    - Spawn new handlers dynamically
+    - Adjust thresholds
+    - Trigger evolution of subscription graph
+    """
+    if signal.type == SignalType.ANOMALY_DETECTED:
+        anomaly_type = signal.payload.get("anomaly_type", "unknown")
+        severity = signal.payload.get("severity", 0.5)
+
+        if severity > 0.8:
+            # High-severity anomaly - trigger evolution
+            logger.info(f"Nexus: High-severity anomaly detected - triggering evolution")
+            nexus_instance.evolve_subscriptions(fitness_threshold=0.4)
+
+    return True
+
+
+def memory_consolidation_middleware(signal: Signal, nexus_instance: Nexus) -> bool:
+    """
+    Middleware that tracks memory-related signals.
+
+    Can trigger consolidation or optimize routing for memory operations.
+    """
+    if signal.type == SignalType.MEMORY_CONSOLIDATION:
+        # Track memory operations for pattern detection
+        memory_ids = signal.payload.get("memory_ids", [])
+        session_ref = signal.payload.get("session_ref")
+
+        logger.debug(
+            f"Nexus: Memory consolidation - {len(memory_ids)} memories, "
+            f"session={session_ref}"
+        )
+
+    return True
+
+
+# Register default middleware
 nexus.add_middleware(logging_middleware)
+nexus.add_middleware(rate_limit_middleware)
+nexus.add_evolution_middleware(anomaly_evolution_middleware)
+nexus.add_evolution_middleware(memory_consolidation_middleware)
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+async def emit_thought(
+    content: str,
+    source: str = "system",
+    thought_type: str = "general",
+    urgency: float = 0.5,
+    context_vector: Optional[List[float]] = None,
+):
+    """Convenience function to emit a thought signal."""
+    await nexus.emit(
+        type=SignalType.THOUGHT_EMITTED,
+        payload={
+            "content": content,
+            "thought_type": thought_type,
+        },
+        source=source,
+        urgency=urgency,
+        context_vector=context_vector,
+    )
+
+
+async def emit_memory_consolidation(
+    memory_ids: List[str],
+    session_ref: Optional[str] = None,
+    context_vector: Optional[List[float]] = None,
+):
+    """Convenience function for memory consolidation signals."""
+    await nexus.emit(
+        type=SignalType.MEMORY_CONSOLIDATION,
+        payload={
+            "memory_ids": memory_ids,
+            "session_ref": session_ref,
+        },
+        source="unified_memory",
+        urgency=0.6,
+        context_vector=context_vector,
+    )
+
+
+async def emit_dialogue_event(
+    event_type: str,
+    session_id: str,
+    content: Dict[str, Any],
+    urgency: float = 0.5,
+):
+    """Convenience function for dialogue signals."""
+    signal_map = {
+        "started": SignalType.DIALOGUE_STARTED,
+        "propose": SignalType.DIALOGUE_PROPOSE,
+        "critique": SignalType.DIALOGUE_CRITIQUE,
+        "refine": SignalType.DIALOGUE_REFINE,
+        "vote": SignalType.DIALOGUE_VOTE,
+        "consensus": SignalType.DIALOGUE_CONSENSUS,
+        "completed": SignalType.DIALOGUE_COMPLETED,
+    }
+
+    signal_type = signal_map.get(event_type, SignalType.DIALOGUE_STARTED)
+
+    await nexus.emit(
+        type=signal_type,
+        payload={
+            "session_id": session_id,
+            **content,
+        },
+        source="dialogue_system",
+        urgency=urgency,
+    )
