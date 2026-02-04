@@ -27,6 +27,21 @@ from pathlib import Path
 from .base import ExternalProvider, IntegrationConfig, ConnectionStatus
 
 
+def _get_dynamic_max_tokens(model_id: str = "grok", task_type: str = "chat") -> int:
+    """
+    AGI v1.8: Get dynamic max_tokens from centralized limits.
+
+    Falls back to reasonable defaults if dynamic_limits unavailable.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import get_max_tokens
+        return get_max_tokens(model_id, task_type)
+    except Exception:
+        # Fallback defaults
+        defaults = {"chat": 2000, "thinking": 4000, "quick": 800, "code": 4000}
+        return defaults.get(task_type, 2000)
+
+
 class GrokProvider(ExternalProvider):
     """xAI Grok integration for real-time search, reasoning, and tool use."""
 
@@ -149,7 +164,7 @@ class GrokProvider(ExternalProvider):
         context: str = None,
         model: str = "grok-3",
         temperature: float = 0.7,
-        max_tokens: int = 1000
+        max_tokens: int = None  # AGI v1.8: None = use dynamic default
     ) -> Dict[str, Any]:
         """
         Chat with Grok.
@@ -160,13 +175,17 @@ class GrokProvider(ExternalProvider):
             context: Additional context (optional)
             model: Model name or alias
             temperature: 0-2 creativity
-            max_tokens: Max response length
+            max_tokens: Max response length (None = dynamic default)
 
         Returns:
             {"content": str, "model": str, "tokens": int}
         """
         if not self.api_key:
             return {"error": "Grok API key not configured", "content": ""}
+
+        # AGI v1.8: Resolve dynamic max_tokens default
+        if max_tokens is None:
+            max_tokens = _get_dynamic_max_tokens("grok", "chat")
 
         model_id = self.models.get(model, model)
         messages = []

@@ -6044,6 +6044,119 @@ async def deliberation_stats():
         }, status_code=500)
 
 
+@app.get("/api/limits")
+async def get_dynamic_limits():
+    """
+    AGI v1.8: Get all dynamic limits configuration.
+
+    Returns current limits for all models and sessions.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import get_all_limits
+        return JSONResponse({
+            "success": True,
+            **get_all_limits()
+        })
+    except Exception as e:
+        logger.error(f"Failed to get dynamic limits: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.post("/api/limits/model/{model_id}")
+async def update_model_limits(model_id: str, request: Request):
+    """
+    AGI v1.8: Update limits for a specific model.
+
+    Body: {"default_max_tokens": 3000, "chat_max_tokens": 2000, ...}
+    """
+    try:
+        from farnsworth.core.dynamic_limits import update_model_limits as _update
+        body = await request.json()
+
+        success = _update(model_id, **body)
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": f"Updated limits for {model_id}",
+                "updates": body
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": f"Unknown model: {model_id}"
+            }, status_code=404)
+    except Exception as e:
+        logger.error(f"Failed to update model limits: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.post("/api/limits/session/{session_type}")
+async def update_session_limits(session_type: str, request: Request):
+    """
+    AGI v1.8: Update limits for a specific session type.
+
+    Body: {"max_tokens": 10000, "deliberation_rounds": 3, ...}
+    """
+    try:
+        from farnsworth.core.dynamic_limits import update_session_limits as _update
+        body = await request.json()
+
+        success = _update(session_type, **body)
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": f"Updated limits for {session_type}",
+                "updates": body
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": f"Unknown session type: {session_type}"
+            }, status_code=404)
+    except Exception as e:
+        logger.error(f"Failed to update session limits: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.post("/api/limits/deliberation")
+async def update_deliberation_limits(request: Request):
+    """
+    AGI v1.8: Update deliberation character limits.
+
+    Body: {"critique": 500, "refine": 1000, "propose": null}
+    Pass null to remove a limit.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import update_deliberation_limits as _update
+        body = await request.json()
+
+        _update(
+            critique=body.get("critique"),
+            refine=body.get("refine"),
+            propose=body.get("propose")
+        )
+        return JSONResponse({
+            "success": True,
+            "message": "Updated deliberation limits",
+            "updates": body
+        })
+    except Exception as e:
+        logger.error(f"Failed to update deliberation limits: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
 @app.get("/api/organism/status")
 async def organism_status():
     """Get Collective Organism status - the unified AI consciousness."""

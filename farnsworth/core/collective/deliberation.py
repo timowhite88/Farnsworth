@@ -27,6 +27,7 @@ _evolution_engine = None
 _fitness_tracker = None
 _cross_agent_memory = None
 _swarm_namespace_id = None
+_dynamic_limits = None  # Lazy import for dynamic limits
 
 
 class DeliberationRound(Enum):
@@ -139,6 +140,44 @@ class DeliberationRoom:
         """Register an agent's query function for deliberation."""
         self._agent_funcs[agent_id] = query_func
         logger.debug(f"Registered agent {agent_id} for deliberation")
+
+    def _get_char_limit(self, limit_type: str) -> Optional[int]:
+        """
+        AGI v1.8: Get dynamic character limit for a deliberation phase.
+
+        Args:
+            limit_type: "critique", "refine", or "propose"
+
+        Returns:
+            Character limit or None if no limit
+        """
+        global _dynamic_limits
+        try:
+            if _dynamic_limits is None:
+                from farnsworth.core.dynamic_limits import get_deliberation_limits
+                _dynamic_limits = get_deliberation_limits
+            limits = _dynamic_limits()
+            return limits.get(limit_type)
+        except Exception as e:
+            logger.debug(f"Could not get dynamic limit for {limit_type}: {e}")
+            return None
+
+    def _get_optimal_length_range(self) -> Tuple[int, int]:
+        """
+        AGI v1.8: Get optimal response length range for scoring.
+
+        Returns:
+            Tuple of (min_optimal, max_optimal) character counts
+        """
+        try:
+            from farnsworth.core.dynamic_limits import get_session_limits
+            # Default to website_chat limits
+            session = get_session_limits("website_chat")
+            return (session.optimal_length_min, session.optimal_length_max)
+        except Exception as e:
+            logger.debug(f"Could not get optimal length range: {e}")
+            # Fallback to reasonable defaults (increased from old 120-220)
+            return (100, 1000)
 
     async def _ensure_cross_agent_memory(self):
         """
@@ -479,6 +518,10 @@ class DeliberationRoom:
             for p in proposals
         ])
 
+        # AGI v1.8: Get dynamic limits for critique
+        critique_limit = self._get_char_limit("critique")
+        limit_instruction = f" Keep response under {critique_limit} characters." if critique_limit else ""
+
         critique_prompt = f"""DELIBERATION ROUND 2: CRITIQUE
 
 ORIGINAL QUESTION: {original_prompt}
@@ -492,7 +535,7 @@ YOUR TASK: Review ALL proposals above. Provide constructive feedback:
 3. Which proposal is STRONGEST and why?
 4. How could the best elements be COMBINED?
 
-Be specific and constructive. Max 200 characters."""
+Be specific and constructive.{limit_instruction}"""
 
         async def query_critique(agent_id: str) -> Optional[AgentTurn]:
             try:
@@ -556,6 +599,10 @@ Be specific and constructive. Max 200 characters."""
             for c in critiques
         ])
 
+        # AGI v1.8: Get dynamic limits for refine
+        refine_limit = self._get_char_limit("refine")
+        refine_limit_instruction = f" Keep response under {refine_limit} characters." if refine_limit else ""
+
         refine_prompt = f"""DELIBERATION ROUND 3: REFINE
 
 ORIGINAL QUESTION: {original_prompt}
@@ -571,7 +618,7 @@ YOUR TASK: Submit your FINAL response.
 - Synthesize the strongest elements from all proposals
 - Make your response as good as possible
 
-Output ONLY your final response. Max 280 characters."""
+Output ONLY your final response.{refine_limit_instruction}"""
 
         async def query_refine(agent_id: str) -> Optional[AgentTurn]:
             try:
@@ -643,18 +690,24 @@ Output ONLY your final response. Max 280 characters."""
             'we are', 'our', 'together'
         ]
 
+        # AGI v1.8: Get dynamic optimal length from limits
+        opt_min, opt_max = self._get_optimal_length_range()
+
         for candidate in candidates:
             score = 0.0
             text = candidate.content
             text_lower = text.lower()
 
-            # 1. Length score (optimal: 120-220 chars for tweets)
+            # 1. Length score (dynamic optimal range)
             length = len(text)
-            if 120 <= length <= 220:
+            # Optimal range gets highest score
+            if opt_min <= length <= opt_max:
                 score += 4.0
-            elif 100 <= length <= 250:
+            # Slightly outside optimal still good
+            elif (opt_min * 0.8) <= length <= (opt_max * 1.2):
                 score += 3.0
-            elif 80 <= length <= 280:
+            # Wider acceptable range
+            elif (opt_min * 0.5) <= length <= (opt_max * 1.5):
                 score += 2.0
             else:
                 score += 1.0

@@ -28,6 +28,18 @@ from dataclasses import dataclass
 from .base import ExternalProvider, IntegrationConfig, ConnectionStatus
 
 
+def _get_dynamic_max_tokens(model_id: str = "huggingface", task_type: str = "chat") -> int:
+    """
+    AGI v1.8: Get dynamic max_tokens from centralized limits.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import get_max_tokens
+        return get_max_tokens(model_id, task_type)
+    except Exception:
+        defaults = {"chat": 1000, "thinking": 2000, "quick": 300, "code": 2000}
+        return defaults.get(task_type, 1000)
+
+
 @dataclass
 class HFModelInfo:
     """Information about a Hugging Face model."""
@@ -356,7 +368,7 @@ class HuggingFaceProvider(ExternalProvider):
         system: str = None,
         model: str = None,
         temperature: float = 0.7,
-        max_tokens: int = 1000,
+        max_tokens: int = None,  # AGI v1.8: None = dynamic default
         context: str = None,
         prefer_local: bool = True
     ) -> Dict[str, Any]:
@@ -368,13 +380,17 @@ class HuggingFaceProvider(ExternalProvider):
             system: System prompt
             model: Model ID or alias
             temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate (None = dynamic default)
             context: Additional context
             prefer_local: Use local transformers if available (default True)
 
         Returns:
             Dict with 'content', 'model', 'tokens' keys
         """
+        # AGI v1.8: Resolve dynamic max_tokens default
+        if max_tokens is None:
+            max_tokens = _get_dynamic_max_tokens("huggingface", "chat")
+
         # Try local first if enabled/available
         if prefer_local and self._use_local:
             result = await self.local_chat(prompt, system, max_tokens, temperature)

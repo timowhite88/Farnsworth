@@ -30,6 +30,18 @@ import time
 from .base import ExternalProvider, IntegrationConfig, ConnectionStatus
 
 
+def _get_dynamic_max_tokens(model_id: str = "claude", task_type: str = "chat") -> int:
+    """
+    AGI v1.8: Get dynamic max_tokens from centralized limits.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import get_max_tokens
+        return get_max_tokens(model_id, task_type)
+    except Exception:
+        defaults = {"chat": 2000, "thinking": 4000, "quick": 500, "code": 4096}
+        return defaults.get(task_type, 2000)
+
+
 class ClaudeProvider(ExternalProvider):
     """Claude Code via tmux session for complex development tasks."""
 
@@ -106,7 +118,7 @@ class ClaudeProvider(ExternalProvider):
     async def complete(
         self,
         prompt: str,
-        max_tokens: int = 4096,
+        max_tokens: int = None,  # AGI v1.8: None = dynamic default
         **kwargs
     ) -> Optional[str]:
         """
@@ -115,6 +127,10 @@ class ClaudeProvider(ExternalProvider):
         This sends the prompt to the Claude Code CLI running in tmux,
         waits for the response, and returns it.
         """
+        # AGI v1.8: Resolve dynamic max_tokens (for documentation/future use)
+        if max_tokens is None:
+            max_tokens = _get_dynamic_max_tokens("claude", "code")
+
         if not await self.ensure_session():
             logger.warning("Claude: Session not available")
             return None

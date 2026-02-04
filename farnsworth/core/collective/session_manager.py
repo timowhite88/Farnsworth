@@ -21,6 +21,49 @@ from loguru import logger
 
 from .deliberation import DeliberationRoom, DeliberationResult, get_deliberation_room
 
+# AGI v1.8: Lazy import for dynamic limits
+_dynamic_limits_loaded = False
+_session_limits_cache = {}
+
+
+def _get_dynamic_session_config(session_type: str) -> Dict[str, Any]:
+    """
+    AGI v1.8: Get session configuration from dynamic limits.
+
+    Falls back to reasonable defaults if dynamic_limits is not available.
+    """
+    global _dynamic_limits_loaded, _session_limits_cache
+
+    if not _dynamic_limits_loaded:
+        try:
+            from farnsworth.core.dynamic_limits import get_session_limits
+            _session_limits_cache["_getter"] = get_session_limits
+            _dynamic_limits_loaded = True
+        except Exception as e:
+            logger.debug(f"Dynamic limits not available: {e}")
+            _dynamic_limits_loaded = True  # Don't retry
+
+    getter = _session_limits_cache.get("_getter")
+    if getter:
+        try:
+            limits = getter(session_type)
+            return {
+                "max_tokens": limits.max_tokens,
+                "deliberation_rounds": limits.deliberation_rounds,
+                "timeout": limits.timeout,
+            }
+        except Exception:
+            pass
+
+    # Fallback defaults
+    defaults = {
+        "website_chat": {"max_tokens": 8000, "deliberation_rounds": 2, "timeout": 120.0},
+        "grok_thread": {"max_tokens": 8000, "deliberation_rounds": 3, "timeout": 120.0},
+        "autonomous_task": {"max_tokens": 6000, "deliberation_rounds": 1, "timeout": 60.0},
+        "quick_response": {"max_tokens": 4000, "deliberation_rounds": 1, "timeout": 30.0},
+    }
+    return defaults.get(session_type, defaults["website_chat"])
+
 
 @dataclass
 class CollectiveConfig:
@@ -72,51 +115,67 @@ class CollectiveSessionManager:
     - autonomous_task: Background task processing
     """
 
-    # Pre-defined session configurations
+    # AGI v1.8: Session configurations now use dynamic limits
+    # Agent lists are still defined here, but token/timing limits come from dynamic_limits.py
     # Local models: DeepSeek (Ollama), Phi4 (Ollama), Llama (Ollama)
     # API models: Grok, Gemini, Kimi, Claude, Groq, Mistral, Perplexity, DeepSeekAPI
-    DEFAULT_CONFIGS = {
-        "website_chat": CollectiveConfig(
-            # Include both local and API models for website chat
-            # Local: DeepSeek, Phi4 (fast, private, no API cost)
-            # API: Grok, Gemini, Kimi, Claude (high quality)
-            agents=["Grok", "Gemini", "DeepSeek", "Phi4", "Kimi", "Claude"],
-            deliberation_rounds=2,
-            tool_awareness=True,
-            max_tokens=5000,
-            media_bias=0.3,
-            technical_depth="medium",
-        ),
-        "grok_thread": CollectiveConfig(
-            # More agents for public X conversations
-            agents=["Grok", "Gemini", "Kimi", "DeepSeek", "Phi4", "Claude", "Groq"],
-            deliberation_rounds=3,  # More thorough for public posts
-            tool_awareness=True,
-            max_tokens=5000,
-            media_bias=0.6,  # Higher chance of media for engagement
-            x_content=True,  # Optimize for Twitter format
-            technical_depth="high",
-        ),
-        "autonomous_task": CollectiveConfig(
-            # Fast local-first for background tasks
-            agents=["DeepSeek", "Phi4", "Gemini", "Claude"],
-            deliberation_rounds=1,  # Fast for background tasks
-            tool_awareness=True,
-            max_tokens=3000,
-            media_bias=0.2,
-            technical_depth="high",
-        ),
-        "quick_response": CollectiveConfig(
-            # Ultra-fast with local models prioritized
-            agents=["DeepSeek", "Phi4", "Grok"],
-            deliberation_rounds=1,
-            tool_awareness=False,
-            max_tokens=2000,
-            timeout=30.0,
-            media_bias=0.1,
-            technical_depth="low",
-        ),
+
+    # Static agent configurations per session type
+    SESSION_AGENTS = {
+        "website_chat": ["Grok", "Gemini", "DeepSeek", "Phi4", "Kimi", "Claude"],
+        "grok_thread": ["Grok", "Gemini", "Kimi", "DeepSeek", "Phi4", "Claude", "Groq"],
+        "autonomous_task": ["DeepSeek", "Phi4", "Gemini", "Claude"],
+        "quick_response": ["DeepSeek", "Phi4", "Grok"],
+        "code_generation": ["Claude", "DeepSeek", "Kimi", "Gemini"],
+        "analysis": ["Grok", "Gemini", "Claude", "Kimi", "DeepSeek"],
     }
+
+    # Static session-specific settings (non-token related)
+    SESSION_SETTINGS = {
+        "website_chat": {"tool_awareness": True, "media_bias": 0.3, "technical_depth": "medium"},
+        "grok_thread": {"tool_awareness": True, "media_bias": 0.6, "x_content": True, "technical_depth": "high"},
+        "autonomous_task": {"tool_awareness": True, "media_bias": 0.2, "technical_depth": "high"},
+        "quick_response": {"tool_awareness": False, "media_bias": 0.1, "technical_depth": "low"},
+        "code_generation": {"tool_awareness": True, "media_bias": 0.0, "technical_depth": "high"},
+        "analysis": {"tool_awareness": True, "media_bias": 0.1, "technical_depth": "high"},
+    }
+
+    @classmethod
+    def _build_config(cls, session_type: str) -> "CollectiveConfig":
+        """Build a CollectiveConfig using dynamic limits."""
+        # Get dynamic limits (max_tokens, rounds, timeout)
+        dynamic = _get_dynamic_session_config(session_type)
+
+        # Get static settings
+        agents = cls.SESSION_AGENTS.get(session_type, cls.SESSION_AGENTS["website_chat"])
+        settings = cls.SESSION_SETTINGS.get(session_type, cls.SESSION_SETTINGS["website_chat"])
+
+        return CollectiveConfig(
+            agents=agents,
+            deliberation_rounds=dynamic["deliberation_rounds"],
+            tool_awareness=settings.get("tool_awareness", True),
+            max_tokens=dynamic["max_tokens"],
+            timeout=dynamic["timeout"],
+            media_bias=settings.get("media_bias", 0.3),
+            require_consensus=settings.get("require_consensus", False),
+            x_content=settings.get("x_content", False),
+            technical_depth=settings.get("technical_depth", "medium"),
+        )
+
+    @classmethod
+    def get_config(cls, session_type: str) -> "CollectiveConfig":
+        """Get configuration for a session type using dynamic limits."""
+        return cls._build_config(session_type)
+
+    # Legacy DEFAULT_CONFIGS for backward compatibility
+    # These are now dynamically generated
+    @property
+    def DEFAULT_CONFIGS(self) -> Dict[str, "CollectiveConfig"]:
+        """Dynamic configs - rebuilds on each access to pick up limit changes."""
+        return {
+            session_type: self._build_config(session_type)
+            for session_type in self.SESSION_AGENTS.keys()
+        }
 
     def __init__(self):
         self.sessions: Dict[str, CollectiveSession] = {}
@@ -165,11 +224,8 @@ class CollectiveSessionManager:
                 session.last_active = datetime.now()
                 return session
 
-            # Get configuration for this session type
-            config = self.DEFAULT_CONFIGS.get(
-                session_type,
-                self.DEFAULT_CONFIGS["website_chat"]  # Default fallback
-            )
+            # AGI v1.8: Get configuration using dynamic limits
+            config = CollectiveSessionManager._build_config(session_type)
 
             # Create new session
             session = CollectiveSession(

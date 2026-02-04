@@ -26,6 +26,19 @@ import os
 from .base import ExternalProvider, IntegrationConfig, ConnectionStatus
 
 
+def _get_dynamic_max_tokens(model_id: str = "kimi", task_type: str = "chat") -> int:
+    """
+    AGI v1.8: Get dynamic max_tokens from centralized limits.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import get_max_tokens
+        return get_max_tokens(model_id, task_type)
+    except Exception:
+        # Kimi supports larger outputs by default
+        defaults = {"chat": 3000, "thinking": 5000, "quick": 400, "code": 5000}
+        return defaults.get(task_type, 3000)
+
+
 class KimiProvider(ExternalProvider):
     """Moonshot AI Kimi integration for long-context reasoning."""
 
@@ -131,7 +144,7 @@ class KimiProvider(ExternalProvider):
         context: str = None,
         model_tier: str = "k2.5",
         temperature: float = None,
-        max_tokens: int = 5000,
+        max_tokens: int = None,  # AGI v1.8: None = dynamic default
         image_url: str = None,
         thinking_mode: bool = False
     ) -> Dict[str, Any]:
@@ -144,7 +157,7 @@ class KimiProvider(ExternalProvider):
             context: Additional context to include (optional)
             model_tier: "fast", "balanced", "long", "k2", "k2.5" (default)
             temperature: 0-1 creativity (auto-set based on thinking_mode if None)
-            max_tokens: Max response length (default 5000 for full code power)
+            max_tokens: Max response length (None = dynamic default)
             image_url: URL or base64 image for multimodal understanding
             thinking_mode: Enable K2.5 thinking mode (temp 1.0, deeper reasoning)
 
@@ -153,6 +166,11 @@ class KimiProvider(ExternalProvider):
         """
         if not self.api_key:
             return {"error": "Kimi API key not configured", "content": ""}
+
+        # AGI v1.8: Resolve dynamic max_tokens default
+        if max_tokens is None:
+            task_type = "thinking" if thinking_mode else "chat"
+            max_tokens = _get_dynamic_max_tokens("kimi", task_type)
 
         model = self.models.get(model_tier, self.default_model)
 

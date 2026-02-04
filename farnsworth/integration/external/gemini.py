@@ -26,6 +26,18 @@ from pathlib import Path
 from .base import ExternalProvider, IntegrationConfig, ConnectionStatus
 
 
+def _get_dynamic_max_tokens(model_id: str = "gemini", task_type: str = "chat") -> int:
+    """
+    AGI v1.8: Get dynamic max_tokens from centralized limits.
+    """
+    try:
+        from farnsworth.core.dynamic_limits import get_max_tokens
+        return get_max_tokens(model_id, task_type)
+    except Exception:
+        defaults = {"chat": 2000, "thinking": 4000, "quick": 600, "code": 4000}
+        return defaults.get(task_type, 2000)
+
+
 class GeminiProvider(ExternalProvider):
     """Google Gemini integration for multimodal AI and long context."""
 
@@ -131,7 +143,7 @@ class GeminiProvider(ExternalProvider):
         context: str = None,
         model: str = "gemini-2.0-flash",
         temperature: float = 0.7,
-        max_tokens: int = 1000
+        max_tokens: int = None  # AGI v1.8: None = dynamic default
     ) -> Dict[str, Any]:
         """
         Chat with Gemini.
@@ -142,13 +154,17 @@ class GeminiProvider(ExternalProvider):
             context: Additional context (optional)
             model: Model name or alias
             temperature: 0-2 creativity
-            max_tokens: Max response length
+            max_tokens: Max response length (None = dynamic default)
 
         Returns:
             {"content": str, "model": str, "tokens": int}
         """
         if not self.api_key:
             return {"error": "Gemini API key not configured", "content": ""}
+
+        # AGI v1.8: Resolve dynamic max_tokens default
+        if max_tokens is None:
+            max_tokens = _get_dynamic_max_tokens("gemini", "chat")
 
         # Rate limiting check
         current_time = time.time()
