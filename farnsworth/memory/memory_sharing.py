@@ -714,3 +714,342 @@ class MemorySharing:
             "total_backup_size_mb": total_backup_size / (1024 * 1024),
             "backup_dir": str(self.backup_dir),
         }
+
+
+# =============================================================================
+# FEDERATED PRIVACY LAYER (Planetary AGI Cohesion)
+# =============================================================================
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    np = None
+    NUMPY_AVAILABLE = False
+
+
+@dataclass
+class AnonymizedMemory:
+    """
+    A memory prepared for federated sharing with privacy guarantees.
+
+    Contains only non-identifying information:
+    - Noisy embedding (differential privacy)
+    - Content hash (not reversible)
+    - Generic tags
+    - Timestamp bucket (not exact)
+    """
+    content_hash: str  # SHA256 hash of original content
+    noisy_embedding: list[float]  # Embedding with Laplacian noise
+    tags: list[str]  # Non-identifying category tags
+    timestamp_bucket: str  # Coarse time bucket (day or week)
+    importance_bucket: str  # "low", "medium", "high"
+    privacy_epsilon: float  # Privacy budget used
+
+
+@dataclass
+class FederatedSyncConfig:
+    """Configuration for federated memory synchronization."""
+    privacy_epsilon: float = 1.0  # Differential privacy budget
+    min_importance: float = 0.5  # Only share memories above this importance
+    share_ratio: float = 0.1  # Share top 10% of memories
+    timestamp_granularity: str = "day"  # "hour", "day", "week"
+    exclude_tags: list[str] = field(default_factory=lambda: ["private", "personal", "secret"])
+    max_share_per_sync: int = 50
+
+
+class FederatedPrivacyLayer:
+    """
+    Privacy-preserving layer for federated memory sharing.
+
+    Implements differential privacy for embeddings and anonymization
+    for memory metadata to enable planetary-scale memory sharing
+    without exposing sensitive information.
+
+    Features:
+    - Laplacian noise for differential privacy
+    - Content hashing (non-reversible)
+    - Timestamp bucketing
+    - Importance categorization
+    - Tag filtering for sensitive content
+    """
+
+    def __init__(
+        self,
+        config: Optional[FederatedSyncConfig] = None,
+        memory_system=None,
+    ):
+        self.config = config or FederatedSyncConfig()
+        self.memory_system = memory_system
+
+        # Track privacy budget usage
+        self.total_budget_used = 0.0
+        self.memories_shared = 0
+        self.sync_history: list[dict] = []
+
+    def anonymize_memory(
+        self,
+        content: str,
+        embedding: Optional[list[float]],
+        tags: list[str],
+        created_at: datetime,
+        importance: float = 0.5,
+        epsilon: Optional[float] = None,
+    ) -> Optional[AnonymizedMemory]:
+        """
+        Anonymize a memory for federated sharing.
+
+        Args:
+            content: Original memory content
+            embedding: Original embedding vector
+            tags: Memory tags
+            created_at: Creation timestamp
+            importance: Importance score (0-1)
+            epsilon: Privacy budget (uses config if None)
+
+        Returns:
+            AnonymizedMemory if shareable, None if filtered
+        """
+        epsilon = epsilon or self.config.privacy_epsilon
+
+        # Filter by importance
+        if importance < self.config.min_importance:
+            return None
+
+        # Filter sensitive tags
+        filtered_tags = [
+            t for t in tags
+            if t.lower() not in [et.lower() for et in self.config.exclude_tags]
+        ]
+
+        # If all tags were sensitive, skip this memory
+        if tags and not filtered_tags:
+            return None
+
+        # Content hash (SHA256 - not reversible)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+        # Add differential privacy noise to embedding
+        noisy_embedding = []
+        if embedding and NUMPY_AVAILABLE:
+            noisy_embedding = self._add_laplacian_noise(embedding, epsilon)
+        elif embedding:
+            # Fallback without numpy - simpler noise
+            import random
+            scale = 1.0 / epsilon
+            noisy_embedding = [
+                v + random.uniform(-scale, scale) for v in embedding
+            ]
+
+        # Bucket timestamp
+        timestamp_bucket = self._bucket_timestamp(created_at)
+
+        # Bucket importance
+        if importance >= 0.8:
+            importance_bucket = "high"
+        elif importance >= 0.5:
+            importance_bucket = "medium"
+        else:
+            importance_bucket = "low"
+
+        # Track privacy budget
+        self.total_budget_used += 1.0 / epsilon
+        self.memories_shared += 1
+
+        return AnonymizedMemory(
+            content_hash=content_hash,
+            noisy_embedding=noisy_embedding,
+            tags=filtered_tags,
+            timestamp_bucket=timestamp_bucket,
+            importance_bucket=importance_bucket,
+            privacy_epsilon=epsilon,
+        )
+
+    def _add_laplacian_noise(
+        self,
+        embedding: list[float],
+        epsilon: float,
+        sensitivity: float = 1.0,
+    ) -> list[float]:
+        """
+        Add Laplacian noise for differential privacy.
+
+        The Laplace mechanism provides epsilon-differential privacy
+        by adding noise from Laplace(0, sensitivity/epsilon).
+
+        Args:
+            embedding: Original embedding vector
+            epsilon: Privacy budget (higher = less privacy, more utility)
+            sensitivity: L1 sensitivity of the query
+
+        Returns:
+            Noisy embedding
+        """
+        scale = sensitivity / epsilon
+        noise = np.random.laplace(0, scale, len(embedding))
+        noisy = np.array(embedding) + noise
+
+        # Re-normalize to unit sphere
+        norm = np.linalg.norm(noisy)
+        if norm > 0:
+            noisy = noisy / norm
+
+        return noisy.tolist()
+
+    def _bucket_timestamp(self, dt: datetime) -> str:
+        """Convert timestamp to coarse bucket for privacy."""
+        if self.config.timestamp_granularity == "hour":
+            return dt.strftime("%Y-%m-%d-%H")
+        elif self.config.timestamp_granularity == "week":
+            # ISO week number
+            return f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+        else:  # day
+            return dt.strftime("%Y-%m-%d")
+
+    async def prepare_memories_for_sync(
+        self,
+        memories: list[dict],
+        max_count: Optional[int] = None,
+    ) -> list[AnonymizedMemory]:
+        """
+        Prepare a batch of memories for federated synchronization.
+
+        Filters, anonymizes, and prepares memories for P2P sharing.
+
+        Args:
+            memories: List of memory dicts with content, embedding, tags, etc.
+            max_count: Maximum memories to prepare (uses config if None)
+
+        Returns:
+            List of AnonymizedMemory objects ready for broadcast
+        """
+        max_count = max_count or self.config.max_share_per_sync
+
+        # Sort by importance and select top share_ratio
+        sorted_memories = sorted(
+            memories,
+            key=lambda m: m.get("importance", 0.5),
+            reverse=True,
+        )
+
+        share_count = min(
+            max_count,
+            int(len(sorted_memories) * self.config.share_ratio),
+        )
+
+        anonymized = []
+        for mem in sorted_memories[:share_count]:
+            anon = self.anonymize_memory(
+                content=mem.get("content", ""),
+                embedding=mem.get("embedding"),
+                tags=mem.get("tags", []),
+                created_at=datetime.fromisoformat(mem["created_at"])
+                    if isinstance(mem.get("created_at"), str)
+                    else mem.get("created_at", datetime.now()),
+                importance=mem.get("importance", 0.5),
+            )
+            if anon:
+                anonymized.append(anon)
+
+        # Record sync
+        self.sync_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "memories_prepared": len(anonymized),
+            "budget_used": sum(1.0 / a.privacy_epsilon for a in anonymized),
+        })
+
+        return anonymized
+
+    def anonymize_gradient(
+        self,
+        gradient: dict[str, list[float]],
+        epsilon: float,
+        clip_norm: float = 1.0,
+    ) -> dict[str, list[float]]:
+        """
+        Anonymize a gradient update for federated learning.
+
+        Implements gradient clipping + Gaussian noise for
+        differential privacy in federated learning.
+
+        Args:
+            gradient: Dict mapping parameter names to gradient vectors
+            epsilon: Privacy budget
+            clip_norm: Maximum L2 norm for gradient clipping
+
+        Returns:
+            Noisy gradient suitable for federated averaging
+        """
+        if not NUMPY_AVAILABLE:
+            # Fallback - add uniform noise
+            import random
+            scale = clip_norm / epsilon
+            return {
+                name: [g + random.gauss(0, scale) for g in grad]
+                for name, grad in gradient.items()
+            }
+
+        noisy_gradient = {}
+
+        for name, grad in gradient.items():
+            grad_np = np.array(grad)
+
+            # Clip gradient norm
+            grad_norm = np.linalg.norm(grad_np)
+            if grad_norm > clip_norm:
+                grad_np = grad_np * (clip_norm / grad_norm)
+
+            # Add Gaussian noise (sigma = clip_norm * sqrt(2 * ln(1.25/delta)) / epsilon)
+            # Using simplified noise calibration
+            sigma = clip_norm / epsilon
+            noise = np.random.normal(0, sigma, len(grad_np))
+            noisy_grad = grad_np + noise
+
+            noisy_gradient[name] = noisy_grad.tolist()
+
+        return noisy_gradient
+
+    def anonymize_fitness_scores(
+        self,
+        genome_id: str,
+        fitness_scores: dict[str, float],
+        generation: int,
+    ) -> tuple[str, dict[str, float]]:
+        """
+        Anonymize fitness scores for federated evolution.
+
+        Args:
+            genome_id: Original genome identifier
+            fitness_scores: Dict of fitness metrics
+            generation: Evolution generation
+
+        Returns:
+            (genome_hash, noisy_scores) tuple
+        """
+        # Hash the genome ID for anonymity
+        genome_hash = hashlib.sha256(
+            f"{genome_id}:{generation}".encode()
+        ).hexdigest()[:16]
+
+        # Add small noise to fitness scores
+        import random
+        noisy_scores = {
+            name: max(0, min(1, score + random.gauss(0, 0.01)))
+            for name, score in fitness_scores.items()
+        }
+
+        return genome_hash, noisy_scores
+
+    def get_privacy_stats(self) -> dict:
+        """Get privacy layer statistics."""
+        return {
+            "total_budget_used": self.total_budget_used,
+            "memories_shared": self.memories_shared,
+            "sync_count": len(self.sync_history),
+            "config": {
+                "epsilon": self.config.privacy_epsilon,
+                "min_importance": self.config.min_importance,
+                "share_ratio": self.config.share_ratio,
+            },
+            "recent_syncs": self.sync_history[-5:],
+        }

@@ -6,6 +6,12 @@ Novel Approaches:
 2. Adaptive Mutation - Mutation rate adjusts based on progress
 3. Island Model - Parallel populations with migration
 4. Hash-Chain Logging - Tamper-proof evolution history
+
+AGI Upgrades (v1.5):
+5. Meta-Learning - Self-optimizing evolutionary strategies
+6. Strategy Portfolio - Learn which operators work best
+7. Cross-Problem Transfer - Learn from past optimization runs
+8. Gene Correlation Learning - Discover effective gene combinations
 """
 
 import asyncio
@@ -116,6 +122,345 @@ class EvolutionResult:
     duration_seconds: float
 
 
+# =============================================================================
+# META-LEARNING (AGI Upgrade v1.5)
+# =============================================================================
+
+@dataclass
+class OperatorPerformance:
+    """Tracks performance of a genetic operator."""
+    name: str
+    uses: int = 0
+    fitness_improvements: int = 0
+    total_improvement: float = 0.0
+    avg_improvement: float = 0.0
+    success_rate: float = 0.5
+
+    def update(self, improved: bool, improvement_amount: float = 0.0):
+        self.uses += 1
+        if improved:
+            self.fitness_improvements += 1
+            self.total_improvement += improvement_amount
+        self.success_rate = self.fitness_improvements / self.uses if self.uses > 0 else 0.5
+        self.avg_improvement = self.total_improvement / max(1, self.fitness_improvements)
+
+
+@dataclass
+class GeneCorrelation:
+    """Tracks correlation between gene values and fitness."""
+    gene1: str
+    gene2: str
+    correlation: float = 0.0
+    sample_count: int = 0
+
+
+@dataclass
+class MetaLearningConfig:
+    """Configuration for meta-learning."""
+    enabled: bool = True
+    strategy_update_interval: int = 3  # Update every N generations
+    min_samples_for_adaptation: int = 10  # Min samples before adapting
+    exploration_rate: float = 0.2  # Probability of trying non-optimal strategy
+    transfer_learning: bool = True  # Use knowledge from past runs
+    correlation_threshold: float = 0.5  # Min correlation to consider genes related
+
+
+@dataclass
+class EvolutionKnowledge:
+    """Knowledge extracted from evolution runs for transfer learning."""
+    problem_signature: str  # Hash of gene definitions
+    best_hyperparameters: dict = field(default_factory=dict)
+    effective_gene_combinations: list[tuple[str, str]] = field(default_factory=list)
+    operator_preferences: dict[str, float] = field(default_factory=dict)
+    total_runs: int = 0
+    avg_convergence_speed: float = 0.0
+
+
+class MetaLearner:
+    """
+    Meta-learning system for self-optimizing evolutionary strategies.
+
+    Learns:
+    - Which operators work best for different problem types
+    - Effective hyperparameter settings
+    - Gene correlations and effective combinations
+    - Cross-problem knowledge transfer
+    """
+
+    def __init__(self, config: Optional[MetaLearningConfig] = None, data_dir: str = "./data/evolution"):
+        self.config = config or MetaLearningConfig()
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Operator performance tracking
+        self.operators: dict[str, OperatorPerformance] = {
+            "crossover_uniform": OperatorPerformance(name="crossover_uniform"),
+            "crossover_two_point": OperatorPerformance(name="crossover_two_point"),
+            "crossover_blend": OperatorPerformance(name="crossover_blend"),
+            "mutation_gaussian": OperatorPerformance(name="mutation_gaussian"),
+            "mutation_uniform": OperatorPerformance(name="mutation_uniform"),
+            "mutation_adaptive": OperatorPerformance(name="mutation_adaptive"),
+        }
+
+        # Gene correlations
+        self.gene_correlations: dict[tuple[str, str], GeneCorrelation] = {}
+
+        # Cross-problem knowledge
+        self.knowledge_base: dict[str, EvolutionKnowledge] = {}
+
+        # Current strategy weights
+        self.strategy_weights = {
+            "crossover_uniform": 0.33,
+            "crossover_two_point": 0.34,
+            "crossover_blend": 0.33,
+            "mutation_gaussian": 0.5,
+            "mutation_uniform": 0.25,
+            "mutation_adaptive": 0.25,
+        }
+
+        # Hyperparameter learning
+        self.hyperparameter_history: list[dict] = []
+        self.best_hyperparameters: dict = {}
+
+        # Load persisted knowledge
+        self._load_knowledge()
+
+    def _load_knowledge(self):
+        """Load persisted meta-learning knowledge."""
+        knowledge_file = self.data_dir / "meta_knowledge.json"
+        if knowledge_file.exists():
+            try:
+                with knowledge_file.open('r') as f:
+                    data = json.load(f)
+                    for sig, kdata in data.get("knowledge_base", {}).items():
+                        self.knowledge_base[sig] = EvolutionKnowledge(
+                            problem_signature=sig,
+                            **{k: v for k, v in kdata.items() if k != "problem_signature"}
+                        )
+                    self.strategy_weights = data.get("strategy_weights", self.strategy_weights)
+                logger.info(f"Loaded meta-learning knowledge: {len(self.knowledge_base)} problems")
+            except Exception as e:
+                logger.warning(f"Failed to load meta-knowledge: {e}")
+
+    def save_knowledge(self):
+        """Persist meta-learning knowledge."""
+        knowledge_file = self.data_dir / "meta_knowledge.json"
+        data = {
+            "knowledge_base": {
+                sig: {
+                    "best_hyperparameters": k.best_hyperparameters,
+                    "effective_gene_combinations": k.effective_gene_combinations,
+                    "operator_preferences": k.operator_preferences,
+                    "total_runs": k.total_runs,
+                    "avg_convergence_speed": k.avg_convergence_speed,
+                }
+                for sig, k in self.knowledge_base.items()
+            },
+            "strategy_weights": self.strategy_weights,
+        }
+        with knowledge_file.open('w') as f:
+            json.dump(data, f, indent=2)
+
+    def get_problem_signature(self, gene_definitions: dict) -> str:
+        """Generate a signature for a problem based on gene definitions."""
+        sig_data = {
+            "genes": sorted(gene_definitions.keys()),
+            "ranges": {k: (v["min"], v["max"]) for k, v in gene_definitions.items()},
+        }
+        return hashlib.sha256(json.dumps(sig_data, sort_keys=True).encode()).hexdigest()[:16]
+
+    def select_crossover_operator(self) -> str:
+        """Select crossover operator using learned preferences."""
+        if random.random() < self.config.exploration_rate:
+            # Exploration: random selection
+            operators = ["crossover_uniform", "crossover_two_point", "crossover_blend"]
+            return random.choice(operators)
+
+        # Exploitation: weighted selection based on success
+        operators = ["crossover_uniform", "crossover_two_point", "crossover_blend"]
+        weights = [self.strategy_weights.get(op, 0.33) for op in operators]
+        total = sum(weights)
+        weights = [w / total for w in weights]
+
+        return random.choices(operators, weights=weights)[0]
+
+    def select_mutation_operator(self) -> str:
+        """Select mutation operator using learned preferences."""
+        if random.random() < self.config.exploration_rate:
+            operators = ["mutation_gaussian", "mutation_uniform", "mutation_adaptive"]
+            return random.choice(operators)
+
+        operators = ["mutation_gaussian", "mutation_uniform", "mutation_adaptive"]
+        weights = [self.strategy_weights.get(op, 0.33) for op in operators]
+        total = sum(weights)
+        weights = [w / total for w in weights]
+
+        return random.choices(operators, weights=weights)[0]
+
+    def record_operator_result(
+        self,
+        operator_name: str,
+        parent_fitness: float,
+        child_fitness: float,
+    ):
+        """Record the result of using an operator."""
+        if operator_name not in self.operators:
+            self.operators[operator_name] = OperatorPerformance(name=operator_name)
+
+        improved = child_fitness > parent_fitness
+        improvement = max(0, child_fitness - parent_fitness)
+        self.operators[operator_name].update(improved, improvement)
+
+    def update_strategy_weights(self):
+        """Update strategy weights based on operator performance."""
+        if not self.config.enabled:
+            return
+
+        # Compute weights from success rates
+        crossover_ops = ["crossover_uniform", "crossover_two_point", "crossover_blend"]
+        mutation_ops = ["mutation_gaussian", "mutation_uniform", "mutation_adaptive"]
+
+        for op_group in [crossover_ops, mutation_ops]:
+            total_success = sum(
+                self.operators.get(op, OperatorPerformance(op)).success_rate
+                for op in op_group
+            )
+            if total_success > 0:
+                for op in op_group:
+                    perf = self.operators.get(op, OperatorPerformance(op))
+                    # Blend current weight with performance
+                    new_weight = perf.success_rate / total_success
+                    self.strategy_weights[op] = (
+                        0.7 * self.strategy_weights.get(op, 0.33) +
+                        0.3 * new_weight
+                    )
+
+        logger.debug(f"Updated strategy weights: {self.strategy_weights}")
+
+    def learn_gene_correlations(self, population: list[Genome]):
+        """Learn correlations between genes from population."""
+        if not population or len(population) < self.config.min_samples_for_adaptation:
+            return
+
+        gene_names = list(population[0].genes.keys())
+        if len(gene_names) < 2:
+            return
+
+        # Build data matrix
+        if np is None:
+            return  # Numpy required for correlation
+
+        n_genes = len(gene_names)
+        n_samples = len(population)
+
+        gene_values = np.zeros((n_samples, n_genes))
+        fitness_values = np.zeros(n_samples)
+
+        for i, genome in enumerate(population):
+            for j, name in enumerate(gene_names):
+                gene_values[i, j] = genome.genes[name].value
+            fitness_values[i] = genome.total_fitness()
+
+        # Compute pairwise correlations with fitness
+        for i in range(n_genes):
+            for j in range(i + 1, n_genes):
+                key = (gene_names[i], gene_names[j])
+
+                # Combined effect correlation
+                combined = gene_values[:, i] * gene_values[:, j]
+                if np.std(combined) > 0 and np.std(fitness_values) > 0:
+                    corr = np.corrcoef(combined, fitness_values)[0, 1]
+                else:
+                    corr = 0.0
+
+                if key not in self.gene_correlations:
+                    self.gene_correlations[key] = GeneCorrelation(
+                        gene1=gene_names[i],
+                        gene2=gene_names[j],
+                    )
+
+                gc = self.gene_correlations[key]
+                gc.correlation = (gc.correlation * gc.sample_count + corr) / (gc.sample_count + 1)
+                gc.sample_count += 1
+
+    def get_correlated_genes(self) -> list[tuple[str, str, float]]:
+        """Get genes with significant correlation."""
+        return [
+            (gc.gene1, gc.gene2, gc.correlation)
+            for gc in self.gene_correlations.values()
+            if abs(gc.correlation) >= self.config.correlation_threshold
+        ]
+
+    def record_run_result(
+        self,
+        gene_definitions: dict,
+        best_fitness: float,
+        generations_to_converge: int,
+        hyperparameters: dict,
+    ):
+        """Record results of an evolution run for transfer learning."""
+        sig = self.get_problem_signature(gene_definitions)
+
+        if sig not in self.knowledge_base:
+            self.knowledge_base[sig] = EvolutionKnowledge(problem_signature=sig)
+
+        knowledge = self.knowledge_base[sig]
+        knowledge.total_runs += 1
+
+        # Update convergence speed (running average)
+        knowledge.avg_convergence_speed = (
+            (knowledge.avg_convergence_speed * (knowledge.total_runs - 1) + generations_to_converge)
+            / knowledge.total_runs
+        )
+
+        # Update best hyperparameters if this run was better
+        if not knowledge.best_hyperparameters or best_fitness > knowledge.best_hyperparameters.get("best_fitness", 0):
+            knowledge.best_hyperparameters = {
+                **hyperparameters,
+                "best_fitness": best_fitness,
+            }
+
+        # Update operator preferences
+        knowledge.operator_preferences = dict(self.strategy_weights)
+
+        # Update effective gene combinations
+        correlated = self.get_correlated_genes()
+        knowledge.effective_gene_combinations = [
+            (g1, g2) for g1, g2, _ in correlated
+        ]
+
+        self.save_knowledge()
+
+    def get_recommended_hyperparameters(self, gene_definitions: dict) -> dict:
+        """Get recommended hyperparameters for a problem."""
+        sig = self.get_problem_signature(gene_definitions)
+
+        # Check for exact match
+        if sig in self.knowledge_base:
+            return self.knowledge_base[sig].best_hyperparameters
+
+        # No transfer knowledge available
+        return {}
+
+    def get_meta_stats(self) -> dict:
+        """Get meta-learning statistics."""
+        return {
+            "operators": {
+                name: {
+                    "uses": op.uses,
+                    "success_rate": op.success_rate,
+                    "avg_improvement": op.avg_improvement,
+                }
+                for name, op in self.operators.items()
+                if op.uses > 0
+            },
+            "strategy_weights": self.strategy_weights,
+            "knowledge_base_size": len(self.knowledge_base),
+            "gene_correlations_learned": len(self.gene_correlations),
+            "significant_correlations": len(self.get_correlated_genes()),
+        }
+
+
 class GeneticOptimizer:
     """
     DEAP-inspired genetic optimizer for system parameters.
@@ -131,6 +476,7 @@ class GeneticOptimizer:
         self,
         config: Optional[EvolutionConfig] = None,
         data_dir: str = "./data/evolution",
+        meta_learning_config: Optional[MetaLearningConfig] = None,
     ):
         self.config = config or EvolutionConfig()
         self.data_dir = Path(data_dir)
@@ -158,6 +504,12 @@ class GeneticOptimizer:
             "best_fitness_ever": 0.0,
             "stagnation_count": 0,
         }
+
+        # AGI v1.5: Meta-learning
+        self.meta_learner = MetaLearner(
+            config=meta_learning_config or MetaLearningConfig(),
+            data_dir=data_dir,
+        )
 
     def define_gene(
         self,
@@ -251,26 +603,59 @@ class GeneticOptimizer:
         return max(contestants, key=lambda g: g.total_fitness())
 
     def _crossover(self, parent1: Genome, parent2: Genome) -> tuple[Genome, Genome]:
-        """Two-point crossover."""
+        """
+        Crossover with meta-learned operator selection.
+
+        AGI v1.5: Selects crossover method based on learned performance.
+        """
+        gene_names = list(self.gene_definitions.keys())
+        if len(gene_names) < 2:
+            return self._mutate(parent1), self._mutate(parent2)
+
+        # AGI v1.5: Select crossover operator using meta-learning
+        operator = self.meta_learner.select_crossover_operator()
+
         genes1 = {}
         genes2 = {}
 
-        gene_names = list(self.gene_definitions.keys())
-        if len(gene_names) < 2:
-            # Can't do meaningful crossover
-            return self._mutate(parent1), self._mutate(parent2)
+        if operator == "crossover_uniform":
+            # Uniform crossover - each gene randomly from either parent
+            for name in gene_names:
+                if random.random() < 0.5:
+                    genes1[name] = Gene(**{**parent1.genes[name].__dict__})
+                    genes2[name] = Gene(**{**parent2.genes[name].__dict__})
+                else:
+                    genes1[name] = Gene(**{**parent2.genes[name].__dict__})
+                    genes2[name] = Gene(**{**parent1.genes[name].__dict__})
 
-        # Select crossover points
-        point1 = random.randint(0, len(gene_names) - 1)
-        point2 = random.randint(point1, len(gene_names))
+        elif operator == "crossover_blend":
+            # Blend crossover - interpolate gene values
+            alpha = 0.5
+            for name in gene_names:
+                g1, g2 = parent1.genes[name], parent2.genes[name]
+                blend1 = alpha * g1.value + (1 - alpha) * g2.value
+                blend2 = (1 - alpha) * g1.value + alpha * g2.value
 
-        for i, name in enumerate(gene_names):
-            if point1 <= i < point2:
-                genes1[name] = Gene(**{**parent2.genes[name].__dict__})
-                genes2[name] = Gene(**{**parent1.genes[name].__dict__})
-            else:
-                genes1[name] = Gene(**{**parent1.genes[name].__dict__})
-                genes2[name] = Gene(**{**parent2.genes[name].__dict__})
+                genes1[name] = Gene(
+                    name=name, value=blend1,
+                    min_val=g1.min_val, max_val=g1.max_val, mutation_sigma=g1.mutation_sigma
+                )
+                genes2[name] = Gene(
+                    name=name, value=blend2,
+                    min_val=g2.min_val, max_val=g2.max_val, mutation_sigma=g2.mutation_sigma
+                )
+
+        else:  # crossover_two_point (default)
+            point1 = random.randint(0, len(gene_names) - 1)
+            point2 = random.randint(point1, len(gene_names))
+
+            for i, name in enumerate(gene_names):
+                if point1 <= i < point2:
+                    genes1[name] = Gene(**{**parent2.genes[name].__dict__})
+                    genes2[name] = Gene(**{**parent1.genes[name].__dict__})
+                else:
+                    genes1[name] = Gene(**{**parent1.genes[name].__dict__})
+                    genes2[name] = Gene(**{**parent2.genes[name].__dict__})
 
         child1 = Genome(
             id=f"g{self.generation}_{random.randint(0, 9999):04d}",
@@ -285,23 +670,65 @@ class GeneticOptimizer:
             parent_ids=[parent1.id, parent2.id],
         )
 
+        # Store operator for later tracking
+        child1.genes["_crossover_op"] = operator  # type: ignore
+        child2.genes["_crossover_op"] = operator  # type: ignore
+
         return child1, child2
 
     def _mutate(self, genome: Genome) -> Genome:
-        """Mutate a genome."""
+        """
+        Mutate a genome with meta-learned operator selection.
+
+        AGI v1.5: Selects mutation method based on learned performance.
+        """
+        # AGI v1.5: Select mutation operator using meta-learning
+        operator = self.meta_learner.select_mutation_operator()
+
         new_genes = {}
         for name, gene in genome.genes.items():
+            if name.startswith("_"):  # Skip metadata
+                continue
+
             if random.random() < self.config.mutation_prob:
-                new_genes[name] = gene.mutate()
+                if operator == "mutation_uniform":
+                    # Uniform mutation - random value in range
+                    new_value = random.uniform(gene.min_val, gene.max_val)
+                    new_genes[name] = Gene(
+                        name=name, value=new_value,
+                        min_val=gene.min_val, max_val=gene.max_val,
+                        mutation_sigma=gene.mutation_sigma
+                    )
+
+                elif operator == "mutation_adaptive":
+                    # Adaptive mutation - sigma based on fitness
+                    # Lower sigma for high-fitness genomes (fine-tuning)
+                    fitness = genome.total_fitness()
+                    adaptive_sigma = gene.mutation_sigma * (1.0 - fitness * 0.5)
+                    delta = random.gauss(0, adaptive_sigma * (gene.max_val - gene.min_val))
+                    new_value = max(gene.min_val, min(gene.max_val, gene.value + delta))
+                    new_genes[name] = Gene(
+                        name=name, value=new_value,
+                        min_val=gene.min_val, max_val=gene.max_val,
+                        mutation_sigma=gene.mutation_sigma
+                    )
+
+                else:  # mutation_gaussian (default)
+                    new_genes[name] = gene.mutate()
             else:
                 new_genes[name] = Gene(**gene.__dict__)
 
-        return Genome(
+        child = Genome(
             id=f"g{self.generation}_{random.randint(0, 9999):04d}",
             genes=new_genes,
             generation=self.generation,
             parent_ids=[genome.id],
         )
+
+        # Store operator for later tracking
+        child.genes["_mutation_op"] = operator  # type: ignore
+
+        return child
 
     def _nsga2_sort(self, population: list[Genome]) -> list[Genome]:
         """
@@ -397,8 +824,33 @@ class GeneticOptimizer:
         return [(i, distances[i]) for i in front]
 
     async def evolve_generation(self):
-        """Evolve one generation."""
+        """Evolve one generation with meta-learning integration."""
+        # Store pre-evaluation fitness for operator tracking
+        pre_fitness = {g.id: g.total_fitness() for g in self.population}
+
         await self.evaluate_population()
+
+        # AGI v1.5: Record operator results for meta-learning
+        for genome in self.population:
+            post_fitness = genome.total_fitness()
+
+            # Track crossover operator if used
+            crossover_op = genome.genes.pop("_crossover_op", None)  # type: ignore
+            if crossover_op and genome.parent_ids:
+                parent_fitness = max(
+                    pre_fitness.get(pid, 0) for pid in genome.parent_ids
+                )
+                self.meta_learner.record_operator_result(
+                    crossover_op, parent_fitness, post_fitness
+                )
+
+            # Track mutation operator if used
+            mutation_op = genome.genes.pop("_mutation_op", None)  # type: ignore
+            if mutation_op and genome.parent_ids:
+                parent_fitness = pre_fitness.get(genome.parent_ids[0], 0)
+                self.meta_learner.record_operator_result(
+                    mutation_op, parent_fitness, post_fitness
+                )
 
         # Sort population (NSGA-II or simple fitness)
         if self.config.use_nsga2:
@@ -428,6 +880,11 @@ class GeneticOptimizer:
             logger.info(f"Increasing mutation rate to {self.config.mutation_prob:.2f}")
         else:
             self.config.mutation_prob = max(0.1, self.config.mutation_prob * 0.95)
+
+        # AGI v1.5: Update meta-learning periodically
+        if self.generation % self.meta_learner.config.strategy_update_interval == 0:
+            self.meta_learner.update_strategy_weights()
+            self.meta_learner.learn_gene_correlations(sorted_pop)
 
         # Create next generation
         self.generation += 1
@@ -500,7 +957,7 @@ class GeneticOptimizer:
         early_stop_fitness: Optional[float] = None,
     ) -> EvolutionResult:
         """
-        Run the full evolution process.
+        Run the full evolution process with meta-learning.
 
         Args:
             generations: Number of generations (uses config if None)
@@ -508,6 +965,8 @@ class GeneticOptimizer:
 
         Returns:
             EvolutionResult with best genome and history
+
+        AGI v1.5: Includes meta-learning for self-optimization.
         """
         import time
         start_time = time.time()
@@ -515,8 +974,18 @@ class GeneticOptimizer:
         generations = generations or self.config.generations
 
         if not self.population:
+            # AGI v1.5: Apply transfer learning from similar problems
+            recommended = self.meta_learner.get_recommended_hyperparameters(self.gene_definitions)
+            if recommended:
+                logger.info(f"Applying transfer learning: {recommended}")
+                if "mutation_prob" in recommended:
+                    self.config.mutation_prob = recommended["mutation_prob"]
+                if "crossover_prob" in recommended:
+                    self.config.crossover_prob = recommended["crossover_prob"]
+
             self.initialize_population()
 
+        early_stopped = False
         for gen in range(generations):
             await self.evolve_generation()
 
@@ -525,6 +994,7 @@ class GeneticOptimizer:
                 best = max(self.population, key=lambda g: g.total_fitness())
                 if best.total_fitness() >= early_stop_fitness:
                     logger.info(f"Early stopping at generation {gen}")
+                    early_stopped = True
                     break
 
             logger.info(f"Generation {gen + 1}/{generations} complete")
@@ -532,6 +1002,18 @@ class GeneticOptimizer:
         # Final evaluation
         await self.evaluate_population()
         best_genome = max(self.population, key=lambda g: g.total_fitness())
+
+        # AGI v1.5: Record run results for transfer learning
+        self.meta_learner.record_run_result(
+            gene_definitions=self.gene_definitions,
+            best_fitness=best_genome.total_fitness(),
+            generations_to_converge=self.generation,
+            hyperparameters={
+                "mutation_prob": self.config.mutation_prob,
+                "crossover_prob": self.config.crossover_prob,
+                "population_size": self.config.population_size,
+            },
+        )
 
         return EvolutionResult(
             best_genome=best_genome,
@@ -548,11 +1030,17 @@ class GeneticOptimizer:
         return max(self.population, key=lambda g: g.total_fitness())
 
     def get_stats(self) -> dict:
-        """Get optimizer statistics."""
+        """Get optimizer statistics including meta-learning."""
         return {
             **self.stats,
             "population_size": len(self.population),
             "current_generation": self.generation,
             "mutation_prob": self.config.mutation_prob,
             "gene_count": len(self.gene_definitions),
+            # AGI v1.5: Meta-learning stats
+            "meta_learning": self.meta_learner.get_meta_stats(),
         }
+
+    def get_correlated_genes(self) -> list[tuple[str, str, float]]:
+        """Get significantly correlated gene pairs from meta-learning."""
+        return self.meta_learner.get_correlated_genes()

@@ -894,6 +894,270 @@ class MemorySystem:
 """
 
     # =========================================================================
+    # SWARM COHESION: TASK-AWARE RECALL (AGI Upgrade)
+    # =========================================================================
+
+    async def recall_for_task(
+        self,
+        task_description: str,
+        context_vector: Optional[list] = None,
+        task_capabilities: Optional[list[str]] = None,
+        limit: int = 5,
+        include_graph: bool = True,
+        boost_recent: bool = True,
+    ) -> dict:
+        """
+        Memory recall optimized for swarm task routing.
+
+        This method bridges memory_system.py with swarm_orchestrator.py,
+        providing rich context for memory-aware task assignment.
+
+        Args:
+            task_description: The task description to match against
+            context_vector: Pre-computed embedding vector (skips embedding if provided)
+            task_capabilities: List of capability tags to boost matching memories
+            limit: Maximum memories to return
+            include_graph: Include knowledge graph entity matches
+            boost_recent: Apply recency boost to scores
+
+        Returns:
+            Dict containing:
+            - memories: List of relevant memories with scores
+            - entities: Related knowledge graph entities
+            - suggested_context: Formatted context string for task
+            - capability_hints: Inferred capabilities from memory patterns
+            - context_vector: The vector used (generated if not provided)
+        """
+        self.notify_activity()
+
+        # Generate embedding if not provided
+        if context_vector is None and self._embed_fn:
+            context_vector = await self._get_embedding(task_description)
+
+        # Parallel recall from multiple sources
+        tasks = []
+
+        # 1. Archival search
+        tasks.append(self._search_archival_wrapped(task_description, limit * 2, 0.2))
+
+        # 2. Conversation search (recent context)
+        tasks.append(self._search_conversation_wrapped(task_description, limit))
+
+        # 3. Knowledge graph (if enabled)
+        if include_graph:
+            tasks.append(self._search_graph_wrapped(task_description, limit))
+        else:
+            async def _empty():
+                return []
+            tasks.append(_empty())
+
+        archival_results, conv_results, graph_results = await asyncio.gather(*tasks)
+
+        # Combine and score results
+        all_memories = []
+
+        for r in archival_results:
+            score = r.score
+            # Capability matching boost
+            if task_capabilities and r.metadata.get("tags"):
+                matching_tags = set(task_capabilities) & set(r.metadata["tags"])
+                score *= (1.0 + len(matching_tags) * 0.15)
+
+            # Recency boost
+            if boost_recent:
+                created_at = r.metadata.get("created_at")
+                if created_at:
+                    try:
+                        if isinstance(created_at, str):
+                            created_at = datetime.fromisoformat(created_at)
+                        age_hours = (datetime.now() - created_at).total_seconds() / 3600
+                        recency_factor = 1.0 / (1.0 + age_hours / 24)  # Half-life of 24 hours
+                        score *= (0.7 + 0.3 * recency_factor)
+                    except:
+                        pass
+
+            all_memories.append({
+                "id": r.metadata.get("id", ""),
+                "content": r.content,
+                "source": r.source,
+                "score": score,
+                "tags": r.metadata.get("tags", []),
+                "metadata": r.metadata,
+            })
+
+        for r in conv_results:
+            all_memories.append({
+                "id": "",
+                "content": r.content,
+                "source": "conversation",
+                "score": r.score * 0.9,  # Slightly lower weight for conversation
+                "tags": [],
+                "metadata": r.metadata,
+            })
+
+        # Sort and deduplicate
+        all_memories.sort(key=lambda x: x["score"], reverse=True)
+
+        seen_content = set()
+        unique_memories = []
+        for m in all_memories:
+            content_key = m["content"][:80].lower()
+            if content_key not in seen_content:
+                seen_content.add(content_key)
+                unique_memories.append(m)
+                if len(unique_memories) >= limit:
+                    break
+
+        # Extract entities from graph results
+        entities = []
+        for r in graph_results:
+            entities.append({
+                "name": r.content,
+                "type": r.metadata.get("entity_type", "unknown"),
+                "properties": r.metadata.get("properties", {}),
+            })
+
+        # Build suggested context string
+        context_parts = []
+        if unique_memories:
+            context_parts.append("RELEVANT MEMORIES:")
+            for i, m in enumerate(unique_memories[:3], 1):
+                context_parts.append(f"  {i}. {m['content'][:200]}...")
+
+        if entities:
+            context_parts.append("\nRELATED ENTITIES:")
+            for e in entities[:3]:
+                context_parts.append(f"  - {e['name']} ({e['type']})")
+
+        suggested_context = "\n".join(context_parts) if context_parts else ""
+
+        # Infer capability hints from memory patterns
+        capability_hints = self._infer_capabilities_from_memories(unique_memories)
+
+        # Emit recall signal via Nexus
+        if NEXUS_AVAILABLE and nexus:
+            asyncio.create_task(nexus.emit(
+                type=SignalType.MEMORY_CONSOLIDATION,
+                payload={
+                    "event": "task_recall",
+                    "memory_count": len(unique_memories),
+                    "entity_count": len(entities),
+                    "capability_hints": capability_hints,
+                    "query_preview": task_description[:50],
+                },
+                source="memory_system",
+                urgency=0.5,
+            ))
+
+        return {
+            "memories": unique_memories,
+            "entities": entities,
+            "suggested_context": suggested_context,
+            "capability_hints": capability_hints,
+            "context_vector": context_vector,
+            "total_searched": len(archival_results) + len(conv_results),
+        }
+
+    async def emit_consolidation_for_swarm(
+        self,
+        memory_ids: list[str],
+        session_ref: Optional[str] = None,
+        relevance_score: float = 0.7,
+    ):
+        """
+        Emit a memory consolidation signal with full context for swarm routing.
+
+        AGI Cohesion: This method bridges memory consolidation events with
+        the swarm_orchestrator's task context updates, enabling dynamic handoffs.
+
+        Args:
+            memory_ids: IDs of consolidated memories
+            session_ref: Optional reference to a task/session
+            relevance_score: How relevant this consolidation is (0-1)
+        """
+        if not NEXUS_AVAILABLE or not nexus:
+            return
+
+        # Gather context from the memories
+        content_preview = ""
+        combined_embedding = None
+        tags = []
+
+        for mem_id in memory_ids[:5]:  # Limit to first 5 for efficiency
+            if hasattr(self.archival_memory, 'entries') and mem_id in self.archival_memory.entries:
+                entry = self.archival_memory.entries[mem_id]
+                content_preview += entry.content[:100] + " "
+                tags.extend(entry.tags)
+
+                # Combine embeddings (average)
+                if entry.embedding:
+                    if combined_embedding is None:
+                        combined_embedding = list(entry.embedding)
+                    else:
+                        combined_embedding = [
+                            (a + b) / 2 for a, b in zip(combined_embedding, entry.embedding)
+                        ]
+
+        # Normalize combined embedding if we have one
+        if combined_embedding:
+            import math
+            norm = math.sqrt(sum(x*x for x in combined_embedding))
+            if norm > 0:
+                combined_embedding = [x / norm for x in combined_embedding]
+
+        # Emit the consolidation signal
+        await nexus.emit(
+            type=SignalType.MEMORY_CONSOLIDATION,
+            payload={
+                "memory_ids": memory_ids,
+                "session_ref": session_ref,
+                "content_preview": content_preview.strip()[:200],
+                "relevance": relevance_score,
+                "tags": list(set(tags)),
+                "new_vector": combined_embedding,
+            },
+            source="memory_system",
+            urgency=0.5 + relevance_score * 0.3,
+            context_vector=combined_embedding,
+        )
+
+        logger.debug(
+            f"Emitted consolidation signal for {len(memory_ids)} memories "
+            f"(relevance={relevance_score:.2f})"
+        )
+
+    def _infer_capabilities_from_memories(self, memories: list) -> list[str]:
+        """
+        Infer task capabilities from memory content patterns.
+
+        Scans memory content for keywords that suggest required capabilities.
+        """
+        capability_keywords = {
+            "code": ["code", "function", "implement", "debug", "programming", "api"],
+            "reasoning": ["analyze", "think", "reason", "logic", "deduce", "infer"],
+            "research": ["research", "search", "find", "investigate", "discover"],
+            "creative": ["write", "create", "design", "story", "creative", "generate"],
+            "math": ["calculate", "math", "equation", "formula", "number"],
+            "data": ["data", "database", "query", "sql", "analysis"],
+        }
+
+        capability_scores = {cap: 0.0 for cap in capability_keywords}
+
+        for memory in memories:
+            content_lower = memory.get("content", "").lower()
+            tags = memory.get("tags", [])
+
+            for capability, keywords in capability_keywords.items():
+                for kw in keywords:
+                    if kw in content_lower:
+                        capability_scores[capability] += memory.get("score", 0.5) * 0.3
+                    if kw in [t.lower() for t in tags]:
+                        capability_scores[capability] += memory.get("score", 0.5) * 0.5
+
+        # Return capabilities with score > 0.5
+        return [cap for cap, score in capability_scores.items() if score > 0.5]
+
+    # =========================================================================
     # FEDERATED SYNC WITH DIFFERENTIAL PRIVACY (AGI Upgrade 1)
     # =========================================================================
 

@@ -579,6 +579,152 @@ class Nexus:
         )
         await self.broadcast(signal)
 
+    # =========================================================================
+    # SEMANTIC BROADCAST (AGI Cohesion Upgrade)
+    # =========================================================================
+
+    async def semantic_broadcast(
+        self,
+        signal: Signal,
+        similarity_threshold: float = 0.15,
+        include_type_handlers: bool = True,
+        embed_fn: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """
+        Intelligent signal routing based on semantic similarity.
+
+        This is the neural routing upgrade that enables signals to find
+        handlers based on context_vector similarity, creating emergent
+        routing patterns without explicit configuration.
+
+        Args:
+            signal: The signal to broadcast
+            similarity_threshold: Maximum cosine distance to trigger (lower = stricter)
+            include_type_handlers: Also dispatch to type-based handlers
+            embed_fn: Optional embedding function for text-based signals
+
+        Returns:
+            Dict with dispatch statistics:
+            - semantic_handlers_invoked: Number of semantic handlers triggered
+            - type_handlers_invoked: Number of type-based handlers triggered
+            - avg_similarity: Average similarity score of invoked handlers
+            - routing_latency_ms: Time taken for routing decision
+        """
+        import time
+        start_time = time.time()
+
+        self._last_activity = datetime.now()
+
+        # Store in history
+        self._history.append(signal)
+        if len(self._history) > 1000:
+            self._history.pop(0)
+        self._store_persistent(signal)
+
+        # Run middleware
+        for mw in self._middleware:
+            try:
+                if not mw(signal):
+                    return {"blocked_by_middleware": True}
+            except Exception as e:
+                logger.error(f"Nexus: Middleware error in semantic_broadcast: {e}")
+                return {"middleware_error": str(e)}
+
+        semantic_invoked = 0
+        type_invoked = 0
+        similarity_scores = []
+
+        # Generate context_vector if not present but we have text content
+        if not signal.context_vector and embed_fn:
+            text_content = signal.payload.get("content") or signal.payload.get("text")
+            if text_content:
+                try:
+                    if asyncio.iscoroutinefunction(embed_fn):
+                        signal.context_vector = await embed_fn(text_content)
+                    else:
+                        signal.context_vector = embed_fn(text_content)
+                except Exception as e:
+                    logger.debug(f"Embedding generation failed: {e}")
+
+        # Semantic dispatch with similarity threshold as distance
+        if signal.context_vector and self._semantic_subscriptions:
+            tasks = []
+
+            for sub in self._semantic_subscriptions:
+                # Optional type filter
+                if sub.signal_types and signal.type not in sub.signal_types:
+                    continue
+
+                # Compute cosine similarity
+                similarity = self._cosine_similarity(signal.context_vector, sub.target_vector)
+                distance = 1.0 - similarity
+
+                # Use distance threshold (lower distance = more similar)
+                if distance <= similarity_threshold:
+                    similarity_scores.append(similarity)
+                    sub.invocations += 1
+                    sub.last_invoked = datetime.now()
+
+                    async def invoke_semantic(handler, subscription, sig, sim):
+                        try:
+                            await handler(sig)
+                            subscription.successful_invocations += 1
+                            return {"success": True, "similarity": sim}
+                        except Exception as e:
+                            logger.error(f"Semantic handler error: {e}")
+                            return {"success": False, "error": str(e)}
+
+                    tasks.append(invoke_semantic(sub.handler, sub, signal, similarity))
+                    semantic_invoked += 1
+
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Type-based dispatch
+        if include_type_handlers:
+            handlers = self._subscribers.get(signal.type, [])
+            if handlers:
+                type_invoked = len(handlers)
+                await asyncio.gather(
+                    *[h(signal) for h in handlers],
+                    return_exceptions=True
+                )
+
+        routing_latency = (time.time() - start_time) * 1000
+
+        return {
+            "semantic_handlers_invoked": semantic_invoked,
+            "type_handlers_invoked": type_invoked,
+            "avg_similarity": sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0,
+            "routing_latency_ms": routing_latency,
+            "signal_id": signal.id,
+        }
+
+    async def emit_semantic(
+        self,
+        type: SignalType,
+        payload: Dict[str, Any],
+        source: str,
+        context_vector: List[float],
+        urgency: float = 0.5,
+        similarity_threshold: float = 0.15,
+        semantic_tags: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Convenience method to emit a signal with semantic routing.
+
+        Combines signal creation with semantic_broadcast for cleaner API.
+        """
+        signal = Signal(
+            type=type,
+            payload=payload,
+            source_id=source,
+            urgency=urgency,
+            context_vector=context_vector,
+            semantic_tags=semantic_tags or [],
+        )
+        return await self.semantic_broadcast(signal, similarity_threshold=similarity_threshold)
+
     def inspection_black_box(self, last_n: int = 10) -> List[Signal]:
         """Retrieve recent signals for debugging/introspection."""
         return self._history[-last_n:]

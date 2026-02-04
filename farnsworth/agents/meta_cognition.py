@@ -6,17 +6,31 @@ Novel Approaches:
 2. Strategy Analysis - Evaluate and improve approaches
 3. Performance Monitoring - Track quality metrics
 4. Improvement Proposals - Generate concrete enhancement ideas
+
+AGI Upgrades:
+5. Self-Healing - Anomaly detection with automatic task rerouting
+6. Proactive Diagnostics - Curiosity-driven system health checks
+7. Adaptive Thresholds - Self-adjusting performance boundaries
 """
 
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional, Any
+from typing import Optional, Any, Callable, Dict, List
 from collections import defaultdict
+from enum import Enum
 
 from loguru import logger
 
 from farnsworth.agents.base_agent import BaseAgent, AgentCapability, TaskResult
+
+# Nexus integration for self-healing
+try:
+    from farnsworth.core.nexus import nexus, SignalType
+    NEXUS_AVAILABLE = True
+except ImportError:
+    NEXUS_AVAILABLE = False
+    nexus = None
 
 
 @dataclass
@@ -50,6 +64,69 @@ class ImprovementProposal:
     implementation_notes: str = ""
     status: str = "proposed"  # proposed, accepted, implemented, rejected
     created_at: datetime = field(default_factory=datetime.now)
+
+
+# =============================================================================
+# SELF-HEALING DATASTRUCTURES (AGI Upgrade)
+# =============================================================================
+
+class AnomalyType(Enum):
+    """Types of system anomalies."""
+    PERFORMANCE_DEGRADATION = "performance_degradation"
+    ERROR_SPIKE = "error_spike"
+    RESOURCE_EXHAUSTION = "resource_exhaustion"
+    LATENCY_INCREASE = "latency_increase"
+    CONFIDENCE_DROP = "confidence_drop"
+    CAPABILITY_FAILURE = "capability_failure"
+    CASCADE_RISK = "cascade_risk"
+
+
+class HealingAction(Enum):
+    """Self-healing actions."""
+    REROUTE_TASK = "reroute_task"
+    REDUCE_LOAD = "reduce_load"
+    ESCALATE_MODEL = "escalate_model"
+    TRIGGER_REFLECTION = "trigger_reflection"
+    SPAWN_SPECIALIST = "spawn_specialist"
+    CLEAR_CACHE = "clear_cache"
+    ADJUST_THRESHOLD = "adjust_threshold"
+    NOTIFY_OPERATOR = "notify_operator"
+
+
+@dataclass
+class Anomaly:
+    """A detected system anomaly."""
+    anomaly_type: AnomalyType
+    severity: float  # 0-1
+    source: str  # agent/component that triggered
+    description: str
+    evidence: Dict[str, Any] = field(default_factory=dict)
+    detected_at: datetime = field(default_factory=datetime.now)
+    resolved: bool = False
+    resolution_action: Optional[HealingAction] = None
+
+
+@dataclass
+class HealingResult:
+    """Result of a self-healing action."""
+    action: HealingAction
+    success: bool
+    anomaly_id: str
+    details: str
+    duration_ms: float = 0.0
+    side_effects: List[str] = field(default_factory=list)
+
+
+@dataclass
+class AdaptiveThreshold:
+    """Self-adjusting performance threshold."""
+    name: str
+    current_value: float
+    min_value: float
+    max_value: float
+    adjustment_rate: float = 0.05  # How much to adjust per update
+    history: List[float] = field(default_factory=list)
+    last_adjusted: datetime = field(default_factory=datetime.now)
 
 
 class MetaCognitionAgent(BaseAgent):
@@ -91,6 +168,9 @@ class MetaCognitionAgent(BaseAgent):
 
         # Strategy effectiveness
         self.strategy_scores: dict[str, list[float]] = defaultdict(list)
+
+        # Initialize self-healing system (AGI upgrade)
+        self._init_self_healing()
 
     @property
     def system_prompt(self) -> str:
@@ -472,4 +552,382 @@ Provide:
             "capability_gaps": len(self.capability_gaps),
             "pending_proposals": len([p for p in self.improvement_proposals if p.status == "proposed"]),
             "top_error_types": dict(sorted(self.error_patterns.items(), key=lambda x: x[1], reverse=True)[:5]),
+            "active_anomalies": len([a for a in self.anomalies if not a.resolved]),
+            "healing_actions_taken": self.healing_stats.get("total_actions", 0),
+        }
+
+    # =========================================================================
+    # SELF-HEALING SYSTEM (AGI Upgrade)
+    # =========================================================================
+
+    def _init_self_healing(self):
+        """Initialize self-healing components."""
+        self.anomalies: List[Anomaly] = []
+        self.healing_history: List[HealingResult] = []
+        self.healing_stats = {
+            "total_actions": 0,
+            "successful_healings": 0,
+            "failed_healings": 0,
+        }
+
+        # Adaptive thresholds
+        self.adaptive_thresholds: Dict[str, AdaptiveThreshold] = {
+            "error_rate": AdaptiveThreshold(
+                name="error_rate",
+                current_value=0.3,  # Alert if >30% errors
+                min_value=0.1,
+                max_value=0.5,
+            ),
+            "latency_ms": AdaptiveThreshold(
+                name="latency_ms",
+                current_value=5000,  # Alert if >5s
+                min_value=1000,
+                max_value=30000,
+            ),
+            "confidence_floor": AdaptiveThreshold(
+                name="confidence_floor",
+                current_value=0.4,  # Alert if confidence drops below
+                min_value=0.2,
+                max_value=0.7,
+            ),
+        }
+
+        # Healing action handlers
+        self._healing_handlers: Dict[HealingAction, Callable] = {
+            HealingAction.REROUTE_TASK: self._heal_reroute_task,
+            HealingAction.REDUCE_LOAD: self._heal_reduce_load,
+            HealingAction.ESCALATE_MODEL: self._heal_escalate_model,
+            HealingAction.TRIGGER_REFLECTION: self._heal_trigger_reflection,
+            HealingAction.ADJUST_THRESHOLD: self._heal_adjust_threshold,
+        }
+
+        # Rerouting callbacks (set by swarm orchestrator)
+        self._reroute_callback: Optional[Callable] = None
+        self._escalate_callback: Optional[Callable] = None
+
+    async def detect_anomalies(self) -> List[Anomaly]:
+        """
+        Proactive anomaly detection across system metrics.
+
+        Checks:
+        - Error rate spikes
+        - Performance degradation
+        - Confidence drops
+        - Capability failures
+        """
+        detected = []
+        recent_tasks = self.task_history[-20:]
+
+        if len(recent_tasks) < 5:
+            return detected  # Not enough data
+
+        # 1. Error rate check
+        error_rate = sum(1 for t in recent_tasks if not t.get("success")) / len(recent_tasks)
+        threshold = self.adaptive_thresholds["error_rate"].current_value
+
+        if error_rate > threshold:
+            severity = min(1.0, error_rate / threshold - 1.0 + 0.5)
+            anomaly = Anomaly(
+                anomaly_type=AnomalyType.ERROR_SPIKE,
+                severity=severity,
+                source="task_history",
+                description=f"Error rate {error_rate:.0%} exceeds threshold {threshold:.0%}",
+                evidence={"error_rate": error_rate, "threshold": threshold, "sample_size": len(recent_tasks)},
+            )
+            detected.append(anomaly)
+            self.anomalies.append(anomaly)
+
+        # 2. Confidence degradation check
+        avg_confidence = sum(t.get("confidence", 0.5) for t in recent_tasks) / len(recent_tasks)
+        conf_floor = self.adaptive_thresholds["confidence_floor"].current_value
+
+        if avg_confidence < conf_floor:
+            severity = min(1.0, (conf_floor - avg_confidence) / conf_floor + 0.3)
+            anomaly = Anomaly(
+                anomaly_type=AnomalyType.CONFIDENCE_DROP,
+                severity=severity,
+                source="task_history",
+                description=f"Avg confidence {avg_confidence:.0%} below floor {conf_floor:.0%}",
+                evidence={"avg_confidence": avg_confidence, "floor": conf_floor},
+            )
+            detected.append(anomaly)
+            self.anomalies.append(anomaly)
+
+        # 3. Capability failure pattern check
+        capability_errors = [t for t in recent_tasks if t.get("metadata", {}).get("error_type") == "capability_limitation"]
+        if len(capability_errors) >= 3:
+            anomaly = Anomaly(
+                anomaly_type=AnomalyType.CAPABILITY_FAILURE,
+                severity=0.7,
+                source="capability_tracking",
+                description=f"Repeated capability failures ({len(capability_errors)} in last {len(recent_tasks)} tasks)",
+                evidence={"failure_count": len(capability_errors)},
+            )
+            detected.append(anomaly)
+            self.anomalies.append(anomaly)
+
+        # 4. Cascade risk detection (multiple simultaneous issues)
+        if len(detected) >= 2:
+            cascade_anomaly = Anomaly(
+                anomaly_type=AnomalyType.CASCADE_RISK,
+                severity=min(1.0, sum(a.severity for a in detected) / 2),
+                source="anomaly_aggregation",
+                description=f"Multiple concurrent anomalies detected ({len(detected)}), cascade risk",
+                evidence={"anomaly_types": [a.anomaly_type.value for a in detected]},
+            )
+            detected.append(cascade_anomaly)
+            self.anomalies.append(cascade_anomaly)
+
+        # Emit anomaly signals via Nexus
+        if NEXUS_AVAILABLE and nexus and detected:
+            for anomaly in detected:
+                asyncio.create_task(nexus.emit(
+                    SignalType.ANOMALY_DETECTED,
+                    {
+                        "anomaly_type": anomaly.anomaly_type.value,
+                        "severity": anomaly.severity,
+                        "source": anomaly.source,
+                        "description": anomaly.description,
+                    },
+                    source="meta_cognition",
+                    urgency=0.5 + anomaly.severity * 0.5,
+                ))
+
+        return detected
+
+    async def self_heal(self, anomaly: Anomaly) -> HealingResult:
+        """
+        Attempt to self-heal from an anomaly.
+
+        Selects appropriate healing action based on anomaly type
+        and executes the corresponding handler.
+        """
+        import time
+        start_time = time.time()
+
+        # Select healing action based on anomaly type
+        action = self._select_healing_action(anomaly)
+
+        # Execute healing
+        handler = self._healing_handlers.get(action)
+        success = False
+        details = ""
+
+        if handler:
+            try:
+                success, details = await handler(anomaly)
+            except Exception as e:
+                details = f"Healing failed with error: {e}"
+                logger.error(f"Self-healing error: {e}")
+        else:
+            details = f"No handler for action {action.value}"
+
+        # Record result
+        duration_ms = (time.time() - start_time) * 1000
+        result = HealingResult(
+            action=action,
+            success=success,
+            anomaly_id=str(id(anomaly)),
+            details=details,
+            duration_ms=duration_ms,
+        )
+
+        self.healing_history.append(result)
+        self.healing_stats["total_actions"] += 1
+        if success:
+            self.healing_stats["successful_healings"] += 1
+            anomaly.resolved = True
+            anomaly.resolution_action = action
+        else:
+            self.healing_stats["failed_healings"] += 1
+
+        logger.info(f"Self-healing {'succeeded' if success else 'failed'}: {action.value} - {details}")
+
+        return result
+
+    def _select_healing_action(self, anomaly: Anomaly) -> HealingAction:
+        """Select appropriate healing action for an anomaly."""
+        action_map = {
+            AnomalyType.ERROR_SPIKE: HealingAction.REROUTE_TASK,
+            AnomalyType.PERFORMANCE_DEGRADATION: HealingAction.REDUCE_LOAD,
+            AnomalyType.CONFIDENCE_DROP: HealingAction.ESCALATE_MODEL,
+            AnomalyType.CAPABILITY_FAILURE: HealingAction.SPAWN_SPECIALIST,
+            AnomalyType.CASCADE_RISK: HealingAction.REDUCE_LOAD,
+            AnomalyType.LATENCY_INCREASE: HealingAction.CLEAR_CACHE,
+        }
+
+        action = action_map.get(anomaly.anomaly_type, HealingAction.TRIGGER_REFLECTION)
+
+        # High severity always triggers reflection
+        if anomaly.severity >= 0.8:
+            action = HealingAction.TRIGGER_REFLECTION
+
+        return action
+
+    async def _heal_reroute_task(self, anomaly: Anomaly) -> tuple[bool, str]:
+        """Reroute tasks away from failing component."""
+        if self._reroute_callback:
+            try:
+                await self._reroute_callback(anomaly.source)
+                return True, f"Tasks rerouted away from {anomaly.source}"
+            except Exception as e:
+                return False, f"Reroute failed: {e}"
+        return False, "No reroute callback configured"
+
+    async def _heal_reduce_load(self, anomaly: Anomaly) -> tuple[bool, str]:
+        """Reduce system load to recover from degradation."""
+        # Emit signal to reduce load across the system
+        if NEXUS_AVAILABLE and nexus:
+            await nexus.emit(
+                SignalType.EXTERNAL_EVENT,
+                {
+                    "event": "load_reduction_requested",
+                    "reason": anomaly.description,
+                    "severity": anomaly.severity,
+                },
+                source="meta_cognition_healing",
+                urgency=0.7,
+            )
+            return True, "Load reduction signal emitted"
+        return False, "Nexus not available for load reduction"
+
+    async def _heal_escalate_model(self, anomaly: Anomaly) -> tuple[bool, str]:
+        """Escalate to a more capable model."""
+        if self._escalate_callback:
+            try:
+                await self._escalate_callback("confidence_issue")
+                return True, "Escalated to higher-capability model"
+            except Exception as e:
+                return False, f"Escalation failed: {e}"
+        return False, "No escalation callback configured"
+
+    async def _heal_trigger_reflection(self, anomaly: Anomaly) -> tuple[bool, str]:
+        """Trigger deep reflection on the issue."""
+        result = await self._reflect({"anomaly": anomaly.description})
+        return True, f"Reflection triggered: {result.output[:100]}..."
+
+    async def _heal_adjust_threshold(self, anomaly: Anomaly) -> tuple[bool, str]:
+        """Adjust adaptive threshold based on evidence."""
+        # Find which threshold needs adjustment
+        threshold_name = anomaly.evidence.get("threshold_name")
+        if threshold_name and threshold_name in self.adaptive_thresholds:
+            threshold = self.adaptive_thresholds[threshold_name]
+            self._adjust_threshold(threshold, direction="relax")
+            return True, f"Adjusted {threshold_name} threshold"
+        return False, "No threshold to adjust"
+
+    def _adjust_threshold(self, threshold: AdaptiveThreshold, direction: str = "auto"):
+        """
+        Adjust an adaptive threshold based on recent performance.
+
+        direction: "tighten", "relax", or "auto"
+        """
+        recent_values = threshold.history[-10:] if threshold.history else []
+
+        if direction == "auto" and recent_values:
+            avg = sum(recent_values) / len(recent_values)
+            if avg > threshold.current_value * 1.2:
+                direction = "relax"  # Values consistently high, relax threshold
+            elif avg < threshold.current_value * 0.8:
+                direction = "tighten"  # Values consistently low, can tighten
+
+        adjustment = threshold.current_value * threshold.adjustment_rate
+
+        if direction == "relax":
+            threshold.current_value = min(threshold.max_value, threshold.current_value + adjustment)
+        elif direction == "tighten":
+            threshold.current_value = max(threshold.min_value, threshold.current_value - adjustment)
+
+        threshold.last_adjusted = datetime.now()
+        logger.debug(f"Adjusted threshold {threshold.name} to {threshold.current_value:.3f}")
+
+    def set_reroute_callback(self, callback: Callable):
+        """Set callback for task rerouting."""
+        self._reroute_callback = callback
+
+    def set_escalate_callback(self, callback: Callable):
+        """Set callback for model escalation."""
+        self._escalate_callback = callback
+
+    async def run_health_check(self) -> Dict[str, Any]:
+        """
+        Run proactive health check (curiosity-driven diagnostics).
+
+        Returns comprehensive health report.
+        """
+        health = {
+            "timestamp": datetime.now().isoformat(),
+            "status": "healthy",
+            "checks": {},
+        }
+
+        # 1. Anomaly detection
+        anomalies = await self.detect_anomalies()
+        health["checks"]["anomaly_detection"] = {
+            "passed": len(anomalies) == 0,
+            "anomalies_found": len(anomalies),
+            "details": [a.description for a in anomalies],
+        }
+
+        # 2. Performance check
+        perf = self.get_performance_summary()
+        health["checks"]["performance"] = {
+            "passed": perf.get("success_rate", 0) >= 0.7,
+            "success_rate": perf.get("success_rate", 0),
+            "avg_confidence": perf.get("avg_confidence", 0),
+        }
+
+        # 3. Capability health
+        health["checks"]["capabilities"] = {
+            "passed": len(self.capability_gaps) < 5,
+            "gap_count": len(self.capability_gaps),
+            "top_gaps": [g.description for g in self.capability_gaps[:3]],
+        }
+
+        # 4. Self-healing effectiveness
+        healing_rate = (
+            self.healing_stats["successful_healings"] / max(1, self.healing_stats["total_actions"])
+        )
+        health["checks"]["self_healing"] = {
+            "passed": healing_rate >= 0.5 or self.healing_stats["total_actions"] == 0,
+            "success_rate": healing_rate,
+            "total_actions": self.healing_stats["total_actions"],
+        }
+
+        # Overall status
+        failed_checks = sum(1 for c in health["checks"].values() if not c.get("passed", True))
+        if failed_checks >= 3:
+            health["status"] = "critical"
+        elif failed_checks >= 1:
+            health["status"] = "degraded"
+
+        # Auto-heal critical issues
+        if health["status"] == "critical" and anomalies:
+            for anomaly in anomalies[:2]:  # Heal top 2 anomalies
+                await self.self_heal(anomaly)
+
+        return health
+
+    def get_healing_stats(self) -> Dict[str, Any]:
+        """Get self-healing statistics."""
+        return {
+            **self.healing_stats,
+            "active_anomalies": len([a for a in self.anomalies if not a.resolved]),
+            "resolved_anomalies": len([a for a in self.anomalies if a.resolved]),
+            "adaptive_thresholds": {
+                name: {
+                    "current": t.current_value,
+                    "min": t.min_value,
+                    "max": t.max_value,
+                }
+                for name, t in self.adaptive_thresholds.items()
+            },
+            "recent_healings": [
+                {
+                    "action": h.action.value,
+                    "success": h.success,
+                    "duration_ms": h.duration_ms,
+                }
+                for h in self.healing_history[-5:]
+            ],
         }

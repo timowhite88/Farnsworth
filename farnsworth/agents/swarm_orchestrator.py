@@ -14,6 +14,12 @@ AGI UPGRADES (v1.4):
 - Speculative agent spawning on spontaneous thoughts
 - Evolution triggers on dialogue consensus and anomalies
 - Closed AGI loop: Memory ↔ Nexus ↔ Swarm
+
+AGI UPGRADES (v1.5):
+- Performance-based agent pooling (recycle low performers)
+- Warm agent pool for rapid spawning
+- Agent health scoring and decay tracking
+- Dynamic pool sizing based on load
 """
 
 import asyncio
@@ -95,6 +101,66 @@ class EvolutionConfig:
         "speed": 0.2,
         "handoff_efficiency": 0.2,
     })
+
+
+# =============================================================================
+# AGENT POOLING (AGI Upgrade v1.5)
+# =============================================================================
+
+@dataclass
+class AgentPerformanceMetrics:
+    """Performance metrics for an agent instance."""
+    agent_id: str
+    agent_type: str
+    tasks_completed: int = 0
+    tasks_failed: int = 0
+    total_execution_time: float = 0.0
+    avg_confidence: float = 0.5
+    avg_latency_ms: float = 0.0
+    last_used: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=datetime.now)
+    error_streak: int = 0  # Consecutive errors
+    health_score: float = 1.0  # 0-1, decays over time and with errors
+
+    def success_rate(self) -> float:
+        total = self.tasks_completed + self.tasks_failed
+        return self.tasks_completed / total if total > 0 else 0.5
+
+    def compute_health_score(self) -> float:
+        """Compute health score from multiple factors."""
+        success_factor = self.success_rate()
+        confidence_factor = self.avg_confidence
+        recency_factor = max(0, 1 - (datetime.now() - self.last_used).seconds / 3600)  # Decay over 1hr
+        error_penalty = max(0, 1 - self.error_streak * 0.2)  # 20% penalty per consecutive error
+
+        self.health_score = (
+            success_factor * 0.4 +
+            confidence_factor * 0.2 +
+            recency_factor * 0.2 +
+            error_penalty * 0.2
+        )
+        return self.health_score
+
+
+@dataclass
+class PooledAgent:
+    """A pooled agent wrapper with performance tracking."""
+    agent: BaseAgent
+    metrics: AgentPerformanceMetrics
+    pool_state: str = "warm"  # "warm", "active", "cooling", "recycled"
+    checkout_time: Optional[datetime] = None
+
+
+@dataclass
+class AgentPoolConfig:
+    """Configuration for agent pooling."""
+    min_pool_size: int = 2  # Minimum warm agents per type
+    max_pool_size: int = 10  # Maximum total pooled agents
+    health_threshold: float = 0.3  # Below this, recycle the agent
+    idle_timeout_seconds: float = 300.0  # Recycle after 5 min idle
+    error_streak_limit: int = 5  # Recycle after N consecutive errors
+    warmup_on_startup: bool = True  # Pre-warm pool on startup
+    decay_interval_seconds: float = 60.0  # How often to decay health
 
 
 class TaskStatus(Enum):
@@ -196,7 +262,18 @@ class SwarmOrchestrator:
         # AGI: Speculative agent tracking
         self._speculative_agents: Dict[str, str] = {}  # agent_id -> thought_id
 
-        logger.info("SwarmOrchestrator initialized with AGI upgrades")
+        # AGI Cohesion: Memory-inferred capability hints
+        self._last_capability_hints: List[str] = []
+
+        # AGI v1.5: Agent pooling
+        self._pool_config = AgentPoolConfig()
+        self._agent_pool: Dict[str, PooledAgent] = {}  # agent_id -> PooledAgent
+        self._pool_by_type: Dict[str, List[str]] = {}  # agent_type -> [agent_ids]
+        self._pool_metrics: Dict[str, AgentPerformanceMetrics] = {}  # agent_id -> metrics
+        self._pool_lock = asyncio.Lock()
+        self._decay_task: Optional[asyncio.Task] = None
+
+        logger.info("SwarmOrchestrator initialized with AGI upgrades (v1.5 pooling)")
 
     # =========================================================================
     # NEXUS INTEGRATION (AGI Upgrade)
@@ -233,6 +310,9 @@ class SwarmOrchestrator:
         self._nexus_subscribed = True
         logger.info("SwarmOrchestrator connected to Nexus")
 
+        # AGI Cohesion: Register semantic subscriptions for neural routing
+        await self._register_semantic_subscriptions()
+
         # Emit startup signal
         await nexus.emit(
             SignalType.SYSTEM_STARTUP,
@@ -240,6 +320,66 @@ class SwarmOrchestrator:
             source="swarm_orchestrator",
             urgency=0.8,
         )
+
+    async def _register_semantic_subscriptions(self):
+        """
+        Register semantic subscriptions for neural routing.
+
+        AGI Cohesion: Links swarm_orchestrator to nexus semantic routing,
+        enabling context-vector-based task discovery and agent matching.
+        """
+        # Subscribe to memory-related signals with semantic matching
+        if self._agent_type_vectors:
+            for agent_type, type_vector in self._agent_type_vectors.items():
+                # Create semantic handler for each agent type
+                async def make_semantic_handler(a_type):
+                    async def handler(signal: Signal):
+                        await self._on_semantic_match(signal, a_type)
+                    return handler
+
+                handler = await make_semantic_handler(agent_type)
+
+                # Register with nexus semantic subscription
+                nexus.subscribe_semantic(
+                    handler=handler,
+                    target_vector=type_vector,
+                    similarity_threshold=0.75,  # Only match highly relevant signals
+                    signal_types={
+                        SignalType.THOUGHT_EMITTED,
+                        SignalType.MEMORY_CONSOLIDATION,
+                        SignalType.TASK_CREATED,
+                    },
+                )
+
+        logger.debug(f"Registered {len(self._agent_type_vectors)} semantic subscriptions")
+
+    async def _on_semantic_match(self, signal: Signal, matched_agent_type: str):
+        """
+        Handle semantically matched signals for proactive task creation.
+
+        Called when a signal's context_vector matches an agent type's vector.
+        """
+        # Don't act on low-urgency signals
+        if signal.urgency < 0.4:
+            return
+
+        # Check if this signal suggests a task we should handle
+        if signal.type == SignalType.THOUGHT_EMITTED:
+            content = signal.payload.get("content", "")
+            thought_type = signal.payload.get("thought_type", "")
+
+            # High-relevance thoughts may warrant speculative task creation
+            relevance = signal.payload.get("relevance", 0.5)
+            if relevance >= 0.7:
+                logger.debug(
+                    f"Semantic match: {matched_agent_type} for thought '{content[:50]}...'"
+                )
+
+        elif signal.type == SignalType.MEMORY_CONSOLIDATION:
+            # Memory consolidation matched to agent type - update routing
+            memory_ids = signal.payload.get("memory_ids", [])
+            if memory_ids and signal.context_vector:
+                self._update_agent_type_vector(matched_agent_type, signal.context_vector)
 
     async def disconnect_from_nexus(self):
         """Disconnect from Nexus."""
@@ -360,7 +500,11 @@ class SwarmOrchestrator:
         """
         Handle memory consolidation signals.
 
-        Updates routing knowledge based on memory patterns.
+        Updates routing knowledge based on memory patterns and proactively
+        updates in-progress task contexts with relevant consolidated memories.
+
+        AGI Cohesion Upgrade: Links memory_system.py consolidation events
+        to swarm task context for dynamic handoffs and context enrichment.
         """
         if not self._memory_aware_routing:
             return
@@ -368,6 +512,8 @@ class SwarmOrchestrator:
         memory_ids = signal.payload.get("memory_ids", [])
         new_vector = signal.payload.get("new_vector")
         session_ref = signal.payload.get("session_ref")
+        consolidated_content = signal.payload.get("content_preview", "")
+        relevance_score = signal.payload.get("relevance", 0.5)
 
         # If we have a context vector, update agent type vectors
         if new_vector and session_ref:
@@ -379,6 +525,124 @@ class SwarmOrchestrator:
                     if agent:
                         agent_type = agent.name
                         self._update_agent_type_vector(agent_type, new_vector)
+
+        # AGI Cohesion: Proactively update in-progress task contexts
+        if memory_ids and relevance_score >= 0.6:
+            await self._update_task_contexts_with_memories(
+                memory_ids=memory_ids,
+                new_vector=new_vector,
+                relevance_score=relevance_score,
+            )
+
+    async def _update_task_contexts_with_memories(
+        self,
+        memory_ids: List[str],
+        new_vector: Optional[List[float]],
+        relevance_score: float,
+    ):
+        """
+        Proactively update in-progress task contexts with relevant memories.
+
+        This enables dynamic task handoffs when consolidated memories reveal
+        that a different agent might be better suited for the task.
+        """
+        for task_id, task in self.state.tasks.items():
+            if task.status != TaskStatus.IN_PROGRESS:
+                continue
+
+            # Check semantic relevance to task
+            if task.context_vector and new_vector:
+                similarity = self._cosine_similarity(task.context_vector, new_vector)
+
+                if similarity >= 0.7:  # Highly relevant to this task
+                    # Enrich task context with memory references
+                    if "enriched_memory_refs" not in task.context:
+                        task.context["enriched_memory_refs"] = []
+
+                    for mem_id in memory_ids:
+                        if mem_id not in task.memory_refs and mem_id not in task.context["enriched_memory_refs"]:
+                            task.context["enriched_memory_refs"].append(mem_id)
+
+                    logger.debug(
+                        f"Enriched task {task_id} with {len(memory_ids)} consolidated memories "
+                        f"(similarity={similarity:.2f})"
+                    )
+
+                    # Consider dynamic handoff if memories suggest different capability
+                    if similarity >= 0.85 and self._should_consider_handoff(task, new_vector):
+                        await self._consider_dynamic_handoff(task, new_vector, relevance_score)
+
+    def _should_consider_handoff(self, task: SwarmTask, memory_vector: List[float]) -> bool:
+        """Determine if memory consolidation suggests a handoff might be beneficial."""
+        if not task.assigned_agent:
+            return False
+
+        agent = self.state.active_agents.get(task.assigned_agent)
+        if not agent:
+            return False
+
+        # Check if memory vector is closer to a different agent type
+        current_agent_type = agent.name
+        current_similarity = 0.0
+
+        if current_agent_type in self._agent_type_vectors:
+            current_similarity = self._cosine_similarity(
+                memory_vector,
+                self._agent_type_vectors[current_agent_type]
+            )
+
+        # Find if any other agent type is significantly better matched
+        for agent_type, type_vector in self._agent_type_vectors.items():
+            if agent_type == current_agent_type:
+                continue
+
+            other_similarity = self._cosine_similarity(memory_vector, type_vector)
+            if other_similarity > current_similarity + 0.2:  # 20% better match
+                return True
+
+        return False
+
+    async def _consider_dynamic_handoff(
+        self,
+        task: SwarmTask,
+        memory_vector: List[float],
+        relevance_score: float,
+    ):
+        """
+        Consider a dynamic handoff based on memory consolidation insights.
+
+        This is a soft handoff - we emit a signal but don't force the handoff.
+        """
+        if not task.assigned_agent:
+            return
+
+        # Find best matching agent type
+        best_type = None
+        best_similarity = 0.0
+
+        for agent_type, type_vector in self._agent_type_vectors.items():
+            similarity = self._cosine_similarity(memory_vector, type_vector)
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_type = agent_type
+
+        if best_type and best_type != self.state.active_agents.get(task.assigned_agent, {}).name:
+            # Emit handoff consideration signal (soft - doesn't force handoff)
+            if self.enable_nexus:
+                await nexus.emit(
+                    SignalType.EXTERNAL_EVENT,
+                    {
+                        "event_type": "memory_triggered_handoff_consideration",
+                        "task_id": task.id,
+                        "current_agent": task.assigned_agent,
+                        "suggested_agent_type": best_type,
+                        "similarity_score": best_similarity,
+                        "relevance_score": relevance_score,
+                    },
+                    source="swarm_orchestrator",
+                    urgency=0.5,
+                    context_vector=memory_vector,
+                )
 
     async def _on_external_task(self, signal: Signal):
         """Handle tasks received from P2P network."""
@@ -554,20 +818,31 @@ class SwarmOrchestrator:
         logger.info(f"Registered agent factory: {agent_type}")
 
     async def spawn_agent(self, agent_type: str) -> Optional[BaseAgent]:
-        """Spawn a new agent of the given type."""
+        """
+        Spawn a new agent of the given type.
+
+        AGI v1.5: Uses agent pool for efficient reuse and performance-based selection.
+        """
         if agent_type not in self._agent_factories:
             logger.error(f"Unknown agent type: {agent_type}")
             return None
 
         if len(self.state.active_agents) >= self.max_concurrent:
-            # Try to recycle an idle agent
+            # Try to recycle an idle agent (performance-based)
             await self._recycle_idle_agents()
 
             if len(self.state.active_agents) >= self.max_concurrent:
                 logger.warning("Max concurrent agents reached")
                 return None
 
-        # Create agent
+        # AGI v1.5: Try to checkout from pool first
+        if self._agent_pool:
+            agent = await self.checkout_agent(agent_type)
+            if agent:
+                logger.info(f"Spawned agent from pool: {agent.name} ({agent.agent_id})")
+                return agent
+
+        # Fallback: Create agent directly (pool not initialized)
         agent = self._agent_factories[agent_type]()
 
         # Configure agent
@@ -581,23 +856,341 @@ class SwarmOrchestrator:
         return agent
 
     async def _recycle_idle_agents(self):
-        """Recycle idle agents to free up capacity."""
+        """
+        Recycle idle agents to free up capacity using performance-based selection.
+
+        AGI v1.5: Prioritizes recycling low-performing agents based on health score.
+        """
         idle_agents = [
             agent_id for agent_id, agent in self.state.active_agents.items()
             if agent.state.status == AgentStatus.IDLE
         ]
+
+        if not idle_agents:
+            return
+
+        # Sort by health score (lowest first - recycle worst performers)
+        def get_health(agent_id: str) -> float:
+            if agent_id in self._pool_metrics:
+                return self._pool_metrics[agent_id].compute_health_score()
+            return 0.5  # Default
+
+        idle_agents.sort(key=get_health)
 
         # Keep at least one of each type
         type_counts: dict[str, int] = {}
         for agent in self.state.active_agents.values():
             type_counts[agent.name] = type_counts.get(agent.name, 0) + 1
 
+        recycled_count = 0
         for agent_id in idle_agents:
             agent = self.state.active_agents[agent_id]
-            if type_counts.get(agent.name, 0) > 1:
-                del self.state.active_agents[agent_id]
-                type_counts[agent.name] -= 1
-                logger.debug(f"Recycled idle agent: {agent_id}")
+            health = get_health(agent_id)
+
+            # Recycle if: low health OR too many of this type
+            should_recycle = (
+                health < self._pool_config.health_threshold or
+                type_counts.get(agent.name, 0) > 1
+            )
+
+            if should_recycle:
+                await self._return_to_pool(agent_id, recycle=health < self._pool_config.health_threshold)
+                if agent_id in self.state.active_agents:
+                    del self.state.active_agents[agent_id]
+                type_counts[agent.name] = max(0, type_counts.get(agent.name, 1) - 1)
+                recycled_count += 1
+                logger.debug(f"Recycled agent {agent_id} (health={health:.2f})")
+
+        if recycled_count > 0:
+            logger.info(f"Recycled {recycled_count} agents (performance-based)")
+
+    # =========================================================================
+    # AGENT POOLING (AGI v1.5)
+    # =========================================================================
+
+    async def init_agent_pool(self, config: Optional[AgentPoolConfig] = None):
+        """
+        Initialize the agent pool with warm agents.
+
+        Args:
+            config: Pool configuration (uses defaults if not provided)
+        """
+        if config:
+            self._pool_config = config
+
+        async with self._pool_lock:
+            # Pre-warm pool with agents for each registered type
+            if self._pool_config.warmup_on_startup:
+                for agent_type in self._agent_factories.keys():
+                    for _ in range(self._pool_config.min_pool_size):
+                        await self._create_pooled_agent(agent_type)
+
+            # Start health decay task
+            if not self._decay_task:
+                self._decay_task = asyncio.create_task(self._pool_decay_loop())
+
+        logger.info(f"Agent pool initialized: {len(self._agent_pool)} agents warmed")
+
+    async def _create_pooled_agent(self, agent_type: str) -> Optional[PooledAgent]:
+        """Create a new agent and add it to the pool."""
+        if agent_type not in self._agent_factories:
+            return None
+
+        if len(self._agent_pool) >= self._pool_config.max_pool_size:
+            # Pool full - try to recycle lowest performer
+            await self._recycle_lowest_performer()
+            if len(self._agent_pool) >= self._pool_config.max_pool_size:
+                return None
+
+        # Create agent
+        agent = self._agent_factories[agent_type]()
+        agent.llm_backend = self.llm_backend
+        agent.memory = self.memory_system
+        agent.set_handoff_callback(self._handle_handoff)
+
+        # Create metrics
+        metrics = AgentPerformanceMetrics(
+            agent_id=agent.agent_id,
+            agent_type=agent_type,
+        )
+
+        # Create pooled wrapper
+        pooled = PooledAgent(
+            agent=agent,
+            metrics=metrics,
+            pool_state="warm",
+        )
+
+        # Add to pool
+        self._agent_pool[agent.agent_id] = pooled
+        self._pool_metrics[agent.agent_id] = metrics
+
+        if agent_type not in self._pool_by_type:
+            self._pool_by_type[agent_type] = []
+        self._pool_by_type[agent_type].append(agent.agent_id)
+
+        logger.debug(f"Created pooled agent: {agent_type} ({agent.agent_id})")
+        return pooled
+
+    async def checkout_agent(self, agent_type: str) -> Optional[BaseAgent]:
+        """
+        Check out an agent from the pool.
+
+        Prefers warm agents; creates new if none available.
+        Selection prioritizes agents with higher health scores.
+        """
+        async with self._pool_lock:
+            # Find available warm agents of this type
+            candidates = []
+            for agent_id in self._pool_by_type.get(agent_type, []):
+                pooled = self._agent_pool.get(agent_id)
+                if pooled and pooled.pool_state == "warm":
+                    candidates.append(pooled)
+
+            if candidates:
+                # Select healthiest agent
+                candidates.sort(key=lambda p: p.metrics.compute_health_score(), reverse=True)
+                pooled = candidates[0]
+
+                # Mark as active
+                pooled.pool_state = "active"
+                pooled.checkout_time = datetime.now()
+
+                # Add to active agents
+                self.state.active_agents[pooled.agent.agent_id] = pooled.agent
+
+                logger.debug(
+                    f"Checked out pooled agent: {agent_type} "
+                    f"(health={pooled.metrics.health_score:.2f})"
+                )
+                return pooled.agent
+
+            # No warm agents - create new one
+            pooled = await self._create_pooled_agent(agent_type)
+            if pooled:
+                pooled.pool_state = "active"
+                pooled.checkout_time = datetime.now()
+                self.state.active_agents[pooled.agent.agent_id] = pooled.agent
+                return pooled.agent
+
+            return None
+
+    async def _return_to_pool(self, agent_id: str, recycle: bool = False):
+        """
+        Return an agent to the pool after use.
+
+        Args:
+            agent_id: The agent to return
+            recycle: If True, destroy the agent instead of pooling
+        """
+        async with self._pool_lock:
+            pooled = self._agent_pool.get(agent_id)
+            if not pooled:
+                return
+
+            if recycle or pooled.metrics.health_score < self._pool_config.health_threshold:
+                # Remove from pool entirely
+                pooled.pool_state = "recycled"
+                agent_type = pooled.metrics.agent_type
+
+                if agent_id in self._pool_by_type.get(agent_type, []):
+                    self._pool_by_type[agent_type].remove(agent_id)
+                if agent_id in self._agent_pool:
+                    del self._agent_pool[agent_id]
+                if agent_id in self._pool_metrics:
+                    del self._pool_metrics[agent_id]
+
+                logger.debug(f"Recycled agent from pool: {agent_id}")
+
+                # Ensure minimum pool size
+                type_count = len(self._pool_by_type.get(agent_type, []))
+                if type_count < self._pool_config.min_pool_size:
+                    await self._create_pooled_agent(agent_type)
+            else:
+                # Return to warm state
+                pooled.pool_state = "warm"
+                pooled.checkout_time = None
+                pooled.metrics.last_used = datetime.now()
+
+                logger.debug(f"Returned agent to pool: {agent_id} (warm)")
+
+    def record_agent_task_result(
+        self,
+        agent_id: str,
+        success: bool,
+        confidence: float,
+        execution_time_ms: float,
+    ):
+        """Record task result for agent performance tracking."""
+        metrics = self._pool_metrics.get(agent_id)
+        if not metrics:
+            return
+
+        if success:
+            metrics.tasks_completed += 1
+            metrics.error_streak = 0
+        else:
+            metrics.tasks_failed += 1
+            metrics.error_streak += 1
+
+        # Update running averages
+        total_tasks = metrics.tasks_completed + metrics.tasks_failed
+        metrics.avg_confidence = (
+            (metrics.avg_confidence * (total_tasks - 1) + confidence) / total_tasks
+        )
+        metrics.avg_latency_ms = (
+            (metrics.avg_latency_ms * (total_tasks - 1) + execution_time_ms) / total_tasks
+        )
+        metrics.total_execution_time += execution_time_ms / 1000
+
+        # Recompute health
+        metrics.compute_health_score()
+
+        # Check if agent should be recycled due to error streak
+        if metrics.error_streak >= self._pool_config.error_streak_limit:
+            asyncio.create_task(self._return_to_pool(agent_id, recycle=True))
+            logger.warning(
+                f"Agent {agent_id} recycled due to {metrics.error_streak} consecutive errors"
+            )
+
+    async def _recycle_lowest_performer(self):
+        """Recycle the lowest performing warm agent to make room."""
+        warm_agents = [
+            (agent_id, pooled)
+            for agent_id, pooled in self._agent_pool.items()
+            if pooled.pool_state == "warm"
+        ]
+
+        if not warm_agents:
+            return
+
+        # Find lowest health
+        warm_agents.sort(key=lambda x: x[1].metrics.compute_health_score())
+        lowest_id, _ = warm_agents[0]
+
+        await self._return_to_pool(lowest_id, recycle=True)
+
+    async def _pool_decay_loop(self):
+        """Background task to decay agent health over time."""
+        while True:
+            try:
+                await asyncio.sleep(self._pool_config.decay_interval_seconds)
+
+                async with self._pool_lock:
+                    now = datetime.now()
+                    to_recycle = []
+
+                    for agent_id, pooled in self._agent_pool.items():
+                        if pooled.pool_state != "warm":
+                            continue
+
+                        # Check idle timeout
+                        idle_seconds = (now - pooled.metrics.last_used).total_seconds()
+                        if idle_seconds > self._pool_config.idle_timeout_seconds:
+                            to_recycle.append(agent_id)
+                            continue
+
+                        # Apply health decay (small penalty for being idle)
+                        decay_factor = 0.99  # 1% decay per interval
+                        pooled.metrics.health_score *= decay_factor
+
+                        # Recycle if health drops too low
+                        if pooled.metrics.health_score < self._pool_config.health_threshold:
+                            to_recycle.append(agent_id)
+
+                    for agent_id in to_recycle:
+                        await self._return_to_pool(agent_id, recycle=True)
+
+                    if to_recycle:
+                        logger.debug(f"Pool decay: recycled {len(to_recycle)} agents")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Pool decay error: {e}")
+
+    def get_pool_stats(self) -> Dict[str, Any]:
+        """Get comprehensive pool statistics."""
+        warm_count = sum(1 for p in self._agent_pool.values() if p.pool_state == "warm")
+        active_count = sum(1 for p in self._agent_pool.values() if p.pool_state == "active")
+
+        type_stats = {}
+        for agent_type, agent_ids in self._pool_by_type.items():
+            type_agents = [self._agent_pool.get(aid) for aid in agent_ids if aid in self._agent_pool]
+            type_stats[agent_type] = {
+                "total": len(type_agents),
+                "warm": sum(1 for p in type_agents if p and p.pool_state == "warm"),
+                "active": sum(1 for p in type_agents if p and p.pool_state == "active"),
+                "avg_health": (
+                    sum(p.metrics.health_score for p in type_agents if p) / len(type_agents)
+                    if type_agents else 0
+                ),
+            }
+
+        return {
+            "total_pooled": len(self._agent_pool),
+            "warm": warm_count,
+            "active": active_count,
+            "config": {
+                "min_pool_size": self._pool_config.min_pool_size,
+                "max_pool_size": self._pool_config.max_pool_size,
+                "health_threshold": self._pool_config.health_threshold,
+            },
+            "by_type": type_stats,
+            "top_performers": [
+                {
+                    "agent_id": p.agent.agent_id,
+                    "type": p.metrics.agent_type,
+                    "health": p.metrics.health_score,
+                    "tasks_completed": p.metrics.tasks_completed,
+                }
+                for p in sorted(
+                    self._agent_pool.values(),
+                    key=lambda x: x.metrics.health_score,
+                    reverse=True,
+                )[:5]
+            ],
+        }
 
     async def submit_task(
         self,
@@ -634,12 +1227,25 @@ class SwarmOrchestrator:
             semantic_tags=semantic_tags or [],
         )
 
-        # AGI: Memory-aware routing - recall relevant memories
-        if self._memory_aware_routing and self.memory_system and context_vector:
+        # AGI: Memory-aware routing - recall relevant memories with capability hints
+        if self._memory_aware_routing and self.memory_system:
             try:
-                memories = await self._recall_relevant_memories(description, context_vector)
+                # Extract capability tags from required capabilities
+                capability_tags = [cap.value for cap in task.required_capabilities] if task.required_capabilities else None
+
+                memories = await self._recall_relevant_memories(
+                    description=description,
+                    context_vector=context_vector,
+                    task_capabilities=capability_tags,
+                )
                 task.memory_refs = [m.get("id", "") for m in memories if m.get("id")]
                 task.context["memory_context"] = memories[:3]  # Top 3 for context
+
+                # Use inferred capabilities to enrich task routing
+                if self._last_capability_hints and not task.required_capabilities:
+                    task.context["inferred_capabilities"] = self._last_capability_hints
+                    task.semantic_tags.extend(self._last_capability_hints)
+
             except Exception as e:
                 logger.debug(f"Memory recall failed: {e}")
 
@@ -673,23 +1279,53 @@ class SwarmOrchestrator:
         description: str,
         context_vector: List[float],
         limit: int = 5,
+        task_capabilities: Optional[List[str]] = None,
     ) -> List[Dict]:
-        """Recall relevant memories for a task."""
+        """
+        Recall relevant memories for a task using memory_system cohesion.
+
+        AGI Cohesion: Uses memory_system.recall_for_task() when available
+        for richer context including capability hints and entity relationships.
+        """
         if not self.memory_system:
             return []
 
         try:
-            # Try to use memory system's recall method
-            if hasattr(self.memory_system, 'recall'):
+            # Prefer the new task-aware recall method (AGI Cohesion)
+            if hasattr(self.memory_system, 'recall_for_task'):
+                result = await self.memory_system.recall_for_task(
+                    task_description=description,
+                    context_vector=context_vector,
+                    task_capabilities=task_capabilities,
+                    limit=limit,
+                    include_graph=True,
+                    boost_recent=True,
+                )
+                # Return memories with enriched context
+                memories = result.get("memories", [])
+
+                # Store capability hints for routing decisions
+                if result.get("capability_hints"):
+                    self._last_capability_hints = result["capability_hints"]
+
+                return memories
+
+            # Fallback to standard recall method
+            elif hasattr(self.memory_system, 'recall'):
                 results = await self.memory_system.recall(
                     query=description,
-                    context_vector=context_vector,
-                    limit=limit,
+                    top_k=limit,
                 )
-                return [r.to_dict() if hasattr(r, 'to_dict') else r for r in results]
+                return [
+                    r.to_dict() if hasattr(r, 'to_dict') else {"content": str(r)}
+                    for r in results
+                ]
+
+            # Final fallback to query method
             elif hasattr(self.memory_system, 'query'):
                 results = await self.memory_system.query(description, top_k=limit)
                 return results
+
         except Exception as e:
             logger.debug(f"Memory recall error: {e}")
 
@@ -818,14 +1454,26 @@ class SwarmOrchestrator:
         retry_delay: float = 1.0
     ):
         """Execute a task with an agent, with retry logic and fallback."""
+        import time
+
         task.status = TaskStatus.IN_PROGRESS
         task.context["retry_count"] = 0
 
         last_error = None
         for attempt in range(max_retries):
             task.context["retry_count"] = attempt
+            task_start_time = time.time()
             try:
                 result = await agent.execute(task.description, task.context)
+                execution_time_ms = (time.time() - task_start_time) * 1000
+
+                # AGI v1.5: Record performance metrics
+                self.record_agent_task_result(
+                    agent_id=agent.agent_id,
+                    success=result.success,
+                    confidence=result.confidence,
+                    execution_time_ms=execution_time_ms,
+                )
 
                 # Check if result indicates failure that might be retryable
                 if result.success:
@@ -878,12 +1526,27 @@ class SwarmOrchestrator:
             except asyncio.TimeoutError:
                 last_error = "Task execution timed out"
                 logger.warning(f"Task {task.id} attempt {attempt + 1} timed out")
+                # AGI v1.5: Record timeout as failure
+                self.record_agent_task_result(
+                    agent_id=agent.agent_id,
+                    success=False,
+                    confidence=0.0,
+                    execution_time_ms=self.handoff_timeout * 1000,
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay * (attempt + 1))
 
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Task {task.id} attempt {attempt + 1} error: {e}")
+                execution_time_ms = (time.time() - task_start_time) * 1000
+                # AGI v1.5: Record exception as failure
+                self.record_agent_task_result(
+                    agent_id=agent.agent_id,
+                    success=False,
+                    confidence=0.0,
+                    execution_time_ms=execution_time_ms,
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay * (attempt + 1))
 
@@ -1043,6 +1706,8 @@ class SwarmOrchestrator:
             "memory_aware_routing": self._memory_aware_routing,
             "evolution_on_consensus": self._evolution_on_consensus,
             "evolution_on_anomaly": self._evolution_on_anomaly,
+            # AGI v1.5: Agent pooling metrics
+            "pool_stats": self.get_pool_stats() if self._agent_pool else None,
         }
 
     # =========================================================================

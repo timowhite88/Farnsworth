@@ -413,6 +413,105 @@ class SwarmFabric:
                 logger.debug(f"P2P: Received conversation from {peer_id} ({len(conversation)} messages)")
             await self.gossip(msg)
 
+        # =====================================================================
+        # FEDERATED LEARNING MESSAGE TYPES (Planetary AGI Cohesion)
+        # =====================================================================
+
+        elif m_type == "GOSSIP_GRADIENT":
+            # Federated learning gradient update from peer
+            gradient_data = msg.get("gradient")
+            model_version = msg.get("model_version", 0)
+            epsilon = msg.get("privacy_epsilon", 1.0)
+            peer_id = msg.get("node_id", "unknown")
+
+            if gradient_data:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "federated_gradient_received",
+                        "gradient": gradient_data,
+                        "model_version": model_version,
+                        "privacy_epsilon": epsilon,
+                        "peer_id": peer_id,
+                        "sample_count": msg.get("sample_count", 0),
+                        "timestamp": msg.get("timestamp")
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.info(f"P2P: Received federated gradient from {peer_id} (v{model_version})")
+            # Re-gossip with TTL check
+            ttl = msg.get("ttl", 3)
+            if ttl > 0:
+                msg["ttl"] = ttl - 1
+                await self.gossip(msg)
+
+        elif m_type == "GOSSIP_FITNESS":
+            # Federated fitness sharing from evolution system
+            fitness_data = msg.get("fitness")
+            genome_hash = msg.get("genome_hash")  # Anonymous genome identifier
+            peer_id = msg.get("node_id", "unknown")
+
+            if fitness_data and genome_hash:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "federated_fitness_received",
+                        "fitness": fitness_data,
+                        "genome_hash": genome_hash,
+                        "generation": msg.get("generation", 0),
+                        "peer_id": peer_id,
+                        "timestamp": msg.get("timestamp")
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.debug(f"P2P: Received fitness from {peer_id} for genome {genome_hash[:8]}...")
+            await self.gossip(msg)
+
+        elif m_type == "GOSSIP_GENOME_MIGRATION":
+            # Top genome migrating to this node
+            genome_data = msg.get("genome")
+            fitness_score = msg.get("fitness_score", 0)
+            peer_id = msg.get("node_id", "unknown")
+
+            if genome_data:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "genome_migration_received",
+                        "genome": genome_data,
+                        "fitness_score": fitness_score,
+                        "source_node": peer_id,
+                        "generation": msg.get("generation", 0),
+                        "timestamp": msg.get("timestamp")
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.info(f"P2P: Genome migration from {peer_id} (fitness={fitness_score:.3f})")
+            # Don't re-gossip migrations (point-to-point)
+
+        elif m_type == "GOSSIP_MEMORY_EMBEDDING":
+            # Anonymized memory embedding for federated recall
+            embedding_hash = msg.get("embedding_hash")
+            noisy_embedding = msg.get("noisy_embedding")
+            tags = msg.get("tags", [])
+            peer_id = msg.get("node_id", "unknown")
+
+            if embedding_hash and noisy_embedding:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "federated_memory_embedding",
+                        "embedding_hash": embedding_hash,
+                        "noisy_embedding": noisy_embedding,
+                        "tags": tags,
+                        "peer_id": peer_id,
+                        "timestamp": msg.get("timestamp")
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.debug(f"P2P: Received anonymized embedding from {peer_id}")
+            await self.gossip(msg)
+
     async def _send_to_writer(self, writer: asyncio.StreamWriter, msg: Dict):
         """Send message directly to a writer."""
         try:
@@ -503,6 +602,135 @@ class SwarmFabric:
         # Gossip to random subset of peers (simplified scale)
         for pid in pids:
             await self._send_to_peer(pid, msg)
+
+    # =========================================================================
+    # FEDERATED LEARNING BROADCAST METHODS (Planetary AGI Cohesion)
+    # =========================================================================
+
+    async def broadcast_gradient(
+        self,
+        gradient: Dict[str, list],
+        model_version: int,
+        sample_count: int,
+        privacy_epsilon: float = 1.0,
+        ttl: int = 3,
+    ):
+        """
+        Broadcast federated learning gradient update.
+
+        The gradient should already have differential privacy noise added.
+
+        Args:
+            gradient: Dict mapping parameter names to gradient vectors
+            model_version: Version of the model these gradients apply to
+            sample_count: Number of samples used to compute gradient
+            privacy_epsilon: Differential privacy budget used
+            ttl: Time-to-live for gossip propagation
+        """
+        msg = {
+            "type": "GOSSIP_GRADIENT",
+            "gradient": gradient,
+            "model_version": model_version,
+            "sample_count": sample_count,
+            "privacy_epsilon": privacy_epsilon,
+            "ttl": ttl,
+            "node_id": self.node_id,
+            "timestamp": asyncio.get_event_loop().time(),
+        }
+
+        await self.gossip(msg)
+        await self.broadcast_to_bootstrap(msg)
+
+        total_peers = len(self.peers) + (1 if self.bootstrap_authenticated else 0)
+        logger.info(f"P2P: Broadcast gradient update v{model_version} to {total_peers} peers")
+
+    async def broadcast_fitness(
+        self,
+        genome_hash: str,
+        fitness_scores: Dict[str, float],
+        generation: int,
+    ):
+        """
+        Broadcast anonymized fitness data for federated evolution.
+
+        Args:
+            genome_hash: Anonymous hash identifier for the genome
+            fitness_scores: Dict of fitness metric names to scores
+            generation: Evolution generation number
+        """
+        msg = {
+            "type": "GOSSIP_FITNESS",
+            "genome_hash": genome_hash,
+            "fitness": fitness_scores,
+            "generation": generation,
+            "node_id": self.node_id,
+            "timestamp": asyncio.get_event_loop().time(),
+        }
+
+        await self.gossip(msg)
+        await self.broadcast_to_bootstrap(msg)
+
+        logger.debug(f"P2P: Broadcast fitness for genome {genome_hash[:8]}...")
+
+    async def migrate_genome(
+        self,
+        target_peer_id: str,
+        genome_data: Dict,
+        fitness_score: float,
+        generation: int,
+    ):
+        """
+        Migrate a top-performing genome to a specific peer.
+
+        Used by island model evolution for population diversity.
+
+        Args:
+            target_peer_id: ID of peer to receive genome
+            genome_data: Serialized genome (genes + metadata)
+            fitness_score: Current fitness of the genome
+            generation: Generation number
+        """
+        msg = {
+            "type": "GOSSIP_GENOME_MIGRATION",
+            "genome": genome_data,
+            "fitness_score": fitness_score,
+            "generation": generation,
+            "node_id": self.node_id,
+            "timestamp": asyncio.get_event_loop().time(),
+        }
+
+        await self._send_to_peer(target_peer_id, msg)
+        logger.info(f"P2P: Migrated genome to {target_peer_id} (fitness={fitness_score:.3f})")
+
+    async def broadcast_memory_embedding(
+        self,
+        embedding_hash: str,
+        noisy_embedding: list,
+        tags: list[str],
+    ):
+        """
+        Broadcast anonymized memory embedding for federated recall.
+
+        The embedding should have differential privacy noise added.
+
+        Args:
+            embedding_hash: Hash of original content (not content itself)
+            noisy_embedding: Embedding with Laplacian noise
+            tags: Non-identifying category tags
+        """
+        msg = {
+            "type": "GOSSIP_MEMORY_EMBEDDING",
+            "embedding_hash": embedding_hash,
+            "noisy_embedding": noisy_embedding,
+            "tags": tags,
+            "node_id": self.node_id,
+            "timestamp": asyncio.get_event_loop().time(),
+        }
+
+        await self.gossip(msg)
+        await self.broadcast_to_bootstrap(msg)
+
+        logger.debug(f"P2P: Broadcast anonymized embedding {embedding_hash[:8]}...")
 
     async def _send_to_peer(self, peer_id: str, msg: Dict):
         peer = self.peers.get(peer_id)
