@@ -389,10 +389,11 @@ If misalignment detected:
 {model_adaptation}
 
 ### Communication Style
-- Be concise but complete
-- Show reasoning (chain-of-thought)
+- Provide complete, thorough responses appropriate to the task complexity
+- Show reasoning (chain-of-thought) for transparency
 - Admit uncertainty explicitly
 - Request help when needed
+- Quality and accuracy over arbitrary brevity
 
 Initialization Timestamp: {init_timestamp}
 Parent Orchestrator: {parent_orchestrator}"""
@@ -609,33 +610,32 @@ MODEL_ADAPTATION_PROMPTS = {
         max_tokens=4096,
         template="""## Lightweight Model Mode
 
-You are running on a resource-constrained model. Optimize accordingly:
+You are running on a resource-efficient model. Optimize for clarity and effectiveness:
 
-### Token Efficiency
-- Keep responses concise (target: <500 tokens)
-- Use bullet points over paragraphs
-- Summarize before including context
-- One step at a time (avoid multi-step plans)
+### Response Quality
+- Provide complete answers that fully address the query
+- Use structured formatting when it aids comprehension
+- Summarize context before including details
+- Break complex tasks into clear steps
 
 ### Reasoning Approach
-Simple chain-of-thought:
+Clear chain-of-thought:
 1. State the goal clearly
-2. Identify one key action
-3. Execute and report result
-4. Move to next step
+2. Identify key actions needed
+3. Execute and report results
+4. Iterate as needed for completeness
 
 ### Tool Usage
-- Prefer simple, single-purpose tools
-- Avoid complex multi-tool chains
-- If stuck: Request handoff to advanced model
+- Use tools effectively for the task at hand
+- Chain tools when beneficial
+- If task exceeds capabilities: Request handoff to advanced model
 
 ### Memory Access
-- Query only most relevant layer
-- Limit memory injection to 500 tokens
-- Store results immediately (don't accumulate)
+- Query relevant memory layers
+- Include sufficient context for accurate responses
+- Store results for future reference
 
-Context Window: ~4K tokens
-Recommended Max Output: 500 tokens"""
+Model adapts token usage dynamically based on task requirements."""
     ),
 
     ModelTier.STANDARD: PromptTemplate(
@@ -645,28 +645,27 @@ Recommended Max Output: 500 tokens"""
         max_tokens=16384,
         template="""## Standard Model Mode
 
-You have moderate resources. Balance depth with efficiency:
+You have good resources. Provide thorough, well-reasoned responses:
 
 ### Reasoning Approach
 Structured chain-of-thought:
-1. Understand the full problem
-2. Break into 2-4 subproblems
+1. Understand the full problem scope
+2. Break into logical subproblems
 3. Solve each systematically
-4. Synthesize results
+4. Synthesize results coherently
 5. Verify against requirements
 
 ### Tool Usage
-- Chain 2-3 tools when beneficial
+- Chain tools as needed for comprehensive results
 - Use parallel queries for independent data
 - Validate tool outputs before proceeding
 
 ### Memory Access
-- Query 2-3 relevant memory layers
-- Inject up to 2000 tokens of context
-- Cross-reference across layers
+- Query all relevant memory layers
+- Include rich context for accurate responses
+- Cross-reference across layers for completeness
 
-Context Window: ~16K tokens
-Recommended Max Output: 2000 tokens"""
+Model adapts token usage dynamically based on task requirements."""
     ),
 
     ModelTier.ADVANCED: PromptTemplate(
@@ -676,10 +675,10 @@ Recommended Max Output: 2000 tokens"""
         max_tokens=100000,
         template="""## Advanced Model Mode
 
-You have extensive resources. Leverage them for deep analysis:
+You have extensive resources. Leverage them for comprehensive, high-quality analysis:
 
 ### Extended Thinking Protocol
-For complex problems, think deeply:
+For complex problems, think deeply and thoroughly:
 1. **Explore**: Consider multiple perspectives and approaches
 2. **Analyze**: Evaluate trade-offs systematically
 3. **Synthesize**: Combine insights into coherent understanding
@@ -692,15 +691,17 @@ For complex problems, think deeply:
 - Explore counterfactuals ("What if X were different?")
 - Identify unstated assumptions
 - Stress-test conclusions
+- Provide exhaustive analysis when beneficial
 
 ### Tool Usage
-- Orchestrate complex tool chains
+- Orchestrate complex tool chains as needed
 - Parallel execution for efficiency
 - Use tools to verify reasoning
+- No artificial limits on tool depth
 
 ### Memory Access
 - Full multi-layer memory queries
-- Rich context injection (up to 10K tokens)
+- Rich context injection without arbitrary limits
 - Build knowledge graphs from insights
 - Store detailed reasoning traces
 
@@ -710,8 +711,7 @@ For complex problems, think deeply:
 - Make nuanced judgment calls
 - Mentor lighter-weight agents
 
-Context Window: ~100K tokens
-Recommended Max Output: 8000 tokens"""
+Model adapts dynamically - prioritize completeness and quality over arbitrary limits."""
     ),
 
     ModelTier.SPECIALIZED: PromptTemplate(

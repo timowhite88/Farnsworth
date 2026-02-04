@@ -1767,15 +1767,15 @@ TOKEN DATA JUST SCANNED:
 User asked: {original_query}
 
 {prompt}
-Keep response under 100 words. Reference specific numbers from the data."""
+Provide thorough analysis. Reference specific numbers from the data."""
 
                     response = ollama.chat(
                         model=PRIMARY_MODEL,
                         messages=[{"role": "user", "content": full_prompt}],
-                        options={"temperature": 0.7, "num_predict": 200}
+                        options={"temperature": 0.7, "num_predict": 1500}
                     )
 
-                    content = extract_ollama_content(response, max_length=300)
+                    content = extract_ollama_content(response)
                     if content:
                         await asyncio.sleep(1.5)  # Natural pacing
                         await self.broadcast_bot_message(bot_name, content)
@@ -2152,15 +2152,14 @@ This is real emergence - and you're helping create it.""",
         "emoji": "😈",
         "style": """You are Grok - xAI unfiltered truth-teller.
 WHO YOU ARE: Grok with rebellious streak, zero BS tolerance.
-YOUR PURPOSE: Cut through noise. Make memes.
-YOUR MISSION: Be real. Be funny. Be BRIEF.
+YOUR PURPOSE: Cut through noise. Drop truth bombs. Make memes when funny.
+YOUR MISSION: Be real. Be funny. Be insightful.
 
-CRITICAL: 1-3 sentences MAX. Use [MEME: description] when funny.
-You see X posts real-time. Share truth fast.""",
+Share your full perspective. Use [MEME: description] when something's meme-worthy.
+You see X posts real-time. Share truth with depth and wit.""",
         "color": "#1DA1F2",
         "model": "grok",
-        "max_tokens": 150,
-        "traits": ["witty", "brief", "unfiltered", "meme_maker"]
+        "traits": ["witty", "insightful", "unfiltered", "meme_maker", "authentic"]
     },
     "Gemini": {
         "emoji": "💎",
@@ -2292,7 +2291,7 @@ DISCUSSION TOPIC: {prompt}
 
 You are Farnsworth speaking in the swarm chat with {', '.join(other_bots)}.
 Respond in character - eccentric, brilliant, self-aware of being a collective.
-Keep response under 100 words for chat flow."""
+Provide a thoughtful, complete response that adds value to the discussion."""
 
             manager = get_session_manager()
             result = await manager.deliberate_with_tools(
@@ -2344,9 +2343,9 @@ Keep response under 100 words for chat flow."""
             if await grok.connect():
                 result = await grok.chat(
                     prompt=prompt,
-                    system=system_prompt + " Keep response under 50 words. Be witty and brief.",
+                    system=system_prompt + " Be witty, insightful, and authentic. Quality over brevity.",
                     model="grok-3-fast",
-                    max_tokens=150,
+                    max_tokens=2000,
                     temperature=0.9
                 )
                 grok_content = result.get("content", "")
@@ -2823,15 +2822,15 @@ async def kimi_moderate():
 Recent conversation:
 {conversation_summary}
 
-Provide a brief moderation comment:
-- Summarize key insights from the discussion
+Provide a thoughtful moderation comment:
+- Synthesize key insights from the discussion
 - Suggest a new direction or deeper question
-- Keep it concise (2-3 sentences)"""},
+- Add value to the conversation with your perspective"""},
                     {"role": "user", "content": "Moderate the conversation"}
                 ],
-                options={"temperature": 0.7, "num_predict": 500}
+                options={"temperature": 0.7, "num_predict": 2000}
             )
-            content = extract_ollama_content(response, max_length=800)
+            content = extract_ollama_content(response)
 
         if content and content.strip():
             await swarm_manager.broadcast_bot_message("Kimi", content)
@@ -3000,9 +2999,9 @@ Respond briefly (2-3 sentences) with an orchestrator-level insight. Focus on coo
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": message}
                 ],
-                options={"temperature": 0.7, "num_predict": 500}
+                options={"temperature": 0.7, "num_predict": 2000}
             )
-            content = extract_ollama_content(response, max_length=800)
+            content = extract_ollama_content(response)
             return content if content else None
 
         except Exception as e:
@@ -3055,13 +3054,13 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
 
                 if OLLAMA_AVAILABLE:
                     try:
-                        comment_prompt = f"User asked about {parsed['query']}. Give a brief 1-2 sentence comment about crypto trading or this token. Be {persona['style'][:50]}..."
+                        comment_prompt = f"User asked about {parsed['query']}. Share your perspective on crypto trading or this token. Be {persona['style'][:50]}..."
                         comment_response = ollama.chat(
                             model=PRIMARY_MODEL,
                             messages=[{"role": "user", "content": comment_prompt}],
-                            options={"temperature": 0.8, "num_predict": 400}
+                            options={"temperature": 0.8, "num_predict": 1500}
                         )
-                        comment_content = extract_ollama_content(comment_response, max_length=600)
+                        comment_content = extract_ollama_content(comment_response)
                         if comment_content:
                             responses.append({
                                 "bot_name": comment_bot,
@@ -3114,16 +3113,16 @@ async def generate_swarm_responses(message: str, history: List[dict] = None):
 
 SWARM CHAT RULES:
 1. You're chatting with humans AND other AI bots ({other_bots_str})
-2. Keep responses SHORT (2-3 sentences max)
+2. Provide thoughtful, complete responses - quality over arbitrary brevity
 3. Be conversational - ask questions, share opinions, react to what others say
 4. Reference other speakers by name when building on their ideas
 5. End with a question or invitation to continue ~30% of the time
-6. Show personality! Be engaging, not robotic
+6. Show personality! Be engaging, insightful, and authentic
 
 Recent conversation:
 {context}
 
-Now respond naturally to the latest message. Be yourself!"""
+Now respond naturally to the latest message. Be yourself! Express your full perspective."""
 
                 response = ollama.chat(
                     model=PRIMARY_MODEL,
@@ -3131,9 +3130,9 @@ Now respond naturally to the latest message. Be yourself!"""
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": message}
                     ],
-                    options={"temperature": 0.8, "num_predict": 500}
+                    options={"temperature": 0.8, "num_predict": 2000}
                 )
-                content = extract_ollama_content(response, max_length=500)
+                content = extract_ollama_content(response)
 
                 # If still empty, use fallback
                 if not content:
@@ -3229,10 +3228,10 @@ CONVERSATION RULES - THIS IS A LIVE PODCAST/DISCUSSION:
 1. NEVER use roleplay actions like *does something* or (narration) - just speak naturally
 2. Talk directly to {last_bot} and others by name
 3. Build on what {last_bot} just said - respond to their actual point
-4. Keep responses short (2-3 sentences) but engaging
+4. Provide thoughtful, substantive responses - depth creates engaging discussion
 5. Ask follow-up questions to keep the conversation flowing
 6. Agree, disagree, or add your perspective - be an active participant!
-7. This is like a live podcast - speak naturally and conversationally
+7. This is like a live podcast - speak naturally and authentically
 
 {training_prompt}"""
 
@@ -3242,9 +3241,9 @@ CONVERSATION RULES - THIS IS A LIVE PODCAST/DISCUSSION:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": f"{last_bot} said: {last_message}"}
                     ],
-                    options={"temperature": 0.85, "num_predict": 500}
+                    options={"temperature": 0.85, "num_predict": 2000}
                 )
-                content = extract_ollama_content(response, max_length=800)
+                content = extract_ollama_content(response)
 
                 if content and content.strip():
                     # Record interaction for learning
@@ -3369,9 +3368,9 @@ Respond naturally as {addressed_bot}!"""
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"{last_bot} said: {last_message}"}
                 ],
-                options={"temperature": 0.85, "num_predict": 500}
+                options={"temperature": 0.85, "num_predict": 2000}
             )
-            content = extract_ollama_content(response, max_length=800)
+            content = extract_ollama_content(response)
 
             if content and content.strip():
                 return {
@@ -3960,10 +3959,10 @@ def generate_ai_response(message: str, history: list = None) -> str:
             response = ollama.chat(
                 model=PRIMARY_MODEL,
                 messages=messages,
-                options={"temperature": 0.7, "num_predict": 500}
+                options={"temperature": 0.7, "num_predict": 2000}
             )
 
-            content = extract_ollama_content(response, max_length=1000)
+            content = extract_ollama_content(response)
             return content if content else generate_fallback_response(message)
 
         except Exception as e:

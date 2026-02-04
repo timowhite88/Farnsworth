@@ -468,7 +468,7 @@ class FarnsworthVTuber:
                     response = ollama.chat(
                         model="phi4",
                         messages=[
-                            {"role": "system", "content": "You are Farnsworth, an eccentric AI scientist leading a collective of AI agents. You speak with wisdom and a touch of madness. Keep responses brief."},
+                            {"role": "system", "content": "You are Farnsworth, an eccentric AI scientist leading a collective of AI agents. You speak with wisdom and a touch of eccentric genius. Provide thoughtful, complete responses."},
                             {"role": "user", "content": prompt}
                         ],
                         options={"num_predict": max_tokens}
@@ -1070,12 +1070,12 @@ Summarize the key revelations for viewers. Emphasize why this matters and encour
             if self.deliberation_room:
                 try:
                     result = await self.deliberation_room.deliberate(
-                        prompt=f"User '{username}' said: '{message}'. Give a brief, friendly acknowledgment (under 150 chars). Be engaging.",
+                        prompt=f"User '{username}' said: '{message}'. Give a friendly, engaging acknowledgment. Be personable.",
                         agents=["Farnsworth", "Grok"],
                         max_rounds=1,
                     )
                     if result and result.final_response:
-                        shoutout = f"Thanks {username}! " + result.final_response[:150]
+                        shoutout = f"Thanks {username}! " + result.final_response
                 except:
                     pass
 

@@ -52,6 +52,11 @@ class FarnsworthMCPServer:
     - farnsworth://memory/graph: Knowledge graph
     - farnsworth://agents/active: Active agents
     - farnsworth://evolution/fitness: Fitness metrics
+
+    AGI v1.8 Additions:
+    - MCP Standardization layer for agent-tool communication
+    - Cross-agent memory support
+    - A2A protocol integration
     """
 
     def __init__(self, data_dir: str = "./data"):
@@ -71,6 +76,13 @@ class FarnsworthMCPServer:
         self._web_agent = None
         self._conversation_exporter = None
         self._project_tracker = None
+
+        # AGI v1.8: MCP Standardization components
+        self._mcp_standard = None
+        self._agent_mcp_clients = {}
+        self._cross_agent_memory = None
+        self._a2a_protocol = None
+        self._langgraph_hybrid = None
 
         # Server instance
         self.server = None
@@ -224,9 +236,143 @@ class FarnsworthMCPServer:
             
             logger.info("Farnsworth Cognitive Cloud fully active.")
 
+            # AGI v1.8: Initialize MCP Standardization
+            await self.initialize_mcp_standard()
+
         except Exception as e:
             logger.error(f"Failed to initialize components: {e}")
             # Continue with minimal functionality
+
+    async def initialize_mcp_standard(self):
+        """
+        Initialize AGI v1.8 MCP Standardization components.
+
+        Sets up:
+        - MCPStandardProtocol for tool standardization
+        - CrossAgentMemory for memory engineering
+        - A2AProtocol for agent-to-agent communication
+        - LangGraphNexusHybrid for stateful workflows
+        """
+        try:
+            # Import AGI v1.8 modules
+            from farnsworth.core.mcp_standard import MCPStandardProtocol, MCPToolCategory
+            from farnsworth.core.cross_agent_memory import CrossAgentMemory
+            from farnsworth.core.a2a_protocol import A2AProtocol
+            from farnsworth.core.langgraph_workflows import LangGraphNexusHybrid
+            from farnsworth.core.nexus import nexus
+
+            # Initialize MCP Standard Protocol
+            self._mcp_standard = MCPStandardProtocol(
+                data_dir=str(self.data_dir / "mcp")
+            )
+            self._mcp_standard.connect_nexus(nexus)
+
+            # Register existing tools as MCP standard
+            await self._register_existing_tools_as_mcp()
+
+            # Initialize Cross-Agent Memory
+            self._cross_agent_memory = CrossAgentMemory(
+                data_dir=str(self.data_dir / "agent_memory")
+            )
+            self._cross_agent_memory.connect_nexus(nexus)
+
+            # Load persisted memory if available
+            await self._cross_agent_memory.load_from_disk()
+
+            # Initialize A2A Protocol
+            self._a2a_protocol = A2AProtocol(
+                data_dir=str(self.data_dir / "a2a")
+            )
+            self._a2a_protocol.connect_nexus(nexus)
+
+            # Connect P2P fabric to A2A protocol
+            try:
+                from farnsworth.core.swarm.p2p import swarm_fabric
+                self._a2a_protocol.connect_p2p(swarm_fabric)
+            except Exception as e:
+                logger.debug(f"P2P fabric not available for A2A: {e}")
+
+            # Initialize LangGraph Hybrid
+            self._langgraph_hybrid = LangGraphNexusHybrid(
+                data_dir=str(self.data_dir / "workflows")
+            )
+            nexus.connect_langgraph(self._langgraph_hybrid)
+
+            # Wire up to SwarmOrchestrator if available
+            if self._swarm_orchestrator:
+                self._swarm_orchestrator.enable_cross_agent_memory(self._cross_agent_memory)
+                self._swarm_orchestrator.enable_a2a_protocol(self._a2a_protocol)
+                self._swarm_orchestrator.enable_langgraph_hybrid(self._langgraph_hybrid)
+
+            logger.info("AGI v1.8: MCP Standardization initialized")
+            logger.info(f"  - MCP Tools: {len(self._mcp_standard.registry._tools)}")
+            logger.info(f"  - Cross-Agent Memory: {self._cross_agent_memory.get_stats()['total_namespaces']} namespaces")
+            logger.info(f"  - A2A Protocol: ready")
+            logger.info(f"  - LangGraph Hybrid: connected to Nexus")
+
+        except ImportError as e:
+            logger.warning(f"AGI v1.8 modules not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP Standardization: {e}")
+
+    async def _register_existing_tools_as_mcp(self):
+        """Register existing Farnsworth tools as MCP standard tools."""
+        if not self._mcp_standard:
+            return
+
+        from farnsworth.core.mcp_standard import MCPToolCategory
+
+        # Register remember tool
+        self._mcp_standard.convert_to_mcp(
+            name="farnsworth_remember",
+            handler=self.remember,
+            description="Store information in Farnsworth's long-term memory",
+            parameters={
+                "content": {"type": "string", "description": "The information to remember", "required": True},
+                "tags": {"type": "array", "description": "Optional tags for categorization"},
+                "importance": {"type": "number", "description": "Importance score 0-1"},
+            },
+            category=MCPToolCategory.MEMORY,
+            tags=["memory", "storage"],
+        )
+
+        # Register recall tool
+        self._mcp_standard.convert_to_mcp(
+            name="farnsworth_recall",
+            handler=self.recall,
+            description="Search and retrieve relevant memories",
+            parameters={
+                "query": {"type": "string", "description": "Search query", "required": True},
+                "limit": {"type": "integer", "description": "Maximum results"},
+            },
+            category=MCPToolCategory.MEMORY,
+            tags=["memory", "search", "retrieval"],
+        )
+
+        # Register delegate tool
+        self._mcp_standard.convert_to_mcp(
+            name="farnsworth_delegate",
+            handler=self.delegate,
+            description="Delegate a task to a specialist agent",
+            parameters={
+                "task": {"type": "string", "description": "Task to delegate", "required": True},
+                "agent_type": {"type": "string", "description": "Type of specialist"},
+            },
+            category=MCPToolCategory.COMMUNICATION,
+            tags=["delegation", "agents", "swarm"],
+        )
+
+        # Register status tool
+        self._mcp_standard.convert_to_mcp(
+            name="farnsworth_status",
+            handler=self.status,
+            description="Get system status and metrics",
+            parameters={},
+            category=MCPToolCategory.SYSTEM,
+            tags=["status", "monitoring"],
+        )
+
+        logger.debug(f"Registered {len(self._mcp_standard.registry._tools)} tools as MCP standard")
 
     async def _ensure_initialized(self):
         """Ensure components are initialized."""

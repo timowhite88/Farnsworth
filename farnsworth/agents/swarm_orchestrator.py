@@ -2514,3 +2514,231 @@ class SwarmOrchestrator:
             "history": self._evolution_history[-10:],  # Last 10 generations
             "best_variant": self.get_best_variant().to_dict() if self.get_best_variant() else None,
         }
+
+    # =========================================================================
+    # AGI v1.8: CROSS-AGENT MEMORY INTEGRATION
+    # =========================================================================
+
+    def enable_cross_agent_memory(self, cross_agent_memory) -> None:
+        """
+        Enable cross-agent memory for enhanced task handoffs.
+
+        AGI v1.8: Memory engineering for agent collaboration.
+
+        Args:
+            cross_agent_memory: CrossAgentMemory instance
+        """
+        self._cross_agent_memory = cross_agent_memory
+        logger.info("SwarmOrchestrator: Cross-agent memory enabled")
+
+    def enable_a2a_protocol(self, a2a_protocol) -> None:
+        """
+        Enable A2A protocol for direct agent-to-agent communication.
+
+        AGI v1.8: Agent-to-agent collaboration protocol.
+
+        Args:
+            a2a_protocol: A2AProtocol instance
+        """
+        self._a2a_protocol = a2a_protocol
+        logger.info("SwarmOrchestrator: A2A protocol enabled")
+
+    def enable_langgraph_hybrid(self, langgraph_hybrid) -> None:
+        """
+        Enable LangGraph hybrid workflows for stateful task execution.
+
+        AGI v1.8: Hybrid Nexus + LangGraph integration.
+
+        Args:
+            langgraph_hybrid: LangGraphNexusHybrid instance
+        """
+        self._langgraph_hybrid = langgraph_hybrid
+        logger.info("SwarmOrchestrator: LangGraph hybrid enabled")
+
+    async def handoff_task_with_memory(
+        self,
+        source_agent_id: str,
+        target_agent_id: Optional[str],
+        task: SwarmTask,
+        insights: Optional[List[str]] = None,
+        failed_approaches: Optional[List[Dict]] = None,
+        partial_results: Optional[Dict] = None,
+    ) -> Optional[str]:
+        """
+        Hand off a task with full memory context transfer.
+
+        AGI v1.8: Enhanced handoffs using CrossAgentMemory.
+
+        Args:
+            source_agent_id: Agent handing off the task
+            target_agent_id: Target agent (or None for auction)
+            task: The task being handed off
+            insights: Insights learned during processing
+            failed_approaches: Approaches that didn't work
+            partial_results: Any partial results achieved
+
+        Returns:
+            Handoff ID or None if failed
+        """
+        if not hasattr(self, '_cross_agent_memory') or not self._cross_agent_memory:
+            logger.debug("Cross-agent memory not enabled, using standard handoff")
+            return None
+
+        try:
+            from farnsworth.core.cross_agent_memory import HandoffReason
+
+            # Determine handoff reason
+            reason = HandoffReason.CAPABILITY_MISMATCH
+            if task.status == TaskStatus.FAILED:
+                reason = HandoffReason.FAILURE
+            elif partial_results:
+                reason = HandoffReason.SPECIALIZATION
+
+            # Prepare handoff context with full memory
+            handoff = await self._cross_agent_memory.prepare_handoff_context(
+                source_agent=source_agent_id,
+                task_description=task.description,
+                reason=reason,
+                target_agent=target_agent_id,
+                insights=insights,
+                failed_approaches=failed_approaches,
+                partial_results=partial_results,
+                context_state=task.context,
+                priority=task.priority / 10.0,  # Normalize to 0-1
+            )
+
+            # If no target, use A2A auction
+            if target_agent_id is None and hasattr(self, '_a2a_protocol') and self._a2a_protocol:
+                # Get required capabilities
+                capabilities = [cap.value for cap in task.required_capabilities]
+
+                auction_id = await self._a2a_protocol.broadcast_task_auction(
+                    initiator=source_agent_id,
+                    task_description=task.description,
+                    required_capabilities=capabilities,
+                    deadline_seconds=30.0,
+                    min_confidence=0.5,
+                    priority=task.priority / 10.0,
+                    context={"handoff_id": handoff.handoff_id},
+                )
+
+                logger.info(f"Task auction {auction_id} started for handoff {handoff.handoff_id}")
+                return handoff.handoff_id
+
+            # Direct handoff to target
+            logger.info(f"Handoff {handoff.handoff_id} prepared from {source_agent_id} to {target_agent_id}")
+            return handoff.handoff_id
+
+        except Exception as e:
+            logger.error(f"Handoff with memory failed: {e}")
+            return None
+
+    async def start_task_workflow(
+        self,
+        task: SwarmTask,
+    ) -> Optional[str]:
+        """
+        Start a task using LangGraph workflow for stateful execution.
+
+        AGI v1.8: Workflow-based task execution.
+
+        Args:
+            task: The task to execute
+
+        Returns:
+            Workflow ID or None if not available
+        """
+        if not hasattr(self, '_langgraph_hybrid') or not self._langgraph_hybrid:
+            logger.debug("LangGraph hybrid not enabled")
+            return None
+
+        try:
+            from farnsworth.core.langgraph_workflows import TaskExecutionWorkflow
+
+            # Create task execution workflow if not exists
+            if not hasattr(self, '_task_execution_workflow'):
+                self._task_execution_workflow = TaskExecutionWorkflow(self._langgraph_hybrid)
+
+            # Start workflow
+            workflow_id = await self._task_execution_workflow.start(
+                task_description=task.description,
+                required_capabilities=[cap.value for cap in task.required_capabilities],
+                context={
+                    "task_id": task.id,
+                    "priority": task.priority,
+                    "memory_refs": task.memory_refs,
+                },
+            )
+
+            # Track workflow
+            if not hasattr(self, '_task_workflows'):
+                self._task_workflows = {}
+            self._task_workflows[task.id] = workflow_id
+
+            logger.info(f"Started workflow {workflow_id} for task {task.id}")
+            return workflow_id
+
+        except Exception as e:
+            logger.error(f"Failed to start task workflow: {e}")
+            return None
+
+    async def start_deliberation_workflow(
+        self,
+        topic: str,
+        participant_agent_ids: List[str],
+    ) -> Optional[str]:
+        """
+        Start a deliberation workflow for collaborative decision-making.
+
+        AGI v1.8: PROPOSE -> CRITIQUE -> REFINE -> VOTE workflow.
+
+        Args:
+            topic: Topic to deliberate on
+            participant_agent_ids: Agents to participate
+
+        Returns:
+            Workflow ID or None if not available
+        """
+        if not hasattr(self, '_langgraph_hybrid') or not self._langgraph_hybrid:
+            logger.debug("LangGraph hybrid not enabled")
+            return None
+
+        try:
+            from farnsworth.core.langgraph_workflows import DeliberationWorkflow
+
+            # Create deliberation workflow if not exists
+            if not hasattr(self, '_deliberation_workflow'):
+                self._deliberation_workflow = DeliberationWorkflow(self._langgraph_hybrid)
+
+            # Start workflow
+            workflow_id = await self._deliberation_workflow.start(
+                topic=topic,
+                participants=participant_agent_ids,
+                context={"orchestrator": "swarm_orchestrator"},
+            )
+
+            logger.info(f"Started deliberation workflow {workflow_id} on topic: {topic[:50]}...")
+            return workflow_id
+
+        except Exception as e:
+            logger.error(f"Failed to start deliberation workflow: {e}")
+            return None
+
+    def get_agi_v18_status(self) -> Dict[str, Any]:
+        """Get AGI v1.8 feature status."""
+        return {
+            "cross_agent_memory_enabled": hasattr(self, '_cross_agent_memory') and self._cross_agent_memory is not None,
+            "a2a_protocol_enabled": hasattr(self, '_a2a_protocol') and self._a2a_protocol is not None,
+            "langgraph_hybrid_enabled": hasattr(self, '_langgraph_hybrid') and self._langgraph_hybrid is not None,
+            "active_workflows": len(getattr(self, '_task_workflows', {})),
+            "cross_agent_memory_stats": (
+                self._cross_agent_memory.get_stats()
+                if hasattr(self, '_cross_agent_memory') and self._cross_agent_memory
+                else None
+            ),
+            "a2a_protocol_stats": (
+                self._a2a_protocol.get_stats()
+                if hasattr(self, '_a2a_protocol') and self._a2a_protocol
+                else None
+            ),
+        }

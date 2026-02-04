@@ -1,0 +1,31 @@
+{
+  "swarm_id": "dev_275a939a",
+  "task_id": "auto_064257_3",
+  "task_description": "the exploration of how humor might influence emotional understanding extends beyond its common association with positivity",
+  "category": "INTEGRATION",
+  "started_at": "2026-02-02T06:42:57.746865",
+  "completed_at": "2026-02-02T06:48:37.813775",
+  "duration_seconds": 340.066917,
+  "files_generated": [
+    "deepseek_farnsworth_core_humor_analysis.py",
+    "deepseek_farnsworth_agents_emotion_humor_agent.py",
+    "deepseek_farnsworth_web_server.py",
+    "deepseek_tests_test_humor_influence.py",
+    "kimi_farnsworth_core_humor_analysis.py",
+    "phi_farnsworth_core_humor_analysis.py",
+    "phi_farnsworth_agents_emotion_humor_agent.py",
+    "phi_farnsworth_web_server.py",
+    "phi_tests_test_humor_influence.py"
+  ],
+  "workers_used": [
+    "Grok",
+    "Gemini",
+    "Claude",
+    "DeepSeek",
+    "Kimi",
+    "Phi",
+    "Swarm-Mind",
+    "Farnsworth"
+  ],
+  "conversation_length": 18
+}

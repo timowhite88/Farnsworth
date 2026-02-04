@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Farnsworth Hourly Video Meme Poster
+Farnsworth Video Meme Poster
 ====================================
 
-Posts fire video memes every hour using:
+Posts fire video memes every 5 hours using:
 - Borg Farnsworth reference image
 - Gemini Nano Banana Pro for image variation
 - Grok Imagine Video for animation
 - Full swarm for caption generation
 
-NO REPLIES - Just bangers every hour.
+NO REPLIES - Just bangers every 5 hours.
 
 "Good news everyone! The memes are now ANIMATED!"
 """
@@ -255,9 +255,9 @@ async def post_video_meme():
 
 
 async def main():
-    """Main loop - post video meme every hour."""
-    logger.info("🎬 FARNSWORTH HOURLY VIDEO MEME POSTER")
-    logger.info("   Posting fire video memes every hour")
+    """Main loop - post video meme every 5 hours."""
+    logger.info("🎬 FARNSWORTH VIDEO MEME POSTER")
+    logger.info("   Posting fire video memes every 5 hours")
     logger.info("   No replies, just bangers")
     logger.info("")
 
@@ -271,9 +271,10 @@ async def main():
                 post_count += 1
                 logger.info(f"Total posts this session: {post_count}")
 
-            # Wait 1 hour
-            logger.info(f"Sleeping for 1 hour... Next post at {datetime.now().hour + 1}:00")
-            await asyncio.sleep(3600)  # 1 hour
+            # Wait 5 hours
+            next_hour = (datetime.now().hour + 5) % 24
+            logger.info(f"Sleeping for 5 hours... Next post around {next_hour}:00")
+            await asyncio.sleep(18000)  # 5 hours
 
         except KeyboardInterrupt:
             logger.info("Shutting down...")

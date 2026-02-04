@@ -41,6 +41,21 @@ from loguru import logger
 import threading
 import queue
 
+
+def _get_dynamic_max_tokens(task_type: str = "chat") -> int:
+    """Get dynamic max_tokens from centralized limits for shadow agents."""
+    try:
+        from farnsworth.core.dynamic_limits import get_session_limits
+        limits = get_session_limits("website_chat")  # Shadow agents use chat limits
+        if limits:
+            return limits.max_tokens
+    except Exception:
+        pass
+    # Generous fallback defaults
+    defaults = {"chat": 4000, "thought": 2000, "followup": 1500, "quick": 1000}
+    return defaults.get(task_type, 4000)
+
+
 # Agent configuration
 AGENT_CONFIGS = {
     "grok": {
@@ -128,8 +143,8 @@ def is_shadow_agent_active(agent_id: str) -> bool:
 async def call_shadow_agent(
     agent_id: str,
     prompt: str,
-    max_tokens: int = 1000,
-    timeout: float = 30.0
+    max_tokens: int = None,
+    timeout: float = 60.0
 ) -> Optional[Tuple[str, str]]:
     """
     Call a shadow agent and get a response.
@@ -140,7 +155,7 @@ async def call_shadow_agent(
     Args:
         agent_id: Which agent to call (grok, gemini, kimi, claude, deepseek, phi)
         prompt: The prompt/question to send
-        max_tokens: Maximum response tokens
+        max_tokens: Maximum response tokens (None = dynamic default)
         timeout: How long to wait for response
 
     Returns:
@@ -150,6 +165,9 @@ async def call_shadow_agent(
         from farnsworth.core.collective.persistent_agent import call_shadow_agent
         result = await call_shadow_agent("grok", "What's your take on AGI?")
     """
+    # Resolve dynamic max_tokens
+    if max_tokens is None:
+        max_tokens = _get_dynamic_max_tokens("chat")
     with _SHADOW_LOCK:
         agent = _SHADOW_AGENTS.get(agent_id)
 
@@ -543,7 +561,7 @@ class PersistentAgent:
             logger.warning(f"[{self.agent_id}] Could not connect to DialogueMemory: {e}")
             self._dialogue_memory = None
 
-    async def query(self, prompt: str, max_tokens: int = 1000) -> Optional[str]:
+    async def query(self, prompt: str, max_tokens: int = None) -> Optional[str]:
         """
         Query this agent for a response.
 
@@ -552,11 +570,15 @@ class PersistentAgent:
 
         Args:
             prompt: The prompt to send
-            max_tokens: Maximum response tokens
+            max_tokens: Maximum response tokens (None = dynamic default)
 
         Returns:
             Response string or None if failed
         """
+        # Resolve dynamic max_tokens
+        if max_tokens is None:
+            max_tokens = _get_dynamic_max_tokens("chat")
+
         if not self.provider:
             logger.warning(f"[{self.agent_id}] No provider available")
             return None
@@ -675,14 +697,15 @@ class PersistentAgent:
             "- 'I agree...' or 'That's a great point...'",
             "Instead, try: direct statements, questions, counterpoints, novel framings.",
             "",
-            "Keep it concise (1-3 sentences). Be authentic to your personality.",
+            "Provide a complete thought. Be authentic to your personality.",
+            "Express yourself fully - depth over arbitrary brevity.",
             "If nothing needs saying, respond with just: [PASS]"
         ])
 
         prompt = "\n".join(context_parts)
 
         try:
-            result = await self.provider.chat(prompt=prompt, max_tokens=300)
+            result = await self.provider.chat(prompt=prompt, max_tokens=_get_dynamic_max_tokens("thought"))
             thought = result.get("content", "").strip()
 
             if thought and "[PASS]" not in thought:
@@ -702,13 +725,13 @@ Your personality: {self.config['personality']}
 
 {message['agent'].upper()} said: "{message['content']}"
 
-Respond briefly (1-2 sentences) from your unique perspective.
+Respond from your unique perspective with the depth the topic deserves.
 Options: extend the idea, challenge it, propose an experiment, ask a deeper question.
 AVOID starting with: "Okay, building on...", "I agree...", "Great point..."
-Use varied, direct openers. Stay in character."""
+Use varied, direct openers. Stay in character. Quality over brevity."""
 
         try:
-            result = await self.provider.chat(prompt=prompt, max_tokens=200)
+            result = await self.provider.chat(prompt=prompt, max_tokens=_get_dynamic_max_tokens("followup"))
             return result.get("content", "").strip()
         except Exception as e:
             logger.error(f"[{self.agent_id}] Response error: {e}")
@@ -846,11 +869,16 @@ async def main():
 # CONVENIENCE FUNCTIONS - Import these from anywhere in the codebase
 # ============================================================================
 
-async def ask_agent(agent_id: str, question: str, max_tokens: int = 1000) -> Optional[str]:
+async def ask_agent(agent_id: str, question: str, max_tokens: int = None) -> Optional[str]:
     """
     Ask a specific agent a question.
 
     Convenience wrapper around call_shadow_agent.
+
+    Args:
+        agent_id: The agent to ask
+        question: The question to ask
+        max_tokens: Max response tokens (None = dynamic default)
 
     Example:
         from farnsworth.core.collective.persistent_agent import ask_agent

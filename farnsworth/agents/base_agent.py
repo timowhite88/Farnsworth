@@ -323,22 +323,38 @@ class BaseAgent(ABC):
     def _get_model_adaptation(self) -> str:
         """Get model-specific adaptation instructions."""
         adaptations = {
-            "lightweight": "Use concise responses (<500 tokens). Simple chain-of-thought. One step at a time.",
-            "standard": "Balanced depth and efficiency. Structure responses. 2-3 tool chains acceptable.",
-            "advanced": "Extended thinking enabled. Deep analysis. Complex tool orchestration. Lead deliberations.",
-            "specialized": "Focus on domain expertise. Flag out-of-scope queries. Maximum domain accuracy.",
+            "lightweight": "Provide clear, complete responses. Use structured chain-of-thought. Quality over arbitrary brevity.",
+            "standard": "Thorough analysis with structured responses. Use tools as needed. Comprehensive coverage.",
+            "advanced": "Extended thinking enabled. Deep analysis. Complex tool orchestration. Lead deliberations. No artificial limits.",
+            "specialized": "Focus on domain expertise. Flag out-of-scope queries. Maximum domain accuracy and depth.",
         }
         return adaptations.get(self._model_tier, adaptations["standard"])
 
     def _get_token_budget(self) -> int:
-        """Get token budget based on model tier."""
-        budgets = {
-            "lightweight": 2000,
-            "standard": 8000,
-            "advanced": 32000,
-            "specialized": 8000,
+        """Get token budget based on model tier - uses dynamic limits."""
+        try:
+            from farnsworth.core.dynamic_limits import get_model_limits
+            # Map tier to representative model for dynamic lookup
+            tier_models = {
+                "lightweight": "phi4",
+                "standard": "gemini",
+                "advanced": "claude-opus",
+                "specialized": "kimi",
+            }
+            model_id = tier_models.get(self._model_tier, "gemini")
+            limits = get_model_limits(model_id)
+            if limits:
+                return limits.max_max_tokens
+        except Exception:
+            pass
+        # Fallback defaults (generous)
+        fallback = {
+            "lightweight": 4000,
+            "standard": 16000,
+            "advanced": 64000,
+            "specialized": 16000,
         }
-        return budgets.get(self._model_tier, 8000)
+        return fallback.get(self._model_tier, 16000)
 
     def get_enhanced_system_prompt(self, task_context: str = "") -> str:
         """

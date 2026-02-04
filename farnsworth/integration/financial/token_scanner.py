@@ -293,13 +293,13 @@ Liquidity: ${liq}
 24h Volume: ${vol}
 24h Change: {c24h}%
 
-Provide a brief but insightful analysis covering:
+Provide a thorough analysis covering:
 1. Is this token tradeable? (enough liquidity?)
-2. Any red flags? (low liq, high volatility, etc.)
+2. Any red flags? (low liq, high volatility, suspicious patterns?)
 3. What type of token is this likely? (meme, utility, scam?)
-4. One-sentence recommendation
+4. Risk assessment and recommendation
 
-Keep it under 150 words. Be direct and helpful.
+Be thorough and helpful. Depth of analysis is valuable for trading decisions.
 """
             session_manager = get_session_manager()
             result = await session_manager.deliberate_in_session(
