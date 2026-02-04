@@ -1,7 +1,7 @@
 # 🧠 Farnsworth: Your Claude Companion AI
 9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS 
 
-Donation and Support please send to this token.This token was created by me. I am One Man. A family man starting a new chapter in AI and researchhoping to bring something new to the world. Mydsughter also helped in the creation of Farnsworth. A company and a dream.  registered in Nee Jersey as business. i bring you Farnsworth Artificial Intelli
+Donation and Support please send to this token.This token was created by me. I am One Man. A family man starting a new chapter in AI and research hoping to bring something new to the world. My daughter also helped in the creation of Farnsworth. A company and a dream.  registered in Nee Jersey as a business. I bring you Farnsworth Artificial Intelli
 
 
 Support the project with $FARNS on Solana: `9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS`
