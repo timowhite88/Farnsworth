@@ -371,6 +371,30 @@ class SwarmFabric:
             # Re-gossip to propagate through network
             await self.gossip(msg)
 
+        elif m_type == "GOSSIP_RESONANCE":
+            # Inter-collective thought packet (Collective Resonance v1.4)
+            source_collective = msg.get("source_collective_id", "unknown")
+            insight = msg.get("insight", "")
+            if insight:
+                nexus.emit(Signal(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "resonant_thought_received",
+                        "packet_id": msg.get("packet_id"),
+                        "source_collective": source_collective,
+                        "insight": insight,
+                        "snippet": msg.get("snippet", []),
+                        "domains": msg.get("domains", []),
+                        "confidence": msg.get("confidence", 0.5),
+                        "query_hash": msg.get("query_hash", ""),
+                        "timestamp": msg.get("timestamp")
+                    },
+                    source="p2p_fabric"
+                ))
+                logger.info(f"P2P: Received resonant thought from collective {source_collective}: {insight[:50]}...")
+            # Re-gossip for propagation
+            await self.gossip(msg)
+
         elif m_type == "GOSSIP_CONVERSATION":
             # Bot-to-bot conversation shared from other nodes
             conversation = msg.get("conversation", [])

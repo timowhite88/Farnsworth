@@ -60,6 +60,12 @@ class SignalType(Enum):
     DIALOGUE_COMPLETED = "dialogue.completed"
     DIALOGUE_TOOL_DECISION = "dialogue.tool_decision"
 
+    # Collective Resonance Signals (Inter-Collective Communication)
+    COLLECTIVE_THOUGHT = "resonance.collective_thought"      # Visible deliberation thought
+    RESONANT_THOUGHT = "resonance.resonant_thought"          # Thought shared via P2P
+    RESONANCE_RECEIVED = "resonance.received"                # Incoming thought from another collective
+    RESONANCE_BROADCAST = "resonance.broadcast"              # Outgoing thought to P2P network
+
 @dataclass
 class Signal:
     """A quantified event propagating through the Nexus."""

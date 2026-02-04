@@ -95,6 +95,23 @@ from .persistent_agent import (
     AGENT_CONFIGS,
 )
 
+from .resonance import (
+    CollectiveMind,
+    ResonanceProtocol,
+    ThoughtVisibility,
+    ThoughtRole,
+    CollectiveThought,
+    ResonancePacket,
+    DeliberationSession,
+    get_collective_mind,
+    get_resonance_protocol,
+    create_collective_resonance,
+    integrate_with_swarm_fabric,
+    setup_public_chat_integration,
+    deliberate_with_visibility,
+    register_nexus_handlers,
+)
+
 __all__ = [
     # Organism
     "CollectiveOrganism",
@@ -161,4 +178,19 @@ __all__ = [
     "spawn_agent_in_background",
     "register_shadow_agents_with_deliberation",
     "AGENT_CONFIGS",
+    # Collective Resonance (v1.4 - Inter-Collective Communication)
+    "CollectiveMind",
+    "ResonanceProtocol",
+    "ThoughtVisibility",
+    "ThoughtRole",
+    "CollectiveThought",
+    "ResonancePacket",
+    "DeliberationSession",
+    "get_collective_mind",
+    "get_resonance_protocol",
+    "create_collective_resonance",
+    "integrate_with_swarm_fabric",
+    "setup_public_chat_integration",
+    "deliberate_with_visibility",
+    "register_nexus_handlers",
 ]
