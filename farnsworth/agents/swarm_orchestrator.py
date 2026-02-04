@@ -60,6 +60,53 @@ except ImportError:
     EMBEDDED_PROMPTS_AVAILABLE = False
     logger.debug("Embedded prompts not available for SwarmOrchestrator")
 
+# Import handler benchmark system (AGI v1.7)
+try:
+    from farnsworth.core.handler_benchmark import (
+        benchmark_engine,
+        HandlerBenchmarkEngine,
+        BenchmarkType,
+        BenchmarkTask,
+        HandlerProfile,
+        ProviderCapability,
+        get_best_handler,
+        get_coding_handler,
+        get_research_handler,
+    )
+    BENCHMARK_AVAILABLE = True
+except ImportError:
+    BENCHMARK_AVAILABLE = False
+    logger.debug("Handler benchmark not available")
+
+# Import sub-swarm spawner (AGI v1.7)
+try:
+    from farnsworth.core.subswarm_spawner import (
+        subswarm_spawner,
+        SubSwarmType,
+        spawn_trading_swarm,
+        spawn_research_swarm,
+        spawn_prediction_swarm,
+        spawn_coding_swarm,
+    )
+    SUBSWARM_AVAILABLE = True
+except ImportError:
+    SUBSWARM_AVAILABLE = False
+    logger.debug("Sub-swarm spawner not available")
+
+# Import tmux session manager (AGI v1.7)
+try:
+    from farnsworth.core.tmux_session_manager import (
+        session_manager,
+        TmuxSession,
+        SessionType,
+        get_claude_session,
+        get_development_session,
+    )
+    TMUX_AVAILABLE = True
+except ImportError:
+    TMUX_AVAILABLE = False
+    logger.debug("Tmux session manager not available")
+
 
 # =============================================================================
 # POPULATION-BASED EVOLUTION (AGI Upgrade)
@@ -1542,13 +1589,25 @@ class SwarmOrchestrator:
         """
         Find the best available agent for a task.
 
-        Uses hybrid scoring:
+        Uses hybrid scoring (AGI v1.7 enhanced):
         1. Capability matching (original)
-        2. Context vector similarity (AGI)
+        2. Context vector similarity (AGI v1.4)
         3. Agent performance history
+        4. Handler benchmark scores (AGI v1.7)
+        5. Dynamic provider recommendations
         """
         best_agent = None
         best_score = 0.0
+
+        # AGI v1.7: Get benchmark recommendations if available
+        benchmark_recommendation = None
+        if BENCHMARK_AVAILABLE:
+            try:
+                benchmark_recommendation = benchmark_engine.get_provider_recommendation(
+                    self._infer_benchmark_type(task)
+                )
+            except Exception:
+                pass
 
         for agent in self.state.active_agents.values():
             if agent.state.status not in (AgentStatus.IDLE, AgentStatus.COMPLETED):
@@ -1563,19 +1622,233 @@ class SwarmOrchestrator:
                 agent_vector = self._agent_type_vectors[agent.name]
                 vector_score = self._cosine_similarity(task.context_vector, agent_vector)
 
-            # Combine scores
+            # AGI v1.7: Benchmark score bonus
+            benchmark_bonus = 0.0
+            if benchmark_recommendation and benchmark_recommendation.get("handler_id"):
+                # Check if this agent matches the benchmark recommendation
+                rec_handler = benchmark_recommendation["handler_id"]
+                if agent.name.lower() in rec_handler.lower() or rec_handler.lower() in agent.name.lower():
+                    benchmark_bonus = benchmark_recommendation.get("score", 0) * 0.3
+
+            # Combine scores with benchmark integration
             if task.context_vector and agent.name in self._agent_type_vectors:
                 # Weighted combination when vector available
-                score = capability_score * 0.4 + vector_score * 0.4 + agent.state.avg_confidence * 0.2
+                score = (
+                    capability_score * 0.35 +
+                    vector_score * 0.3 +
+                    agent.state.avg_confidence * 0.15 +
+                    benchmark_bonus * 0.2
+                )
             else:
                 # Original scoring when no vector
-                score = capability_score * (0.5 + 0.5 * agent.state.avg_confidence)
+                base_score = capability_score * (0.5 + 0.5 * agent.state.avg_confidence)
+                score = base_score * 0.8 + benchmark_bonus * 0.2
 
             if score > best_score:
                 best_score = score
                 best_agent = agent
 
         return best_agent if best_score > 0.3 else None
+
+    def _infer_benchmark_type(self, task: SwarmTask) -> "BenchmarkType":
+        """Infer benchmark type from task for handler selection."""
+        if not BENCHMARK_AVAILABLE:
+            return None
+
+        desc = task.description.lower()
+
+        if any(kw in desc for kw in ["code", "implement", "function", "debug", "refactor"]):
+            return BenchmarkType.CODING
+        elif any(kw in desc for kw in ["research", "find", "search", "analyze"]):
+            return BenchmarkType.RESEARCH
+        elif any(kw in desc for kw in ["reason", "think", "logic", "math", "calculate"]):
+            return BenchmarkType.REASONING
+        elif any(kw in desc for kw in ["trade", "buy", "sell", "market", "token"]):
+            return BenchmarkType.TRADING
+        elif any(kw in desc for kw in ["write", "creative", "story", "brainstorm"]):
+            return BenchmarkType.CREATIVE
+        else:
+            return BenchmarkType.REASONING  # Default
+
+    async def run_handler_tournament(
+        self,
+        task: SwarmTask,
+        handler_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run a competitive tournament to find the best handler for a task.
+
+        AGI v1.7: Dynamic selection through competitive benchmarking.
+
+        Args:
+            task: The task to compete on
+            handler_ids: Specific handlers to test (or all available)
+
+        Returns:
+            Tournament results with winner and rankings
+        """
+        if not BENCHMARK_AVAILABLE:
+            return {"error": "Benchmark system not available"}
+
+        benchmark_type = self._infer_benchmark_type(task)
+
+        # Get handlers to test
+        if handler_ids is None:
+            # Get top candidates based on type
+            candidates = benchmark_engine.select_best_handlers(benchmark_type, top_n=5)
+            handler_ids = [c[0] for c in candidates]
+
+        if not handler_ids:
+            return {"error": "No handlers available for tournament"}
+
+        # Create benchmark task
+        bench_task = BenchmarkTask(
+            task_id=task.id,
+            benchmark_type=benchmark_type,
+            prompt=task.description,
+            timeout_ms=30000.0,
+        )
+
+        # Run tournament
+        try:
+            result = await benchmark_engine.run_tournament(handler_ids, bench_task)
+
+            # Emit result via Nexus
+            await self._emit_benchmark_result(result)
+
+            return {
+                "tournament_id": result.tournament_id,
+                "winner": result.winner_id,
+                "winner_score": result.winner_score,
+                "rankings": result.rankings,
+                "benchmark_type": benchmark_type.value,
+            }
+
+        except Exception as e:
+            logger.error(f"Tournament failed: {e}")
+            return {"error": str(e)}
+
+    async def _emit_benchmark_result(self, result):
+        """Emit benchmark result via Nexus."""
+        try:
+            await nexus.emit(
+                SignalType.BEST_HANDLER_SELECTED,
+                {
+                    "tournament_id": result.tournament_id,
+                    "winner": result.winner_id,
+                    "score": result.winner_score,
+                    "rankings": result.rankings[:3],
+                },
+                source="swarm_orchestrator",
+                urgency=0.5,
+            )
+        except Exception:
+            pass
+
+    async def spawn_subswarm_for_task(
+        self,
+        task: SwarmTask,
+        swarm_type: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Spawn a sub-swarm for complex tasks requiring specialized agent groups.
+
+        AGI v1.7: API-triggered sub-swarm spinning.
+
+        Args:
+            task: The task requiring sub-swarm
+            swarm_type: Override the inferred swarm type
+
+        Returns:
+            Sub-swarm info or None if not available
+        """
+        if not SUBSWARM_AVAILABLE:
+            logger.debug("Sub-swarm spawner not available")
+            return None
+
+        # Infer swarm type from task
+        if swarm_type is None:
+            desc = task.description.lower()
+            if any(kw in desc for kw in ["trade", "market", "token", "price"]):
+                inferred_type = SubSwarmType.TRADING
+            elif any(kw in desc for kw in ["research", "analyze", "investigate"]):
+                inferred_type = SubSwarmType.RESEARCH
+            elif any(kw in desc for kw in ["code", "implement", "debug"]):
+                inferred_type = SubSwarmType.CODING
+            elif any(kw in desc for kw in ["predict", "forecast", "odds"]):
+                inferred_type = SubSwarmType.PREDICTION
+            else:
+                inferred_type = SubSwarmType.ANALYSIS
+        else:
+            inferred_type = SubSwarmType(swarm_type)
+
+        try:
+            subswarm = await subswarm_spawner.spawn_subswarm(
+                inferred_type,
+                task.description,
+                context={"task_id": task.id, "capabilities": [c.value for c in task.required_capabilities]},
+                trigger_source="swarm_orchestrator",
+            )
+
+            logger.info(f"Spawned sub-swarm {subswarm.swarm_id} for task {task.id}")
+
+            return {
+                "swarm_id": subswarm.swarm_id,
+                "type": inferred_type.value,
+                "agent_count": len(subswarm.agents),
+                "state": subswarm.state.value,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to spawn sub-swarm: {e}")
+            return None
+
+    async def get_or_create_persistent_session(
+        self,
+        handler_id: str,
+        session_type: str = "development",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get or create a persistent tmux session for a handler.
+
+        AGI v1.7: Persistent sessions for Claude/Kimi coding workflows.
+
+        Args:
+            handler_id: The handler requesting a session
+            session_type: Type of session (claude_code, development, research)
+
+        Returns:
+            Session info or None if not available
+        """
+        if not TMUX_AVAILABLE:
+            logger.debug("Tmux session manager not available")
+            return None
+
+        try:
+            # Map session type
+            type_map = {
+                "claude_code": SessionType.CLAUDE_CODE,
+                "development": SessionType.DEVELOPMENT,
+                "research": SessionType.RESEARCH,
+                "trading": SessionType.TRADING,
+            }
+            sess_type = type_map.get(session_type, SessionType.DEVELOPMENT)
+
+            session = await session_manager.get_or_create_session(
+                sess_type,
+                handler_id=handler_id,
+            )
+
+            return {
+                "session_id": session.session_id,
+                "session_name": session.session_name,
+                "type": session.session_type.value,
+                "state": session.state.value,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get/create session: {e}")
+            return None
 
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """Compute cosine similarity between two vectors."""

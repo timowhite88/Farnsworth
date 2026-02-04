@@ -82,6 +82,24 @@ class SignalType(Enum):
     RESONANCE_RECEIVED = "resonance.received"                # Incoming thought from another collective
     RESONANCE_BROADCAST = "resonance.broadcast"              # Outgoing thought to P2P network
 
+    # Handler Benchmark Signals (AGI v1.7 - Dynamic Selection)
+    HANDLER_BENCHMARK_START = "benchmark.start"              # Tournament starting
+    HANDLER_BENCHMARK_RESULT = "benchmark.result"            # Single handler result
+    HANDLER_EVALUATION = "benchmark.evaluation"              # Collaborative evaluation request
+    BEST_HANDLER_SELECTED = "benchmark.selected"             # Winner announced
+    HANDLER_PERFORMANCE_UPDATE = "benchmark.performance"     # Fitness update
+
+    # Sub-Swarm Signals (AGI v1.7 - API-Triggered Swarms)
+    SUBSWARM_SPAWN = "subswarm.spawn"                        # Spin up sub-swarm
+    SUBSWARM_COMPLETE = "subswarm.complete"                  # Sub-swarm finished
+    SUBSWARM_MERGE = "subswarm.merge"                        # Merge results back
+
+    # Provider Session Signals (AGI v1.7 - Persistent Sessions)
+    SESSION_CREATED = "session.created"                      # tmux/persistent session created
+    SESSION_COMMAND = "session.command"                      # Command sent to session
+    SESSION_OUTPUT = "session.output"                        # Output captured
+    SESSION_DESTROYED = "session.destroyed"                  # Session ended
+
 
 # =============================================================================
 # NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)
