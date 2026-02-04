@@ -26,6 +26,27 @@ from pathlib import Path
 from loguru import logger
 
 
+def _safe_content(content: Any) -> str:
+    """
+    Safely extract string content from message content field.
+
+    AGI v1.8: Handles cases where API responses return dicts instead of strings.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        # Try common keys for text content
+        for key in ("content", "text", "response", "message", "result"):
+            if key in content and isinstance(content[key], str):
+                return content[key]
+        # Fallback: serialize the dict
+        return json.dumps(content, indent=2)
+    # Fallback for other types
+    return str(content)
+
+
 async def get_powerful_completion(prompt: str, task_complexity: str = "medium", max_tokens: int = 8000) -> str:
     """
     Route to the most capable model based on task complexity.
@@ -53,11 +74,11 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
         try:
             from farnsworth.integration.external.grok import get_grok_provider
             grok = get_grok_provider()
-            if grok:
+            if grok and grok.api_key:
                 result = await grok.chat(prompt, max_tokens=max_tokens)
-                if result:
+                if result and result.get("content"):
                     logger.info(f"Complex task handled by Grok API")
-                    return result
+                    return result.get("content", "")
         except Exception as e:
             logger.debug(f"Grok API unavailable: {e}")
 
@@ -66,10 +87,10 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
             from farnsworth.integration.external.gemini import get_gemini_provider
             gemini = get_gemini_provider()
             if gemini:
-                result = await gemini.chat(prompt)
-                if result:
+                result = await gemini.chat(prompt, max_tokens=max_tokens)  # AGI v1.8: Pass max_tokens
+                if result and result.get("content"):
                     logger.info(f"Complex task handled by Gemini API")
-                    return result
+                    return result.get("content", "")
         except Exception as e:
             logger.debug(f"Gemini API unavailable: {e}")
 
@@ -78,11 +99,11 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
         try:
             from farnsworth.integration.external.kimi import get_kimi_provider
             kimi = get_kimi_provider()
-            if kimi:
+            if kimi and kimi.api_key:
                 result = await kimi.chat(prompt, max_tokens=max_tokens)
-                if result:
+                if result and result.get("content"):
                     logger.info(f"Task handled by Kimi API")
-                    return result
+                    return result.get("content", "")
         except Exception as e:
             logger.debug(f"Kimi API unavailable: {e}")
 
@@ -393,8 +414,9 @@ class DevelopmentSwarm:
         logger.info(f"[{self.swarm_id}] Phase 2: Collective Deliberation (Discussion)")
 
         # Gather research context - FULL context for proper task understanding
+        # AGI v1.8: Safe content extraction for API responses that return dicts
         research_context = "\n\n".join([
-            f"**{msg['role']}**: {msg['content']}"
+            f"**{msg['role']}**: {_safe_content(msg['content'])}"
             for msg in self.conversation if msg.get("phase") == "research"
         ])
 
@@ -488,7 +510,7 @@ The solution should be innovative yet practical - we are building consciousness.
 
             for bot_name in discussion_bots:
                 prev_discussion = "\n".join([
-                    f"{msg['role']}: {msg['content'][:500]}"
+                    f"{msg['role']}: {_safe_content(msg['content'])[:500]}"
                     for msg in self.conversation[-5:]
                     if msg.get("phase") == "discussion"
                 ])
@@ -589,7 +611,7 @@ Be thorough and detailed. Focus on actionable technical decisions.
         else:
             # Fallback: No deliberation result, use Farnsworth synthesis
             all_points = "\n".join([
-                f"{msg['role']}: {msg['content']}"
+                f"{msg['role']}: {_safe_content(msg['content'])}"
                 for msg in self.conversation if msg.get("phase") == "discussion"
             ])
 
@@ -720,9 +742,9 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
         self._task_complexity = assess_task_complexity(self.task_description, self.category)
         logger.info(f"[{self.swarm_id}] Task complexity: {self._task_complexity}")
 
-        # Gather research context
+        # Gather research context (AGI v1.8: safe content extraction)
         research_context = "\n".join([
-            msg["content"] for msg in self.conversation
+            _safe_content(msg["content"]) for msg in self.conversation
             if msg.get("phase") == "research"
         ])
 
@@ -788,9 +810,9 @@ This is a {self._task_complexity.upper()} complexity task - provide appropriate 
         """Implementation phase - Multiple models write code in parallel."""
         logger.info(f"[{self.swarm_id}] Phase 3: Implementation")
 
-        # Get the plan
+        # Get the plan (AGI v1.8: safe content extraction)
         plan_context = "\n".join([
-            msg["content"] for msg in self.conversation
+            _safe_content(msg["content"]) for msg in self.conversation
             if msg.get("phase") == "planning"
         ])
 

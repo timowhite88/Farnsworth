@@ -246,7 +246,7 @@ class AgentRegistry:
                         },
                         json={
                             "model": "claude-3-haiku-20240307",
-                            "max_tokens": min(max_tokens, 500),
+                            "max_tokens": max_tokens,  # AGI v1.8: Use dynamic limit
                             "messages": [{"role": "user", "content": prompt}]
                         },
                         timeout=45.0
@@ -276,7 +276,7 @@ class AgentRegistry:
                         json={
                             "model": "llama-3.3-70b-versatile",
                             "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": min(max_tokens, 500)
+                            "max_tokens": max_tokens  # AGI v1.8: Use dynamic limit
                         },
                         timeout=30.0
                     )
@@ -305,7 +305,7 @@ class AgentRegistry:
                         json={
                             "model": "mistral-large-latest",
                             "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": min(max_tokens, 500)
+                            "max_tokens": max_tokens  # AGI v1.8: Use dynamic limit
                         },
                         timeout=45.0
                     )
@@ -360,7 +360,7 @@ class AgentRegistry:
                         json={
                             "model": "llama-3.1-sonar-small-128k-online",
                             "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": min(max_tokens, 500)
+                            "max_tokens": max_tokens  # AGI v1.8: Use dynamic limit
                         },
                         timeout=45.0
                     )
@@ -389,7 +389,7 @@ class AgentRegistry:
                         json={
                             "model": "deepseek-chat",
                             "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": min(max_tokens, 500)
+                            "max_tokens": max_tokens  # AGI v1.8: Use dynamic limit
                         },
                         timeout=45.0
                     )

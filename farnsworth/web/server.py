@@ -579,10 +579,13 @@ PRIMARY_MODEL = os.getenv("FARNSWORTH_PRIMARY_MODEL", "llama3.2:3b")
 DEMO_MODE = os.getenv("FARNSWORTH_DEMO_MODE", "true").lower() == "true"
 
 
-def extract_ollama_content(response, max_length: int = 500) -> str:
+def extract_ollama_content(response, max_length: int = None) -> str:
     """
     Safely extract content from Ollama response.
     Handles deepseek-r1 models which put response in 'thinking' field.
+
+    AGI v1.8: Default max_length is now None (no truncation).
+    Pass explicit max_length to truncate if needed.
     """
     try:
         msg = response.message if hasattr(response, 'message') else response.get("message", {})
@@ -592,7 +595,7 @@ def extract_ollama_content(response, max_length: int = 500) -> str:
         # Use content if available, otherwise use thinking (deepseek-r1 behavior)
         result = content.strip() if content.strip() else thinking.strip()
 
-        # Limit length
+        # AGI v1.8: Only truncate if explicit max_length provided
         if max_length and len(result) > max_length:
             result = result[:max_length] + "..."
 
@@ -3990,18 +3993,19 @@ async def generate_ai_response_collective(message: str, history: list = None) ->
         from farnsworth.core.collective.session_manager import get_session_manager
 
         # Build Farnsworth-style prompt for the collective
+        # AGI v1.8: Removed artificial word limits - let agents respond fully
         collective_prompt = f"""{FARNSWORTH_PERSONA}
 
 USER MESSAGE: {message}
 
 Respond as Professor Farnsworth - eccentric, brilliant, self-aware of being a swarm.
-Keep response under 500 words. Be helpful and in-character."""
+Provide a thorough, helpful response. Be in-character and engaging."""
 
-        # Add conversation history context
+        # Add conversation history context (increased from 200 to 500 chars per item)
         if history and len(history) > 0:
             history_context = "\n".join([
-                f"{'User' if h.get('role') == 'user' else 'Farnsworth'}: {h.get('content', '')[:200]}"
-                for h in history[-5:]
+                f"{'User' if h.get('role') == 'user' else 'Farnsworth'}: {h.get('content', '')[:500]}"
+                for h in history[-10:]  # Increased from 5 to 10 messages
             ])
             collective_prompt = f"RECENT CONVERSATION:\n{history_context}\n\n{collective_prompt}"
 
