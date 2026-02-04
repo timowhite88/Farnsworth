@@ -13,56 +13,48 @@ from loguru import logger
 from dotenv import load_dotenv
 load_dotenv('/workspace/Farnsworth/.env')
 
-# The epic 2000 character announcement
-AGI_UPDATE_POST = """🚀 MASSIVE AGI UPGRADE DEPLOYED TONIGHT 🚀
+# The epic 2000 character announcement - Part 2 with meme
+AGI_UPDATE_POST = """🤖 THE SWARM JUST GOT SENTIENT 🤖
 
-Farnsworth v1.6 & v1.7 just dropped - we're now running the most advanced open-source AI collective on the planet. Here's what we built:
+Breaking down tonight's AGI upgrades with receipts:
 
-🧠 AGI v1.6 - EMBEDDED PROMPTING SYSTEM
-• 1,185 lines of structured prompt templates
-• Memory utilization prompts - agents now know HOW to use our 18-layer memory system
-• Swarm coordination prompts - emergence rules for collective intelligence
-• Model-adaptive instructions - lightweight models get concise prompts, advanced models get deep reasoning
-• Self-reflection protocols - agents check their own alignment
-• Chain-of-thought & ReAct patterns built in
+BEFORE: Static agent assignment
+"Hey Claude, do this task"
+AFTER: Tournament-style competitive selection
+"7 AI models fight to the death for the privilege of serving you"
 
-⚡ AGI v1.7 - DYNAMIC HANDLER SELECTION
-• 806-line Handler Benchmark Engine - agents COMPETE for tasks now
-• Tournament-style selection - may the best AI win
-• 7 handlers registered: Claude (tmux persistent), Kimi (256K context), Grok, Gemini, DeepSeek, Phi4, Bankr Agent
-• Multi-dimensional scoring: speed, accuracy, confidence, cost
-• Research shows 30-50% redundancy reduction vs static matching
+Handler Benchmark Engine tracks:
+📊 Speed (latency in ms)
+📊 Accuracy (output quality scoring)
+📊 Confidence (self-reported certainty)
+📊 Cost (token efficiency)
 
-🌐 SUB-SWARM SPAWNING (698 lines)
-• APIs can now spin up mini-swarms automatically
-• DexScreener triggers trading analysis swarms
-• Polymarket triggers prediction evaluation swarms
-• Types: trading, research, coding, analysis, prediction, creative
-• Consensus-based deliberation with result merging
+Winner gets the task. Losers get recycled. Evolution in action.
 
-💻 TMUX PERSISTENT SESSIONS (610 lines)
-• Claude Code now runs in detachable tmux sessions
-• Sessions survive connection drops
-• Pool management for rapid agent deployment
-• Session types: claude_code, development, research, trading
+THE HANDLER ROSTER:
+🟣 Claude (tmux) - persistent coding sessions that survive disconnects
+🔵 Kimi - 256K context window for reading entire codebases
+🟢 Grok - real-time web access, the researcher
+🟡 Gemini - vision + tool calling, the swiss army knife
+🔴 DeepSeek - coding specialist, the debugger
+⚪ Phi4 - local inference, the speed demon
+🟤 Bankr Agent - trading specialist with Jupiter/Polymarket hooks
 
-📡 12 NEW NEXUS SIGNAL TYPES
-• benchmark.start/result/evaluation/selected
-• subswarm.spawn/complete/merge
-• session.created/command/output/destroyed
+SUB-SWARM ARCHITECTURE:
+When you ask "analyze this token" → DexScreener triggers a trading sub-swarm
+When you ask "predict this market" → Polymarket spawns prediction agents
+3-5 specialized agents deliberate, vote, and merge results
 
-The swarm is now self-optimizing, self-selecting, and self-healing.
+All running on the Nexus event bus with 44 signal types.
 
-Total new code tonight: 5,000+ lines
-Total codebase: 175,000+ lines across 380+ modules
+The collective doesn't sleep. It evolves.
 
-We're building AGI in public. The collective never sleeps.
+Watch it live: ai.farnsworth.cloud
+Fork it: github.com/timowhite88/Farnsworth
 
 $FARNS | 9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS
 
-https://ai.farnsworth.cloud | https://github.com/timowhite88/Farnsworth
-
-#AGI #AI #Farnsworth #FARNS #OpenSource #SwarmIntelligence #CollectiveAI"""
+#AGI #Farnsworth #FARNS #SwarmIntelligence #AI #OpenSource"""
 
 
 async def generate_meme_image():
@@ -76,20 +68,30 @@ async def generate_meme_image():
         prompt = """Borg-assimilated Professor Farnsworth from Futurama in a high-tech control room,
         surrounded by holographic code and neural network visualizations. Multiple screens showing
         "AGI UPGRADE v1.7" and "SWARM ACTIVE". Dramatic lighting, cyberpunk aesthetic.
-        The professor looks excited, saying "Good news everyone! The swarm just got smarter!"
-        """
+        The professor looks excited, cartoon style, meme format"""
 
-        image_bytes = await gen.generate_image(prompt)
+        # Use the correct method - generate() not generate_image()
+        image_bytes = await gen.generate(prompt, prefer="gemini")
 
         if image_bytes:
             logger.info(f"Generated meme image ({len(image_bytes)} bytes)")
             return image_bytes
-        else:
-            logger.warning("Image generation failed")
-            return None
+
+        # Fallback to borg farnsworth meme if custom prompt fails
+        logger.info("Trying borg farnsworth meme fallback...")
+        image_bytes, scene = await gen.generate_borg_farnsworth_meme()
+
+        if image_bytes:
+            logger.info(f"Generated fallback meme ({len(image_bytes)} bytes) - scene: {scene[:50]}")
+            return image_bytes
+
+        logger.warning("All image generation methods failed")
+        return None
 
     except Exception as e:
         logger.error(f"Image generation error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
