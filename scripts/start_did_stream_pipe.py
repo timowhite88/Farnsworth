@@ -329,8 +329,8 @@ class Content:
 
         category = self._pick_category()
 
-        # 70% chance: use pre-written content, 30% chance: do live research
-        if category == "research" or random.random() < 0.3:
+        # 50/50 split: live research vs scripted content
+        if category == "research" or random.random() < 0.5:
             return await self._research_segment()
         else:
             return self._scripted_segment(category)
