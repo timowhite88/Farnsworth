@@ -23,6 +23,10 @@ from loguru import logger
 
 from .deliberation import AgentTurn, DeliberationResult, DeliberationRound
 
+# AGI v1.8: Lazy imports for archival memory integration
+_archival_memory = None
+_archival_memory_initialized = False
+
 
 @dataclass
 class DeliberationExchange:
@@ -171,8 +175,107 @@ class DialogueMemory:
         if len(self._exchanges) % 10 == 0:
             self._save_state()
 
+        # AGI v1.8: Archive to long-term memory asynchronously
+        asyncio.create_task(self._archive_to_long_term(exchange, result))
+
         logger.info(f"Stored exchange {exchange.exchange_id}")
         return exchange.exchange_id
+
+    async def _archive_to_long_term(
+        self,
+        exchange: DeliberationExchange,
+        result: DeliberationResult
+    ):
+        """
+        AGI v1.8: Bridge deliberations to archival memory for long-term learning.
+
+        Stores the winning response with full metadata and semantic tags,
+        enabling future context recall via embeddings.
+        """
+        global _archival_memory, _archival_memory_initialized
+
+        try:
+            # Lazy initialization of archival memory
+            if not _archival_memory_initialized:
+                try:
+                    from farnsworth.memory.archival_memory import ArchivalMemory
+                    import os
+
+                    # Determine data directory
+                    if os.path.exists("/workspace/farnsworth_memory"):
+                        data_dir = "/workspace/farnsworth_memory/archival/deliberations"
+                    else:
+                        data_dir = "data/archival/deliberations"
+
+                    _archival_memory = ArchivalMemory(data_dir=data_dir)
+                    await _archival_memory.initialize()
+
+                    # Try to set up HuggingFace embeddings for semantic search
+                    _archival_memory.set_huggingface_embeddings()
+
+                    _archival_memory_initialized = True
+                    logger.info("DialogueMemory: Archival bridge initialized")
+                except Exception as e:
+                    logger.warning(f"DialogueMemory: Could not initialize archival memory: {e}")
+                    _archival_memory_initialized = True  # Don't retry
+                    return
+
+            if _archival_memory is None:
+                return
+
+            # Build rich content for archival storage
+            content = f"""DELIBERATION: {exchange.exchange_id}
+PROMPT: {exchange.prompt}
+
+WINNING RESPONSE ({exchange.winning_agent}):
+{exchange.final_response}
+
+VOTE BREAKDOWN: {json.dumps(exchange.vote_breakdown, indent=2)}
+PARTICIPANTS: {', '.join(exchange.participating_agents)}
+CONSENSUS: {'Yes' if exchange.consensus_reached else 'No'}
+"""
+
+            # Build metadata for filtering and context
+            metadata = {
+                "type": "deliberation",
+                "exchange_id": exchange.exchange_id,
+                "winning_agent": exchange.winning_agent,
+                "consensus_reached": exchange.consensus_reached,
+                "participant_count": len(exchange.participating_agents),
+                "participants": exchange.participating_agents,
+                "vote_breakdown": exchange.vote_breakdown,
+                "session_type": exchange.session_type,
+                "duration_ms": exchange.duration_ms,
+                "timestamp": exchange.timestamp,
+            }
+
+            # Build semantic tags for search
+            tags = [
+                "deliberation",
+                f"winner:{exchange.winning_agent}",
+                f"session:{exchange.session_type or 'unknown'}",
+            ]
+            if exchange.consensus_reached:
+                tags.append("consensus")
+            for agent in exchange.participating_agents:
+                tags.append(f"agent:{agent}")
+
+            # Extract topic keywords from prompt for better retrieval
+            prompt_words = exchange.prompt.lower().split()
+            topic_keywords = [w for w in prompt_words if len(w) > 4][:5]
+            tags.extend([f"topic:{kw}" for kw in topic_keywords])
+
+            # Store in archival memory with embeddings
+            await _archival_memory.store(
+                content=content,
+                metadata=metadata,
+                tags=tags,
+            )
+
+            logger.debug(f"Archived deliberation {exchange.exchange_id} to long-term memory")
+
+        except Exception as e:
+            logger.warning(f"Failed to archive deliberation to long-term memory: {e}")
 
     async def get_recent_exchanges(
         self,

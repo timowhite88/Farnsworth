@@ -55,10 +55,11 @@ class CollectiveSession:
         self.deliberation_count += 1
         self.total_turns += len(result.participating_agents)
         self.last_active = datetime.now()
-        # Keep last 10 deliberations in history
+        # AGI v1.8: Keep last 100 deliberations in history (increased from 10)
+        # More context enables better pattern recognition across sessions
         self.history.append(result)
-        if len(self.history) > 10:
-            self.history = self.history[-10:]
+        if len(self.history) > 100:
+            self.history = self.history[-100:]
 
 
 class CollectiveSessionManager:
@@ -228,8 +229,19 @@ class CollectiveSessionManager:
             timeout=config.timeout,
         )
 
-        # Record the deliberation
+        # Record the deliberation to session (in-memory)
         session.record_deliberation(result)
+
+        # AGI v1.8: Record to persistent DialogueMemory for learning
+        # This triggers the full learning pipeline:
+        # 1. DialogueMemory.store_exchange() → saves to exchanges.json
+        # 2. _archive_to_long_term() → stores to ArchivalMemory with embeddings
+        try:
+            from .dialogue_memory import record_deliberation as persist_deliberation
+            asyncio.create_task(persist_deliberation(result, session_type=session.session_type))
+            logger.debug(f"Queued deliberation {result.deliberation_id} for persistent storage")
+        except Exception as e:
+            logger.warning(f"Could not persist deliberation: {e}")
 
         return result
 

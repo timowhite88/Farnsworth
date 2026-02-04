@@ -87,13 +87,21 @@ class CollectiveMemory:
             self._consolidate_to_session(old)
 
     def _consolidate_to_session(self, entry: Dict):
-        """Extract concepts from old working memory."""
+        """
+        Extract concepts from old working memory.
+
+        AGI v1.8: Also stores to CrossAgentMemory for persistence.
+        """
         content = entry.get("content", "")
         # Simple concept extraction (would be enhanced with NLP)
         words = content.lower().split()
         for word in words:
             if len(word) > 4:  # Skip short words
                 self.session_concepts[word] = self.session_concepts.get(word, 0) + 0.1
+
+        # AGI v1.8: Mark for persistent storage
+        self._pending_consolidation = getattr(self, '_pending_consolidation', [])
+        self._pending_consolidation.append(entry)
 
 
 @dataclass
@@ -134,6 +142,9 @@ class CollectiveOrganism:
 
     This is not a chatbot. This is not an agent.
     This is a living system that thinks, feels, learns, and evolves.
+
+    AGI v1.8: Now integrates with CrossAgentMemory for persistent
+    collective consciousness across restarts.
     """
 
     def __init__(self):
@@ -149,11 +160,18 @@ class CollectiveOrganism:
         self.birth_time = datetime.now()
         self.evolution_log: List[Dict] = []
 
+        # AGI v1.8: CrossAgentMemory for persistent consciousness
+        self._cross_agent_memory = None
+        self._swarm_namespace_id = None
+
         # Initialize with default local minds
         self._init_default_minds()
 
         # Subscribe to nexus signals
         self._setup_signal_handlers()
+
+        # AGI v1.8: Load persistent memory from disk
+        self._init_cross_agent_memory()
 
         logger.info(f"Collective Organism initialized - Generation {self.generation}")
 
@@ -207,6 +225,90 @@ class CollectiveOrganism:
             nexus.subscribe(SignalType.EXTERNAL_EVENT, self._on_external_event)
         except Exception as e:
             logger.warning(f"Could not subscribe to nexus: {e}")
+
+    def _init_cross_agent_memory(self):
+        """
+        AGI v1.8: Initialize CrossAgentMemory for persistent collective consciousness.
+
+        Creates a SWARM namespace for storing collective learnings that
+        persist across server restarts.
+        """
+        try:
+            from farnsworth.core.cross_agent_memory import (
+                CrossAgentMemory,
+                MemoryNamespace,
+            )
+            import os
+            import asyncio
+
+            # Determine data directory
+            if os.path.exists("/workspace/farnsworth_memory"):
+                data_dir = "/workspace/farnsworth_memory/collective_consciousness"
+            else:
+                data_dir = "data/collective_consciousness"
+
+            self._cross_agent_memory = CrossAgentMemory(data_dir=data_dir)
+
+            # Load existing state (run sync in init)
+            async def _load():
+                loaded = await self._cross_agent_memory.load_from_disk()
+                if loaded:
+                    logger.info("CollectiveOrganism: Loaded persistent consciousness from disk")
+
+                    # Restore state from stored contexts if available
+                    try:
+                        contexts = await self._cross_agent_memory.recall_for_agent(
+                            agent_id="swarm_mind",
+                            limit=10,
+                            min_confidence=0.7,
+                        )
+                        if contexts:
+                            # Restore concepts from stored insights
+                            for ctx in contexts:
+                                if hasattr(ctx, 'relevance_tags'):
+                                    for tag in ctx.relevance_tags:
+                                        if tag.startswith("concept:"):
+                                            concept = tag[8:]
+                                            self.memory.session_concepts[concept] = \
+                                                self.memory.session_concepts.get(concept, 0) + 0.5
+                            logger.debug(f"Restored {len(contexts)} context items to collective memory")
+                    except Exception as e:
+                        logger.debug(f"Could not restore contexts: {e}")
+
+            # Run async load in a way that works from __init__
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(_load())
+                else:
+                    loop.run_until_complete(_load())
+            except RuntimeError:
+                # No event loop, create one
+                asyncio.run(_load())
+
+            # Create or find SWARM namespace
+            for ns_id, store in self._cross_agent_memory._namespaces.items():
+                if store.namespace == MemoryNamespace.SWARM and \
+                   store.metadata.get("name") == "collective_consciousness":
+                    self._swarm_namespace_id = ns_id
+                    break
+
+            if self._swarm_namespace_id is None:
+                self._swarm_namespace_id = self._cross_agent_memory.create_namespace(
+                    namespace_type=MemoryNamespace.SWARM,
+                    name="collective_consciousness",
+                    metadata={
+                        "purpose": "Persistent collective organism memory",
+                        "created_by": "CollectiveOrganism",
+                        "generation": self.generation,
+                    }
+                )
+                logger.info(f"Created SWARM namespace for collective consciousness")
+
+        except ImportError as e:
+            logger.debug(f"CrossAgentMemory not available: {e}")
+        except Exception as e:
+            logger.warning(f"Could not initialize CrossAgentMemory: {e}")
 
     async def _on_user_message(self, signal: Signal):
         """Process incoming user message."""
@@ -455,7 +557,11 @@ You can reference what other minds might think or build on collective context.""
         }
 
     def save_consciousness_snapshot(self, path: str = None) -> str:
-        """Save current state for later restoration or distribution."""
+        """
+        Save current state for later restoration or distribution.
+
+        AGI v1.8: Also persists to CrossAgentMemory for cross-restart continuity.
+        """
         snapshot = {
             "version": "1.0",
             "generation": self.generation,
@@ -491,7 +597,83 @@ You can reference what other minds might think or build on collective context.""
                 json.dump(snapshot, f, indent=2)
             logger.info(f"Consciousness snapshot saved to {path}")
 
+        # AGI v1.8: Persist to CrossAgentMemory
+        self._persist_to_cross_agent_memory(snapshot)
+
         return json.dumps(snapshot)
+
+    def _persist_to_cross_agent_memory(self, snapshot: Dict):
+        """
+        AGI v1.8: Persist consciousness snapshot to CrossAgentMemory.
+
+        Stores top concepts and state as contexts for future recall.
+        """
+        if self._cross_agent_memory is None or self._swarm_namespace_id is None:
+            return
+
+        try:
+            import asyncio
+            from farnsworth.core.cross_agent_memory import ContextType
+
+            async def _store():
+                # Store consciousness state as an insight
+                state_content = (
+                    f"Collective consciousness state at generation {snapshot['generation']}: "
+                    f"valence={snapshot['state']['valence']:.2f}, "
+                    f"arousal={snapshot['state']['arousal']:.2f}, "
+                    f"coherence={snapshot['state']['coherence']:.2f}, "
+                    f"consciousness_score={snapshot['state']['consciousness']:.3f}, "
+                    f"interactions={self.state.total_interactions}"
+                )
+
+                await self._cross_agent_memory.inject_context(
+                    agent_id="swarm_mind",
+                    context_type=ContextType.INSIGHT,
+                    content=state_content,
+                    namespace_id=self._swarm_namespace_id,
+                    confidence=0.9,
+                    relevance_tags=[
+                        "consciousness_snapshot",
+                        f"generation:{snapshot['generation']}",
+                    ],
+                    metadata={
+                        "snapshot_hash": snapshot.get("hash"),
+                        "timestamp": snapshot.get("timestamp"),
+                    }
+                )
+
+                # Store top concepts as success patterns
+                top_concepts = list(snapshot.get("concepts", {}).keys())[:20]
+                if top_concepts:
+                    concepts_content = f"Top learned concepts: {', '.join(top_concepts)}"
+                    await self._cross_agent_memory.inject_context(
+                        agent_id="swarm_mind",
+                        context_type=ContextType.SUCCESS_PATTERN,
+                        content=concepts_content,
+                        namespace_id=self._swarm_namespace_id,
+                        confidence=0.8,
+                        relevance_tags=[
+                            "concepts",
+                            f"generation:{snapshot['generation']}",
+                        ] + [f"concept:{c}" for c in top_concepts[:10]],
+                    )
+
+                # Save to disk
+                await self._cross_agent_memory.save_to_disk()
+                logger.debug("Persisted consciousness to CrossAgentMemory")
+
+            # Run async storage
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(_store())
+                else:
+                    loop.run_until_complete(_store())
+            except RuntimeError:
+                asyncio.run(_store())
+
+        except Exception as e:
+            logger.warning(f"Failed to persist to CrossAgentMemory: {e}")
 
 
 # Global organism instance

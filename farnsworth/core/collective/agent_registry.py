@@ -12,7 +12,7 @@ enabling the collective to deliberate using real AI models.
 
 import asyncio
 import os
-from typing import Optional, Tuple, Dict, Callable, Awaitable
+from typing import Optional, Tuple, Dict, Callable, Awaitable, List
 from loguru import logger
 
 
@@ -39,7 +39,7 @@ class AgentRegistry:
 
         logger.info("Initializing agent registry...")
 
-        # Register each agent type
+        # Register each API agent type
         await self._register_grok()
         await self._register_gemini()
         await self._register_kimi()
@@ -52,6 +52,9 @@ class AgentRegistry:
         await self._register_perplexity()
         await self._register_deepseek_api()
 
+        # AGI v1.8: Register shadow agents (tmux persistent agents)
+        await self._register_shadow_agents()
+
         # Register with deliberation room
         from .deliberation import get_deliberation_room
         room = get_deliberation_room()
@@ -60,6 +63,70 @@ class AgentRegistry:
 
         self._initialized = True
         logger.info(f"Agent registry initialized with {len(self._agent_funcs)} agents")
+
+    async def _register_shadow_agents(self):
+        """
+        AGI v1.8: Register tmux shadow agents with deliberation room.
+
+        Shadow agents are persistent processes running in tmux that can be
+        called via call_shadow_agent(). This integrates them into the
+        deliberation protocol so they participate in PROPOSE/CRITIQUE/REFINE/VOTE.
+
+        Available shadow agents:
+        - grok, gemini, kimi, claude, deepseek, phi, huggingface, swarm_mind
+        """
+        try:
+            from .persistent_agent import call_shadow_agent, AGENT_CONFIGS
+
+            # Shadow agent configurations with deliberation weights
+            shadow_agent_weights = {
+                "grok_shadow": 1.3,        # Real-time knowledge
+                "gemini_shadow": 1.2,      # Strong reasoning
+                "kimi_shadow": 1.1,        # Long context
+                "claude_shadow": 1.2,      # Careful analysis
+                "deepseek_shadow": 1.2,    # Deep reasoning
+                "phi_shadow": 1.15,        # Fast inference
+                "huggingface_shadow": 1.0, # Open source
+                "swarm_mind_shadow": 1.25, # Collective synthesis
+            }
+
+            # Map shadow agent IDs to their base configs
+            shadow_mappings = {
+                "grok_shadow": "grok",
+                "gemini_shadow": "gemini",
+                "kimi_shadow": "kimi",
+                "claude_shadow": "claude",
+                "deepseek_shadow": "deepseek",
+                "phi_shadow": "phi",
+                "huggingface_shadow": "huggingface",
+                "swarm_mind_shadow": "swarm_mind",
+            }
+
+            registered_count = 0
+            for shadow_id, base_id in shadow_mappings.items():
+                if base_id in AGENT_CONFIGS:
+                    # Create query function that calls the shadow agent
+                    async def query_shadow(
+                        prompt: str,
+                        max_tokens: int,
+                        agent_id: str = base_id
+                    ) -> Optional[Tuple[str, str]]:
+                        result = await call_shadow_agent(agent_id, prompt, max_tokens)
+                        if result:
+                            return (f"{agent_id}_shadow", result[1])
+                        return None
+
+                    self._agent_funcs[shadow_id] = query_shadow
+                    registered_count += 1
+                    logger.debug(f"Registered shadow agent: {shadow_id} -> {base_id}")
+
+            if registered_count > 0:
+                logger.info(f"Registered {registered_count} shadow agents for deliberation")
+
+        except ImportError as e:
+            logger.debug(f"Shadow agents not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to register shadow agents: {e}")
 
     async def _register_grok(self):
         """Register Grok (xAI) agent."""

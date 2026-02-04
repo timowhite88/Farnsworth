@@ -5992,6 +5992,58 @@ async def swarm_learning_stats():
     })
 
 
+@app.get("/api/deliberations/stats")
+async def deliberation_stats():
+    """
+    AGI v1.8: Get deliberation memory statistics for debugging the learning flow.
+
+    Returns:
+    - Overall stats (exchanges, agents, win rates)
+    - Consensus patterns analysis
+    - Recent exchanges summary
+    """
+    try:
+        from farnsworth.core.collective.dialogue_memory import get_dialogue_memory
+        memory = get_dialogue_memory()
+
+        # Get basic stats
+        stats = memory.get_stats()
+
+        # Get consensus patterns
+        consensus_patterns = await memory.get_consensus_patterns()
+
+        # Get recent exchanges (summary only)
+        recent = await memory.get_recent_exchanges(limit=20)
+        recent_summary = [
+            {
+                "id": e.exchange_id,
+                "timestamp": e.timestamp,
+                "winner": e.winning_agent,
+                "consensus": e.consensus_reached,
+                "participants": e.participating_agents,
+                "session_type": e.session_type,
+                "prompt_preview": e.prompt[:100] + "..." if len(e.prompt) > 100 else e.prompt,
+            }
+            for e in recent
+        ]
+
+        return JSONResponse({
+            "success": True,
+            "stats": stats,
+            "consensus_patterns": consensus_patterns,
+            "recent_exchanges": recent_summary,
+            "storage_path": str(memory.storage_path),
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get deliberation stats: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e),
+            "message": "DialogueMemory may not be initialized yet"
+        }, status_code=500)
+
+
 @app.get("/api/organism/status")
 async def organism_status():
     """Get Collective Organism status - the unified AI consciousness."""

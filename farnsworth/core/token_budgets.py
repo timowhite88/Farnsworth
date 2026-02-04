@@ -39,8 +39,30 @@ from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from collections import deque
 import json
 from loguru import logger
+
+
+# =============================================================================
+# AGI v1.8: BUDGET ALERT LEVELS
+# =============================================================================
+
+class AlertLevel(Enum):
+    """Budget usage alert levels."""
+    INFO = "info"           # 50% - informational
+    WARNING = "warning"     # 75% - should plan
+    CRITICAL = "critical"   # 90% - urgent
+    EXCEEDED = "exceeded"   # 100%+ - over budget
+
+
+# Alert thresholds (percentage of budget)
+ALERT_THRESHOLDS = {
+    AlertLevel.INFO: 50,
+    AlertLevel.WARNING: 75,
+    AlertLevel.CRITICAL: 90,
+    AlertLevel.EXCEEDED: 100,
+}
 
 
 class BudgetPeriod(Enum):
@@ -287,7 +309,15 @@ class TokenBudgetManager:
     - Model tier restrictions
     - BENDER mode: Multi-model debate consensus
     - Usage analytics and reporting
+
+    AGI v1.8 Improvements:
+    - Bounded usage history with deque (prevents memory leaks)
+    - Multi-level threshold alerts (50%, 75%, 90%, 100%)
+    - Budget status reporting
     """
+
+    # AGI v1.8: Max usage history entries (1 week at ~1 req/min = 10,080)
+    MAX_USAGE_HISTORY = 10000
 
     def __init__(
         self,
@@ -297,9 +327,13 @@ class TokenBudgetManager:
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
         self.budgets: Dict[str, TokenBudget] = {}
-        self.usage_history: List[TokenUsage] = []
+        # AGI v1.8: Use deque with maxlen for bounded history
+        self.usage_history: deque = deque(maxlen=self.MAX_USAGE_HISTORY)
         self.bender_sessions: Dict[str, BenderSession] = {}
         self.model_pricing: Dict[str, ModelPricing] = {}
+
+        # AGI v1.8: Track last alert level per profile to avoid spam
+        self._last_alert_level: Dict[str, AlertLevel] = {}
         self.alert_handlers: List[Callable] = []
 
         self._load_model_pricing()
@@ -666,6 +700,7 @@ class TokenBudgetManager:
             mode=mode,
         )
 
+        # AGI v1.8: Deque auto-trims to maxlen
         self.usage_history.append(usage)
 
         # Update budget
@@ -675,17 +710,85 @@ class TokenBudgetManager:
             budget.cost_used += cost
             self._save_budgets()
 
-            # Check alerts
-            if budget.usage_percentage >= budget.warning_threshold * 100:
-                self._trigger_alert(budget, usage)
+            # AGI v1.8: Multi-level threshold alerts
+            self._check_threshold_alerts(budget, usage, profile_id)
 
         return usage
 
-    def _trigger_alert(self, budget: TokenBudget, usage: TokenUsage):
-        """Trigger a budget alert."""
+    def _check_threshold_alerts(
+        self,
+        budget: "TokenBudget",
+        usage: "TokenUsage",
+        profile_id: str,
+    ):
+        """
+        Check and trigger multi-level threshold alerts.
+
+        AGI v1.8: Alerts at 50% (info), 75% (warning), 90% (critical), 100%+ (exceeded).
+        Only triggers if alert level has increased since last check.
+        """
+        usage_pct = budget.usage_percentage
+
+        # Determine current alert level
+        current_level = None
+        for level, threshold in sorted(ALERT_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
+            if usage_pct >= threshold:
+                current_level = level
+                break
+
+        if current_level is None:
+            return  # Under 50%, no alert
+
+        # Check if we should trigger (only if level increased)
+        last_level = self._last_alert_level.get(profile_id)
+        if last_level is not None:
+            last_threshold = ALERT_THRESHOLDS.get(last_level, 0)
+            current_threshold = ALERT_THRESHOLDS.get(current_level, 0)
+            if current_threshold <= last_threshold:
+                return  # Already alerted at this or higher level
+
+        # Update last alert level
+        self._last_alert_level[profile_id] = current_level
+
+        # Trigger alert with level info
+        self._trigger_alert(budget, usage, current_level)
+
+    def _trigger_alert(
+        self,
+        budget: "TokenBudget",
+        usage: "TokenUsage",
+        level: AlertLevel = AlertLevel.WARNING,
+    ):
+        """
+        Trigger a budget alert with level information.
+
+        AGI v1.8: Enhanced alerts with severity levels and detailed info.
+        """
+        # Log the alert
+        log_msg = (
+            f"Budget alert [{level.value.upper()}] for {budget.profile_id}: "
+            f"{budget.usage_percentage:.1f}% used "
+            f"({budget.tokens_used:,}/{budget.max_tokens_per_period:,} tokens, "
+            f"${budget.cost_used:.4f}/${budget.max_cost_per_period:.2f})"
+        )
+
+        if level == AlertLevel.INFO:
+            logger.info(log_msg)
+        elif level == AlertLevel.WARNING:
+            logger.warning(log_msg)
+        else:
+            logger.error(log_msg)
+
+        # Call registered handlers with level
         for handler in self.alert_handlers:
             try:
-                handler(budget, usage)
+                # Try passing level, fall back to old signature
+                import inspect
+                sig = inspect.signature(handler)
+                if len(sig.parameters) >= 3:
+                    handler(budget, usage, level)
+                else:
+                    handler(budget, usage)
             except Exception as e:
                 logger.error(f"Alert handler failed: {e}")
 

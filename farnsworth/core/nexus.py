@@ -20,6 +20,7 @@ AGI UPGRADES (v1.4):
 """
 
 import asyncio
+import inspect
 import random
 import math
 import uuid
@@ -27,8 +28,41 @@ import json
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Callable, Any, Optional, Awaitable, Tuple, Set
+from typing import Dict, List, Callable, Any, Optional, Awaitable, Tuple, Set, Union
 from loguru import logger
+
+
+# =============================================================================
+# AGI v1.8: SAFE HANDLER INVOCATION
+# =============================================================================
+
+async def _safe_invoke_handler(handler: Callable, signal: Any) -> Any:
+    """
+    Safely invoke a signal handler, handling both sync and async handlers.
+
+    AGI v1.8: Prevents 'asyncio.Future, a coroutine or an awaitable is required' errors
+    by properly wrapping sync handlers and handling non-awaitable returns.
+
+    Args:
+        handler: The handler function (sync or async)
+        signal: The signal to pass to the handler
+
+    Returns:
+        The handler result, or None on error
+    """
+    try:
+        result = handler(signal)
+        # If result is a coroutine or awaitable, await it
+        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+            return await result
+        # If it's an awaitable (has __await__), await it
+        if hasattr(result, '__await__'):
+            return await result
+        # Otherwise return the sync result
+        return result
+    except Exception as e:
+        logger.error(f"Nexus: Handler {getattr(handler, '__name__', 'unknown')} failed: {e}")
+        return None
 
 
 # =============================================================================
@@ -99,6 +133,41 @@ class SignalType(Enum):
     SESSION_COMMAND = "session.command"                      # Command sent to session
     SESSION_OUTPUT = "session.output"                        # Output captured
     SESSION_DESTROYED = "session.destroyed"                  # Session ended
+
+    # =========================================================================
+    # AGI v1.8 SIGNALS
+    # =========================================================================
+
+    # LangGraph Workflow Signals
+    WORKFLOW_STARTED = "workflow.started"                    # Workflow execution started
+    WORKFLOW_NODE_ENTERED = "workflow.node_entered"          # Entered a workflow node
+    WORKFLOW_NODE_EXITED = "workflow.node_exited"            # Exited a workflow node
+    WORKFLOW_CHECKPOINT = "workflow.checkpoint"              # Checkpoint created
+    WORKFLOW_RESUMED = "workflow.resumed"                    # Resumed from checkpoint
+    WORKFLOW_COMPLETED = "workflow.completed"                # Workflow finished successfully
+    WORKFLOW_FAILED = "workflow.failed"                      # Workflow execution failed
+
+    # Cross-Agent Memory Signals
+    MEMORY_CONTEXT_INJECTED = "memory.context_injected"      # Context injected to namespace
+    MEMORY_HANDOFF_PREPARED = "memory.handoff_prepared"      # Handoff context prepared
+    MEMORY_NAMESPACE_CREATED = "memory.namespace_created"    # New memory namespace created
+    MEMORY_TEAM_MERGED = "memory.team_merged"                # Team memories merged
+
+    # MCP Standardization Signals
+    MCP_TOOL_REGISTERED = "mcp.tool_registered"              # New tool registered
+    MCP_TOOL_CALLED = "mcp.tool_called"                      # Tool invoked
+    MCP_AGENT_CONNECTED = "mcp.agent_connected"              # Agent connected via MCP
+    MCP_CAPABILITY_DISCOVERED = "mcp.capability_discovered"  # Capabilities discovered
+
+    # A2A Protocol Signals
+    A2A_SESSION_REQUESTED = "a2a.session_requested"          # Session requested
+    A2A_SESSION_STARTED = "a2a.session_started"              # Session started
+    A2A_SESSION_ENDED = "a2a.session_ended"                  # Session ended
+    A2A_TASK_AUCTIONED = "a2a.task_auctioned"                # Task put up for auction
+    A2A_BID_RECEIVED = "a2a.bid_received"                    # Bid received for auction
+    A2A_TASK_ASSIGNED = "a2a.task_assigned"                  # Task assigned to winner
+    A2A_CONTEXT_SHARED = "a2a.context_shared"                # Context shared between agents
+    A2A_SKILL_TRANSFERRED = "a2a.skill_transferred"          # Skill transferred
 
 
 # =============================================================================
@@ -245,6 +314,10 @@ class Nexus:
         self._evolution_generation: int = 0
         self._evolution_history: List[Dict] = []
 
+        # AGI v1.8: LangGraph hybrid integration
+        self._langgraph_hybrid = None
+        self._workflow_state_cache: Dict[str, Dict] = {}
+
         logger.info("Nexus initialized with AGI upgrades")
 
     @classmethod
@@ -378,7 +451,8 @@ class Nexus:
                     import time
                     start = time.time()
                     try:
-                        await handler(sig)
+                        # AGI v1.8: Use safe handler invocation
+                        await _safe_invoke_handler(handler, sig)
                         subscription.successful_invocations += 1
                         latency = (time.time() - start) * 1000
                         # Update rolling average
@@ -485,10 +559,11 @@ class Nexus:
         start_time = time.time()
 
         # 1. Type-based handlers
+        # AGI v1.8: Use safe handler invocation to support both sync and async handlers
         handlers = self._subscribers.get(signal.type, [])
         if handlers:
             results = await asyncio.gather(
-                *[h(signal) for h in handlers],
+                *[_safe_invoke_handler(h, signal) for h in handlers],
                 return_exceptions=True
             )
 
@@ -573,10 +648,14 @@ class Nexus:
             ))
         else:
             # Immediate processing (backwards compatible)
+            # AGI v1.8: Use safe handler invocation to support both sync and async handlers
             handlers = self._subscribers.get(signal.type, [])
             if handlers:
                 try:
-                    await asyncio.gather(*[h(signal) for h in handlers], return_exceptions=True)
+                    await asyncio.gather(
+                        *[_safe_invoke_handler(h, signal) for h in handlers],
+                        return_exceptions=True
+                    )
                 except Exception as e:
                     logger.error(f"Nexus: Critical propagation failure: {e}")
 
@@ -691,7 +770,8 @@ class Nexus:
 
                     async def invoke_semantic(handler, subscription, sig, sim):
                         try:
-                            await handler(sig)
+                            # AGI v1.8: Use safe handler invocation
+                            await _safe_invoke_handler(handler, sig)
                             subscription.successful_invocations += 1
                             return {"success": True, "similarity": sim}
                         except Exception as e:
@@ -1098,7 +1178,87 @@ Return ONLY the JSON:"""
                 "creativity": self._thought_config.creativity_temperature,
             },
             "evolution_generation": self._evolution_generation,
+            "langgraph_connected": self._langgraph_hybrid is not None,
         }
+
+    # =========================================================================
+    # LANGGRAPH HYBRID INTEGRATION (AGI v1.8)
+    # =========================================================================
+
+    def connect_langgraph(self, langgraph_hybrid) -> None:
+        """
+        Connect the LangGraph hybrid workflow system to Nexus.
+
+        This enables bidirectional communication between the event bus
+        and stateful workflows.
+
+        Args:
+            langgraph_hybrid: LangGraphNexusHybrid instance
+        """
+        self._langgraph_hybrid = langgraph_hybrid
+        langgraph_hybrid.connect_nexus(self)
+        logger.info("Nexus: LangGraph hybrid connected")
+
+    async def emit_with_workflow_state(
+        self,
+        type: SignalType,
+        payload: Dict[str, Any],
+        source: str,
+        workflow_id: str,
+        urgency: float = 0.5,
+    ) -> None:
+        """
+        Emit a signal with attached workflow state context.
+
+        This allows workflow-aware signal processing where handlers
+        can access the current workflow state.
+
+        Args:
+            type: Signal type to emit
+            payload: Signal payload
+            source: Signal source identifier
+            workflow_id: ID of the associated workflow
+            urgency: Signal urgency (0-1)
+        """
+        # Get workflow state if available
+        workflow_state = None
+        if self._langgraph_hybrid:
+            workflow_status = self._langgraph_hybrid.get_workflow_status(workflow_id)
+            if workflow_status:
+                workflow_state = workflow_status
+                self._workflow_state_cache[workflow_id] = workflow_state
+
+        # Enrich payload with workflow context
+        enriched_payload = {
+            **payload,
+            "_workflow_id": workflow_id,
+            "_workflow_state": workflow_state,
+        }
+
+        await self.emit(
+            type=type,
+            payload=enriched_payload,
+            source=source,
+            urgency=urgency,
+        )
+
+    def get_workflow_state(self, workflow_id: str) -> Optional[Dict]:
+        """
+        Get cached workflow state for a workflow ID.
+
+        Args:
+            workflow_id: The workflow identifier
+
+        Returns:
+            Workflow state dict or None if not found
+        """
+        if workflow_id in self._workflow_state_cache:
+            return self._workflow_state_cache[workflow_id]
+
+        if self._langgraph_hybrid:
+            return self._langgraph_hybrid.get_workflow_status(workflow_id)
+
+        return None
 
 # Global accessor
 nexus = Nexus.get_instance()

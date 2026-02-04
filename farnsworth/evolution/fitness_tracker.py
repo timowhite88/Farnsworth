@@ -6,15 +6,63 @@ Tracks and aggregates fitness metrics for evolution:
 - Response quality
 - Efficiency (tokens, time)
 - User satisfaction
+
+AGI v1.8 Improvements:
+- TTL-based caching for fitness calculations
+- Deque-based bounded storage for O(1) operations
+- Heap-based leaderboard for efficient top-k queries
 """
 
 import asyncio
+import heapq
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional, Any
-from collections import defaultdict
+from typing import Optional, Any, Dict, List, Tuple
+from collections import defaultdict, deque
+from functools import lru_cache
 
 from loguru import logger
+
+
+# =============================================================================
+# CACHING UTILITIES (AGI v1.8)
+# =============================================================================
+
+class TTLCache:
+    """
+    Simple TTL-based cache for fitness calculations.
+
+    AGI v1.8: Minimizes redundant fitness computations.
+    """
+    def __init__(self, ttl_seconds: float = 5.0, max_size: int = 100):
+        self.ttl = timedelta(seconds=ttl_seconds)
+        self.max_size = max_size
+        self._cache: Dict[str, Tuple[Any, datetime]] = {}
+
+    def get(self, key: str) -> Optional[Any]:
+        """Get cached value if not expired."""
+        if key not in self._cache:
+            return None
+        value, timestamp = self._cache[key]
+        if datetime.now() - timestamp > self.ttl:
+            del self._cache[key]
+            return None
+        return value
+
+    def set(self, key: str, value: Any) -> None:
+        """Set cached value with current timestamp."""
+        # Evict oldest if over size
+        if len(self._cache) >= self.max_size:
+            oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][1])
+            del self._cache[oldest_key]
+        self._cache[key] = (value, datetime.now())
+
+    def invalidate(self, key: Optional[str] = None) -> None:
+        """Invalidate specific key or all keys."""
+        if key is None:
+            self._cache.clear()
+        elif key in self._cache:
+            del self._cache[key]
 
 
 @dataclass
@@ -44,34 +92,55 @@ class FitnessTracker:
     - Multi-dimensional fitness tracking
     - Genome-specific performance
     - Trend detection
+
+    AGI v1.8 Improvements:
+    - TTL caching for get_current_fitness() and get_trend()
+    - Deque-based bounded storage for O(1) append/trim
+    - Heap-based leaderboard for efficient top-k queries
     """
 
     def __init__(
         self,
         window_size: int = 100,
         snapshot_interval_minutes: int = 30,
+        cache_ttl_seconds: float = 5.0,
     ):
         self.window_size = window_size
         self.snapshot_interval = timedelta(minutes=snapshot_interval_minutes)
 
-        # Metric storage (rolling windows)
-        self.metrics: dict[str, list[FitnessMetric]] = defaultdict(list)
-
-        # Genome-specific metrics
-        self.genome_metrics: dict[str, dict[str, list[float]]] = defaultdict(
-            lambda: defaultdict(list)
+        # AGI v1.8: Use deque for O(1) bounded append
+        self.metrics: Dict[str, deque] = defaultdict(
+            lambda: deque(maxlen=window_size)
         )
 
-        # Snapshots
-        self.snapshots: list[FitnessSnapshot] = []
+        # Genome-specific metrics (also use deque)
+        self.genome_metrics: Dict[str, Dict[str, deque]] = defaultdict(
+            lambda: defaultdict(lambda: deque(maxlen=window_size))
+        )
+
+        # AGI v1.8: Use deque for bounded snapshots
+        self.snapshots: deque = deque(maxlen=1000)
         self.last_snapshot: Optional[datetime] = None
 
         # Fitness weights (importance of each metric)
-        self.weights: dict[str, float] = {
+        # AGI v1.8: Added deliberation weights for evolution feedback loop
+        self.weights: Dict[str, float] = {
             "task_success": 0.4,
             "efficiency": 0.3,
             "user_satisfaction": 0.3,
+            # Deliberation metrics (AGI v1.8)
+            "deliberation_score": 0.15,     # Normalized vote score per agent
+            "deliberation_win": 0.10,       # 1.0 for winner, 0.0 for others
+            "consensus_contribution": 0.05,  # 1.0 when consensus reached
         }
+
+        # AGI v1.8: TTL caches for computed values
+        self._fitness_cache = TTLCache(ttl_seconds=cache_ttl_seconds)
+        self._trend_cache = TTLCache(ttl_seconds=cache_ttl_seconds * 2)  # Trends change slower
+
+        # AGI v1.8: Heap for leaderboard (negated scores for max-heap)
+        self._leaderboard_heap: List[Tuple[float, str]] = []
+        self._leaderboard_dirty = True
 
     def record(
         self,
@@ -87,20 +156,19 @@ class FitnessTracker:
             context=context or {},
         )
 
-        # Add to global metrics
+        # AGI v1.8: Deque auto-trims to maxlen, O(1) append
         self.metrics[metric_name].append(metric)
 
-        # Trim to window size
-        if len(self.metrics[metric_name]) > self.window_size:
-            self.metrics[metric_name] = self.metrics[metric_name][-self.window_size:]
-
-        # Add to genome-specific metrics
+        # Add to genome-specific metrics (also auto-trimmed)
         if genome_id:
             self.genome_metrics[genome_id][metric_name].append(value)
-            # Trim genome metrics too
-            if len(self.genome_metrics[genome_id][metric_name]) > self.window_size:
-                self.genome_metrics[genome_id][metric_name] = \
-                    self.genome_metrics[genome_id][metric_name][-self.window_size:]
+            # Mark leaderboard as needing update
+            self._leaderboard_dirty = True
+
+        # AGI v1.8: Invalidate caches on new data
+        cache_key = f"fitness_{genome_id}" if genome_id else "fitness_global"
+        self._fitness_cache.invalidate(cache_key)
+        self._trend_cache.invalidate(f"trend_{metric_name}")
 
         # Check if snapshot needed
         self._maybe_snapshot()
@@ -129,20 +197,36 @@ class FitnessTracker:
         if user_feedback is not None:
             self.record("user_satisfaction", user_feedback, genome_id)
 
-    def get_current_fitness(self, genome_id: Optional[str] = None) -> dict[str, float]:
-        """Get current fitness scores."""
+    def get_current_fitness(self, genome_id: Optional[str] = None) -> Dict[str, float]:
+        """
+        Get current fitness scores.
+
+        AGI v1.8: Uses TTL cache to minimize redundant computations.
+        """
+        cache_key = f"fitness_{genome_id}" if genome_id else "fitness_global"
+
+        # Check cache first
+        cached = self._fitness_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Compute fitness
         if genome_id and genome_id in self.genome_metrics:
             metrics = self.genome_metrics[genome_id]
-            return {
+            result = {
                 name: sum(values) / len(values) if values else 0.0
                 for name, values in metrics.items()
             }
+        else:
+            # Global metrics
+            result = {
+                name: sum(m.value for m in metrics) / len(metrics) if metrics else 0.0
+                for name, metrics in self.metrics.items()
+            }
 
-        # Global metrics
-        return {
-            name: sum(m.value for m in metrics) / len(metrics) if metrics else 0.0
-            for name, metrics in self.metrics.items()
-        }
+        # Cache result
+        self._fitness_cache.set(cache_key, result)
+        return result
 
     def get_weighted_fitness(self, genome_id: Optional[str] = None) -> float:
         """Get weighted total fitness."""
@@ -173,7 +257,11 @@ class FitnessTracker:
         }
 
     def _maybe_snapshot(self):
-        """Create snapshot if interval has passed."""
+        """
+        Create snapshot if interval has passed.
+
+        AGI v1.8: Deque auto-bounds to maxlen, no manual trimming needed.
+        """
         now = datetime.now()
 
         if self.last_snapshot and now - self.last_snapshot < self.snapshot_interval:
@@ -184,21 +272,31 @@ class FitnessTracker:
             metrics=self.get_current_fitness(),
             sample_count=sum(len(m) for m in self.metrics.values()),
         )
+        # AGI v1.8: Deque auto-trims to maxlen
         self.snapshots.append(snapshot)
         self.last_snapshot = now
 
-        # Keep bounded snapshots
-        if len(self.snapshots) > 1000:
-            self.snapshots = self.snapshots[-500:]
+        # Invalidate trend cache on new snapshot
+        self._trend_cache.invalidate()
 
     def get_trend(self, metric_name: str, periods: int = 5) -> float:
         """
         Calculate trend for a metric.
 
         Returns positive for improving, negative for declining.
+
+        AGI v1.8: Uses TTL cache for trend calculations.
         """
+        cache_key = f"trend_{metric_name}_{periods}"
+
+        # Check cache first
+        cached = self._trend_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Get relevant snapshots (convert deque to list for slicing)
         relevant_snapshots = [
-            s for s in self.snapshots
+            s for s in list(self.snapshots)
             if metric_name in s.metrics
         ][-periods:]
 
@@ -207,7 +305,7 @@ class FitnessTracker:
 
         values = [s.metrics[metric_name] for s in relevant_snapshots]
 
-        # Simple linear trend
+        # Simple linear trend (linear regression slope)
         n = len(values)
         x_mean = (n - 1) / 2
         y_mean = sum(values) / n
@@ -216,9 +314,13 @@ class FitnessTracker:
         denominator = sum((i - x_mean) ** 2 for i in range(n))
 
         if denominator == 0:
-            return 0.0
+            result = 0.0
+        else:
+            result = numerator / denominator
 
-        return numerator / denominator
+        # Cache result
+        self._trend_cache.set(cache_key, result)
+        return result
 
     def set_weight(self, metric_name: str, weight: float):
         """Set weight for a metric."""
@@ -236,10 +338,20 @@ class FitnessTracker:
             "trends": {name: self.get_trend(name) for name in self.metrics.keys()},
         }
 
-    def get_leaderboard(self, top_k: int = 10) -> list[tuple[str, float]]:
-        """Get top performing genomes."""
-        genome_scores = [
-            (gid, self.get_weighted_fitness(gid))
-            for gid in self.genome_metrics.keys()
-        ]
-        return sorted(genome_scores, key=lambda x: x[1], reverse=True)[:top_k]
+    def get_leaderboard(self, top_k: int = 10) -> List[Tuple[str, float]]:
+        """
+        Get top performing genomes.
+
+        AGI v1.8: Uses heapq.nlargest for O(n log k) instead of O(n log n) sort.
+        """
+        # Rebuild heap if dirty
+        if self._leaderboard_dirty:
+            self._leaderboard_heap = [
+                (self.get_weighted_fitness(gid), gid)
+                for gid in self.genome_metrics.keys()
+            ]
+            self._leaderboard_dirty = False
+
+        # Use heapq.nlargest for efficient top-k
+        top = heapq.nlargest(top_k, self._leaderboard_heap)
+        return [(gid, score) for score, gid in top]
