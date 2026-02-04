@@ -47,6 +47,12 @@ OUTPUT_HEIGHT = 1080
 OUTPUT_FPS = 30
 KEYFRAME_SEC = 3
 
+# Buffer settings for stability
+INITIAL_VIDEOS = 10          # Generate this many before starting stream
+QUEUE_REFILL_THRESHOLD = 8   # Generate more when queue drops below this
+STREAM_DELAY_SECONDS = 45    # Pre-buffer this much before streaming starts
+FFMPEG_BUFFER_SIZE = "28000k"  # Larger encoding buffer (2x default)
+
 CACHE_DIR = Path("/workspace/Farnsworth/cache/did_pipe")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -388,6 +394,12 @@ class PipeStreamer:
     """
     TRUE persistent streaming via stdin pipe.
     ONE FFmpeg runs forever, we pipe video data to it.
+
+    Buffer layers:
+    1. Video queue (10+ videos)
+    2. FFmpeg input thread queue (1024 packets)
+    3. FFmpeg encoding buffer (28MB)
+    4. Pre-stream delay (45 sec buffer before RTMP starts)
     """
 
     def __init__(self):
@@ -395,6 +407,8 @@ class PipeStreamer:
         self._running = False
         self._ffmpeg = None
         self._feeder_thread = None
+        self._prebuffer_done = threading.Event()
+        self._total_buffered_seconds = 0.0
 
     def start(self):
         self._running = True
@@ -403,17 +417,19 @@ class PipeStreamer:
         # This process runs FOREVER
         cmd = [
             "ffmpeg",
+            # Input settings with large buffer
+            "-thread_queue_size", "1024",  # Large input queue
             "-re",  # Read at realtime speed
             "-f", "mpegts",  # Input format: MPEG-TS (good for piping)
             "-i", "pipe:0",  # Read from stdin
-            # Output encoding
+            # Output encoding with large buffers
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-tune", "zerolatency",
             "-profile:v", "high",
             "-b:v", "6000k",
             "-maxrate", "7000k",
-            "-bufsize", "14000k",
+            "-bufsize", FFMPEG_BUFFER_SIZE,  # Large encoding buffer
             "-g", str(OUTPUT_FPS * KEYFRAME_SEC),
             "-keyint_min", str(OUTPUT_FPS * KEYFRAME_SEC),
             "-sc_threshold", "0",
@@ -422,12 +438,15 @@ class PipeStreamer:
             "-b:a", "128k",
             "-ar", "44100",
             "-ac", "2",
+            "-max_muxing_queue_size", "1024",  # Prevent muxer stalls
             "-f", "flv",
             "-flvflags", "no_duration_filesize",
             f"{RTMP_URL}/{STREAM_KEY}",
         ]
 
         logger.info("[FFmpeg] Starting PERSISTENT stream (never restarts)...")
+        logger.info(f"[FFmpeg] Buffer: {FFMPEG_BUFFER_SIZE}, Pre-buffer: {STREAM_DELAY_SECONDS}s")
+
         self._ffmpeg = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -451,11 +470,19 @@ class PipeStreamer:
     def add_video(self, path: str, duration: float):
         self.video_queue.put((path, duration))
 
+    def get_buffered_seconds(self) -> float:
+        """Get total seconds of video buffered ahead of stream."""
+        return self._total_buffered_seconds
+
     def _feed_loop(self):
         """
         Feed video files to FFmpeg's stdin as MPEG-TS stream.
         Each video is converted to MPEG-TS and piped.
+
+        Pre-buffers STREAM_DELAY_SECONDS before allowing realtime playback.
         """
+        prebuffer_logged = False
+
         while self._running:
             try:
                 # Get next video
@@ -465,10 +492,23 @@ class PipeStreamer:
                     logger.warning("[Feeder] Queue empty, waiting...")
                     continue
 
-                logger.info(f"[Feeder] Feeding video ({duration:.1f}s), queue: {self.video_queue.qsize()}")
+                # Track buffer depth
+                self._total_buffered_seconds += duration
+
+                # Log pre-buffer progress
+                if not self._prebuffer_done.is_set():
+                    logger.info(f"[Pre-buffer] {self._total_buffered_seconds:.1f}s / {STREAM_DELAY_SECONDS}s buffered")
+                    if self._total_buffered_seconds >= STREAM_DELAY_SECONDS:
+                        logger.info(f"[Pre-buffer] ✓ {STREAM_DELAY_SECONDS}s buffer ready! Stream is now {STREAM_DELAY_SECONDS}s ahead.")
+                        self._prebuffer_done.set()
+
+                logger.info(f"[Feeder] Feeding video ({duration:.1f}s), queue: {self.video_queue.qsize()}, buffer: {self._total_buffered_seconds:.0f}s")
 
                 # Convert video to MPEG-TS and pipe to FFmpeg
                 self._pipe_video(path)
+
+                # Video has been sent, reduce buffer tracking (it's now in FFmpeg's hands)
+                self._total_buffered_seconds = max(0, self._total_buffered_seconds - duration)
 
                 # Clean up
                 try:
@@ -547,32 +587,39 @@ async def main():
     logger.info("=" * 60)
     logger.info("  FARNSWORTH TRUE PERSISTENT STREAM")
     logger.info("  ONE FFmpeg process - ZERO restarts")
+    logger.info(f"  Buffer: {INITIAL_VIDEOS} initial videos, {STREAM_DELAY_SECONDS}s pre-buffer")
     logger.info("=" * 60)
 
     gen = VideoGen()
     content = Content()
     streamer = PipeStreamer()
 
-    # Generate initial videos
-    logger.info("Generating initial videos...")
-    texts = [
-        content.opening(),
-        await content.full_segment(),
-        await content.full_segment(),
-        await content.full_segment(),
-    ]
+    # Generate initial videos (more for stability)
+    logger.info(f"Generating {INITIAL_VIDEOS} initial videos for buffer...")
+    texts = [content.opening()]
+    for _ in range(INITIAL_VIDEOS - 1):
+        texts.append(await content.full_segment())
 
-    tasks = [gen.generate(t) for t in texts]
-    segments = [s for s in await asyncio.gather(*tasks) if s]
+    # Generate in batches of 4 to avoid overwhelming APIs
+    all_segments = []
+    for i in range(0, len(texts), 4):
+        batch = texts[i:i+4]
+        logger.info(f"Generating batch {i//4 + 1}/{(len(texts)+3)//4}...")
+        tasks = [gen.generate(t) for t in batch]
+        segments = [s for s in await asyncio.gather(*tasks) if s]
+        all_segments.extend(segments)
+        if i + 4 < len(texts):
+            await asyncio.sleep(2)  # Small delay between batches
 
-    if not segments:
+    if not all_segments:
         logger.error("No initial segments")
         return
 
-    for seg in segments:
+    for seg in all_segments:
         streamer.add_video(seg.path, seg.duration)
 
-    logger.info(f"Queued {len(segments)} initial videos")
+    total_duration = sum(s.duration for s in all_segments)
+    logger.info(f"Queued {len(all_segments)} initial videos ({total_duration:.0f}s total)")
 
     # Start persistent stream
     streamer.start()
@@ -591,10 +638,14 @@ async def main():
     while running:
         try:
             qsize = streamer.video_queue.qsize()
-            logger.info(f"Queue: {qsize}")
+            buffer_sec = streamer.get_buffered_seconds()
+            logger.info(f"Queue: {qsize} videos, Buffer: {buffer_sec:.0f}s ahead")
 
-            if qsize < 4:
+            # Refill when below threshold (higher threshold for stability)
+            if qsize < QUEUE_REFILL_THRESHOLD:
+                # Generate 3 videos at a time for faster refill
                 new_texts = [
+                    await content.full_segment(),
                     await content.full_segment(),
                     await content.full_segment(),
                 ]
@@ -603,6 +654,9 @@ async def main():
 
                 for seg in new_segs:
                     streamer.add_video(seg.path, seg.duration)
+
+                if new_segs:
+                    logger.info(f"Added {len(new_segs)} videos to queue")
 
             await asyncio.sleep(5)
 
