@@ -63,6 +63,33 @@ class SearchResult:
     debug_info: dict = field(default_factory=dict)
 
 
+# =============================================================================
+# HYBRID RETRIEVAL CONFIGURATION
+# =============================================================================
+
+@dataclass
+class HybridWeights:
+    """Configurable weights for hybrid retrieval scoring."""
+    semantic: float = 0.4
+    keyword: float = 0.2
+    temporal: float = 0.2
+    graph: float = 0.1
+    attention: float = 0.1
+
+    def normalize(self) -> "HybridWeights":
+        """Ensure weights sum to 1.0."""
+        total = self.semantic + self.keyword + self.temporal + self.graph + self.attention
+        if total == 0:
+            return HybridWeights()
+        return HybridWeights(
+            semantic=self.semantic / total,
+            keyword=self.keyword / total,
+            temporal=self.temporal / total,
+            graph=self.graph / total,
+            attention=self.attention / total,
+        )
+
+
 class ArchivalMemory:
     """
     Long-term memory storage with vector search capabilities.
@@ -487,6 +514,237 @@ class ArchivalMemory:
 
             except Exception as e:
                 logger.error(f"Failed to load entry {entry_file}: {e}")
+
+    # =========================================================================
+    # CROSS-ATTENTION HYBRID RETRIEVAL (AGI Upgrade 2)
+    # =========================================================================
+
+    async def hybrid_recall(
+        self,
+        query: str,
+        top_k: int = 10,
+        oversample_factor: int = 3,
+        use_attention: bool = True,
+        weights: Optional[HybridWeights] = None,
+        knowledge_graph=None,  # Optional KnowledgeGraph for context enrichment
+    ) -> list[SearchResult]:
+        """
+        Enhanced hybrid retrieval combining semantic, keyword, temporal, and graph signals.
+
+        Pipeline:
+        1. Oversample candidates from FAISS (semantic) + BM25 (keyword)
+        2. Apply temporal decay scores
+        3. Fetch graph neighbors for context enrichment
+        4. Cross-attention reranking
+        5. Return top_k
+
+        Args:
+            query: Search query
+            top_k: Number of results to return
+            oversample_factor: Oversample ratio for initial retrieval
+            use_attention: Whether to apply cross-attention reranking
+            weights: Custom weights for score combination
+            knowledge_graph: Optional KnowledgeGraph for context enrichment
+
+        Returns:
+            List of SearchResult objects with enhanced scores
+        """
+        async with self._lock:
+            if not self.entries:
+                return []
+
+            weights = (weights or HybridWeights()).normalize()
+            candidate_k = top_k * oversample_factor
+
+            # Step 1: Oversample candidates
+            candidates = []  # List of (entry_id, score, source)
+
+            # Semantic search
+            if self.embed_fn:
+                semantic_results = await self._semantic_search(query, candidate_k)
+                for entry_id, score in semantic_results:
+                    candidates.append((entry_id, score * weights.semantic, "semantic"))
+
+            # Keyword search
+            keyword_results = self._keyword_search(query, candidate_k)
+            for entry_id, score in keyword_results:
+                candidates.append((entry_id, score * weights.keyword, "keyword"))
+
+            # Combine using RRF
+            combined = self._reciprocal_rank_fusion(candidates)
+
+            # Step 2: Apply temporal decay
+            temporal_scored = []
+            for entry_id, score, search_type in combined[:candidate_k]:
+                if entry_id not in self.entries:
+                    continue
+
+                entry = self.entries[entry_id]
+                age_days = (datetime.now() - entry.created_at).days
+                temporal_boost = 1.0 / (1.0 + age_days / 365)
+                temporal_score = score + temporal_boost * weights.temporal
+
+                temporal_scored.append((entry_id, temporal_score, search_type))
+
+            # Step 3: Fetch graph context if available
+            graph_context = []
+            if knowledge_graph:
+                candidate_ids = [c[0] for c in temporal_scored[:top_k * 2]]
+                graph_context = await self._fetch_graph_context(
+                    query, candidate_ids, knowledge_graph, max_hops=1
+                )
+
+            # Step 4: Cross-attention reranking
+            if use_attention and self.embed_fn:
+                query_embedding = await self._get_embedding(query)
+                if query_embedding:
+                    reranked = self._cross_attention_rerank(
+                        query_embedding,
+                        temporal_scored,
+                        graph_context,
+                        weights,
+                    )
+                    temporal_scored = reranked
+
+            # Step 5: Build final results
+            results = []
+            for entry_id, final_score, search_type in temporal_scored[:top_k]:
+                if entry_id not in self.entries:
+                    continue
+
+                entry = self.entries[entry_id]
+                entry.retrieval_count += 1
+                entry.last_retrieved = datetime.now()
+
+                results.append(SearchResult(
+                    entry=entry,
+                    score=final_score,
+                    search_type="hybrid_attention" if use_attention else search_type,
+                    debug_info={
+                        "weights": {
+                            "semantic": weights.semantic,
+                            "keyword": weights.keyword,
+                            "temporal": weights.temporal,
+                            "graph": weights.graph,
+                            "attention": weights.attention,
+                        },
+                        "graph_context_count": len(graph_context),
+                    }
+                ))
+
+            return results
+
+    def _cross_attention_rerank(
+        self,
+        query_embedding: list[float],
+        candidates: list[tuple[str, float, str]],
+        graph_context: Optional[list] = None,
+        weights: Optional[HybridWeights] = None,
+    ) -> list[tuple[str, float, str]]:
+        """
+        Rerank candidates using cross-attention mechanism.
+
+        Attention: softmax(query @ candidates.T / sqrt(dim))
+        Final score = original + attention_weight + graph_boost
+
+        Args:
+            query_embedding: Query vector
+            candidates: List of (entry_id, score, source)
+            graph_context: Related entities from knowledge graph
+            weights: Scoring weights
+
+        Returns:
+            Reranked list of (entry_id, final_score, source)
+        """
+        weights = weights or HybridWeights()
+
+        if not candidates:
+            return []
+
+        query_vec = np.array(query_embedding)
+        dim = len(query_embedding)
+
+        # Build candidate embedding matrix
+        candidate_embeddings = []
+        valid_candidates = []
+
+        for entry_id, score, source in candidates:
+            if entry_id in self.entries:
+                entry = self.entries[entry_id]
+                if entry.embedding:
+                    candidate_embeddings.append(entry.embedding)
+                    valid_candidates.append((entry_id, score, source))
+
+        if not candidate_embeddings:
+            return candidates
+
+        # Compute attention scores
+        candidate_matrix = np.array(candidate_embeddings)  # Shape: (n_candidates, dim)
+
+        # Attention: softmax(Q @ K^T / sqrt(d))
+        attention_scores = np.dot(candidate_matrix, query_vec) / np.sqrt(dim)
+
+        # Softmax normalization
+        attention_weights = np.exp(attention_scores - np.max(attention_scores))
+        attention_weights = attention_weights / attention_weights.sum()
+
+        # Graph context boost
+        graph_boost = {}
+        if graph_context:
+            graph_entity_ids = {e.id for e in graph_context if hasattr(e, 'id')}
+            for entry_id, _, _ in valid_candidates:
+                if entry_id in self.entries:
+                    entry = self.entries[entry_id]
+                    # Check if entry content mentions graph entities
+                    content_lower = entry.content.lower()
+                    boost = sum(
+                        1 for e in graph_context
+                        if hasattr(e, 'name') and e.name.lower() in content_lower
+                    )
+                    graph_boost[entry_id] = min(1.0, boost * 0.2)
+
+        # Compute final scores
+        reranked = []
+        for i, (entry_id, original_score, source) in enumerate(valid_candidates):
+            attention_contribution = attention_weights[i] * weights.attention
+            graph_contribution = graph_boost.get(entry_id, 0) * weights.graph
+
+            final_score = original_score + attention_contribution + graph_contribution
+            reranked.append((entry_id, final_score, source))
+
+        # Sort by final score
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        return reranked
+
+    async def _fetch_graph_context(
+        self,
+        query: str,
+        candidate_ids: list[str],
+        knowledge_graph,
+        max_hops: int = 1,
+    ) -> list:
+        """
+        Fetch related entities from knowledge graph for context enrichment.
+
+        Args:
+            query: Search query
+            candidate_ids: IDs of candidate entries
+            knowledge_graph: KnowledgeGraph instance
+            max_hops: Maximum graph traversal depth
+
+        Returns:
+            List of related Entity objects
+        """
+        if not knowledge_graph:
+            return []
+
+        try:
+            # Query the knowledge graph
+            graph_result = await knowledge_graph.query(query, max_hops=max_hops)
+            return graph_result.entities if hasattr(graph_result, 'entities') else []
+        except Exception as e:
+            logger.debug(f"Graph context fetch failed: {e}")
+            return []
 
     async def add_feedback(self, entry_id: str, feedback: float):
         """Add relevance feedback to an entry (-1 to 1)."""

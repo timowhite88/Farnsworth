@@ -26,12 +26,83 @@ import os
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Any, Callable
 
+import numpy as np
 from loguru import logger
+
+
+# =============================================================================
+# AGI MEMORY CONFIGURATION
+# =============================================================================
+
+@dataclass
+class MemoryAGIConfig:
+    """
+    Configuration for AGI memory upgrades.
+
+    All features are enabled by default but can be toggled via environment
+    variables with the FARNSWORTH_ prefix.
+    """
+    # Feature toggles
+    sync_enabled: bool = True
+    hybrid_enabled: bool = True
+    proactive_context: bool = True
+    cost_aware: bool = True
+    drift_detection: bool = True
+
+    # Sync settings (Federated memory sharing)
+    sync_epsilon: float = 1.0  # Differential privacy budget
+    sync_max_batch: int = 100
+
+    # Retrieval settings (Hybrid recall)
+    hybrid_oversample: int = 3
+    hybrid_use_attention: bool = True
+
+    # Context settings (Proactive compaction)
+    proactive_threshold: float = 0.7  # Trigger at 70% capacity
+    preserve_ratio: float = 0.3
+
+    # Cost settings (Budget-aware operations)
+    cost_daily_limit: float = 1.0  # USD
+    prefer_local: bool = True
+
+    # Schema settings (Adaptive drift detection)
+    drift_threshold: float = 0.3
+    decay_halflife: float = 24.0  # hours
+
+    @classmethod
+    def from_env(cls) -> "MemoryAGIConfig":
+        """Load configuration from environment variables with FARNSWORTH_ prefix."""
+        def get_bool(key: str, default: bool) -> bool:
+            return os.getenv(key, str(default)).lower() in ("true", "1", "yes")
+
+        def get_float(key: str, default: float) -> float:
+            return float(os.getenv(key, str(default)))
+
+        def get_int(key: str, default: int) -> int:
+            return int(os.getenv(key, str(default)))
+
+        return cls(
+            sync_enabled=get_bool("FARNSWORTH_SYNC_ENABLED", True),
+            hybrid_enabled=get_bool("FARNSWORTH_HYBRID_ENABLED", True),
+            proactive_context=get_bool("FARNSWORTH_CONTEXT_PROACTIVE", True),
+            cost_aware=get_bool("FARNSWORTH_COST_AWARE", True),
+            drift_detection=get_bool("FARNSWORTH_DRIFT_DETECTION", True),
+            sync_epsilon=get_float("FARNSWORTH_SYNC_EPSILON", 1.0),
+            sync_max_batch=get_int("FARNSWORTH_SYNC_MAX_BATCH", 100),
+            hybrid_oversample=get_int("FARNSWORTH_HYBRID_OVERSAMPLE", 3),
+            hybrid_use_attention=get_bool("FARNSWORTH_HYBRID_ATTENTION", True),
+            proactive_threshold=get_float("FARNSWORTH_CONTEXT_THRESHOLD", 0.7),
+            preserve_ratio=get_float("FARNSWORTH_CONTEXT_PRESERVE_RATIO", 0.3),
+            cost_daily_limit=get_float("FARNSWORTH_COST_DAILY_LIMIT", 1.0),
+            prefer_local=get_bool("FARNSWORTH_PREFER_LOCAL", True),
+            drift_threshold=get_float("FARNSWORTH_DRIFT_THRESHOLD", 0.3),
+            decay_halflife=get_float("FARNSWORTH_DECAY_HALFLIFE", 24.0),
+        )
 
 # Optional encryption
 try:
@@ -139,6 +210,31 @@ class MemorySearchResult:
     source: str  # "archival", "recall", "graph", "working"
     score: float
     metadata: dict
+
+
+# =============================================================================
+# FEDERATED SYNC DATACLASSES
+# =============================================================================
+
+@dataclass
+class SyncResult:
+    """Result of memory synchronization with a peer."""
+    pushed_count: int
+    pulled_count: int
+    merged_count: int
+    conflicts_resolved: int
+    privacy_budget_used: float
+    sync_timestamp: datetime
+    peer_id: str
+
+    def summary(self) -> str:
+        """Human-readable summary of sync result."""
+        return (
+            f"Sync with {self.peer_id}: "
+            f"pushed={self.pushed_count}, pulled={self.pulled_count}, "
+            f"merged={self.merged_count}, conflicts={self.conflicts_resolved}, "
+            f"privacy_budget={self.privacy_budget_used:.3f}"
+        )
 
 
 class MemorySystem:
@@ -796,6 +892,599 @@ class MemorySystem:
 - Working Memory: {stats['working_memory']['slot_count']} active slots
 - Dreamer: {'Idle' if stats['dreamer']['is_idle'] else 'Active'}, {stats['dreamer']['total_dreams']} sessions
 """
+
+    # =========================================================================
+    # FEDERATED SYNC WITH DIFFERENTIAL PRIVACY (AGI Upgrade 1)
+    # =========================================================================
+
+    async def sync_memories(
+        self,
+        peer_id: str,
+        direction: str = "bidirectional",  # "push", "pull", "bidirectional"
+        epsilon: float = 1.0,  # Differential privacy budget
+        max_memories: int = 100,
+        importance_threshold: float = 0.7,
+        swarm_fabric=None,  # P2P SwarmFabric instance
+    ) -> SyncResult:
+        """
+        Federated memory synchronization with differential privacy.
+
+        Enables privacy-preserving memory sharing across Farnsworth instances
+        using Laplacian noise for differential privacy guarantees.
+
+        Args:
+            peer_id: ID of the peer to sync with
+            direction: "push", "pull", or "bidirectional"
+            epsilon: Differential privacy budget (higher = less privacy, more utility)
+            max_memories: Maximum memories to sync per direction
+            importance_threshold: Only sync memories above this importance
+            swarm_fabric: P2P networking instance (SwarmFabric)
+
+        Returns:
+            SyncResult with sync statistics
+        """
+        async with self._op_semaphore:
+            pushed_count = 0
+            pulled_count = 0
+            merged_count = 0
+            conflicts_resolved = 0
+            privacy_budget_used = 0.0
+
+            # Step 1: Push memories if direction allows
+            if direction in ("push", "bidirectional"):
+                push_result = await self._push_memories(
+                    peer_id=peer_id,
+                    epsilon=epsilon,
+                    max_memories=max_memories,
+                    importance_threshold=importance_threshold,
+                    swarm_fabric=swarm_fabric,
+                )
+                pushed_count = push_result.get("pushed", 0)
+                privacy_budget_used += push_result.get("budget_used", 0)
+
+            # Step 2: Pull memories if direction allows
+            if direction in ("pull", "bidirectional"):
+                pull_result = await self._pull_memories(
+                    peer_id=peer_id,
+                    max_memories=max_memories,
+                    swarm_fabric=swarm_fabric,
+                )
+                pulled_count = pull_result.get("pulled", 0)
+                merged_count = pull_result.get("merged", 0)
+                conflicts_resolved = pull_result.get("conflicts", 0)
+
+            result = SyncResult(
+                pushed_count=pushed_count,
+                pulled_count=pulled_count,
+                merged_count=merged_count,
+                conflicts_resolved=conflicts_resolved,
+                privacy_budget_used=privacy_budget_used,
+                sync_timestamp=datetime.now(),
+                peer_id=peer_id,
+            )
+
+            # Emit sync event via Nexus
+            if NEXUS_AVAILABLE and nexus:
+                asyncio.create_task(nexus.emit(
+                    type=SignalType.EXTERNAL_EVENT,
+                    payload={
+                        "event": "memory_sync_completed",
+                        "peer_id": peer_id,
+                        "direction": direction,
+                        "pushed": pushed_count,
+                        "pulled": pulled_count,
+                        "merged": merged_count,
+                    },
+                    source="memory_system",
+                ))
+
+            logger.info(f"Memory sync completed: {result.summary()}")
+            return result
+
+    async def _push_memories(
+        self,
+        peer_id: str,
+        epsilon: float,
+        max_memories: int,
+        importance_threshold: float,
+        swarm_fabric=None,
+    ) -> dict:
+        """Push important memories to peer with differential privacy."""
+        pushed = 0
+        budget_used = 0.0
+
+        # Select high-importance memories for sharing
+        candidates = []
+        for entry_id, entry in list(self.archival_memory.entries.items()):
+            # Skip encrypted or private entries
+            if entry.metadata.get("encrypted"):
+                continue
+            if entry.metadata.get("private"):
+                continue
+
+            # Calculate importance (using emotional valence and access patterns)
+            base_importance = 0.5
+            emotional_boost = abs(entry.metadata.get("emotional_valence", 0)) * 0.2
+            access_boost = min(0.3, entry.retrieval_count * 0.05)
+            importance = base_importance + emotional_boost + access_boost
+
+            if importance >= importance_threshold:
+                candidates.append((entry_id, entry, importance))
+
+        # Sort by importance and take top max_memories
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        candidates = candidates[:max_memories]
+
+        for entry_id, entry, importance in candidates:
+            # Apply differential privacy to embedding
+            if entry.embedding:
+                noisy_embedding = self._add_differential_noise(
+                    entry.embedding,
+                    epsilon=epsilon,
+                    sensitivity=1.0,
+                )
+                budget_used += 1.0 / epsilon
+
+                # Prepare sync message
+                sync_data = {
+                    "type": "GOSSIP_MEMORY",
+                    "memory_id": entry_id,
+                    "content_hash": hashlib.sha256(entry.content.encode()).hexdigest()[:16],
+                    "embedding": noisy_embedding,
+                    "tags": entry.tags,
+                    "importance": importance,
+                    "created_at": entry.created_at.isoformat(),
+                    "from_node": self.node_id if hasattr(self, 'node_id') else "local",
+                }
+
+                # Send via P2P if available
+                if swarm_fabric:
+                    try:
+                        await swarm_fabric.broadcast_message(sync_data)
+                        pushed += 1
+                    except Exception as e:
+                        logger.debug(f"Failed to push memory {entry_id}: {e}")
+
+        return {"pushed": pushed, "budget_used": budget_used}
+
+    async def _pull_memories(
+        self,
+        peer_id: str,
+        max_memories: int,
+        swarm_fabric=None,
+    ) -> dict:
+        """Pull and integrate memories from peer."""
+        pulled = 0
+        merged = 0
+        conflicts = 0
+
+        # In a real implementation, this would request memories from the peer
+        # For now, we process any incoming memory sync events
+        # The actual pull would be triggered by receiving GOSSIP_MEMORY events
+
+        return {"pulled": pulled, "merged": merged, "conflicts": conflicts}
+
+    def _add_differential_noise(
+        self,
+        embedding: list[float],
+        epsilon: float,
+        sensitivity: float = 1.0,
+    ) -> list[float]:
+        """
+        Add Laplacian noise for differential privacy.
+
+        The Laplace mechanism adds noise calibrated to sensitivity/epsilon
+        to provide epsilon-differential privacy.
+
+        Args:
+            embedding: Original embedding vector
+            epsilon: Privacy budget (higher = less noise, less privacy)
+            sensitivity: L1 sensitivity of the query (default 1.0 for normalized embeddings)
+
+        Returns:
+            Noisy embedding preserving approximate utility
+        """
+        # Scale parameter for Laplace distribution
+        scale = sensitivity / epsilon
+
+        # Generate Laplacian noise
+        noise = np.random.laplace(0, scale, len(embedding))
+
+        # Add noise to embedding
+        noisy = np.array(embedding) + noise
+
+        # Re-normalize to unit sphere (embeddings are typically normalized)
+        norm = np.linalg.norm(noisy)
+        if norm > 0:
+            noisy = noisy / norm
+
+        return noisy.tolist()
+
+    async def _semantic_merge(
+        self,
+        local: MemorySearchResult,
+        remote: dict,
+        threshold: float = 0.95,
+    ) -> Optional[str]:
+        """
+        Merge semantically similar memories, keeping higher importance.
+
+        Args:
+            local: Local memory result
+            remote: Remote memory data
+            threshold: Similarity threshold for merging (0.95 = 95% similar)
+
+        Returns:
+            Merged memory ID if merge occurred, None otherwise
+        """
+        # Get embeddings
+        local_embedding = await self._get_embedding(local.content)
+        remote_embedding = remote.get("embedding")
+
+        if not local_embedding or not remote_embedding:
+            return None
+
+        # Calculate cosine similarity
+        local_vec = np.array(local_embedding)
+        remote_vec = np.array(remote_embedding)
+
+        similarity = np.dot(local_vec, remote_vec) / (
+            np.linalg.norm(local_vec) * np.linalg.norm(remote_vec) + 1e-8
+        )
+
+        if similarity < threshold:
+            return None  # Not similar enough to merge
+
+        # Determine which to keep based on importance
+        local_importance = local.metadata.get("importance", 0.5)
+        remote_importance = remote.get("importance", 0.5)
+
+        if remote_importance > local_importance:
+            # Remote is more important, update local
+            local_id = local.metadata.get("id")
+            if local_id:
+                entry = await self.archival_memory.get_entry(local_id)
+                if entry:
+                    # Update with remote tags (union)
+                    entry.tags = list(set(entry.tags + remote.get("tags", [])))
+                    # Boost importance
+                    entry.metadata["merged_importance"] = max(local_importance, remote_importance)
+                    await self.archival_memory._save_entry(entry)
+                    return local_id
+
+        return None
+
+
+# =============================================================================
+# ADAPTIVE SCHEMA MANAGER (AGI Upgrade 5)
+# =============================================================================
+
+@dataclass
+class DriftResult:
+    """Result of concept drift detection."""
+    concept_name: str
+    drift_magnitude: float
+    drift_direction: list[float]  # Unit vector
+    samples_analyzed: int
+    is_significant: bool
+    recommended_action: str  # "update_centroid", "create_branch", "ignore"
+
+
+@dataclass
+class SchemaEvolution:
+    """Record of schema evolution event."""
+    timestamp: datetime
+    concept_name: str
+    old_centroid: list[float]
+    new_centroid: list[float]
+    drift_magnitude: float
+    action_taken: str
+
+
+class AdaptiveSchemaManager:
+    """
+    Manages adaptive memory schemas for long-horizon tasks.
+
+    Features:
+    - Concept drift detection using EMA centroid tracking
+    - Importance decay with configurable halflife
+    - Schema evolution with branching for significant drift
+
+    This enables the memory system to adapt to evolving concepts
+    over extended time periods (days to weeks).
+    """
+
+    def __init__(
+        self,
+        drift_threshold: float = 0.3,
+        decay_halflife_hours: float = 24.0,
+        min_samples_for_drift: int = 10,
+        ema_alpha: float = 0.1,
+    ):
+        """
+        Initialize the schema manager.
+
+        Args:
+            drift_threshold: Magnitude threshold for significant drift
+            decay_halflife_hours: Half-life for importance decay
+            min_samples_for_drift: Minimum samples before drift detection
+            ema_alpha: Exponential moving average smoothing factor
+        """
+        self.drift_threshold = drift_threshold
+        self.decay_halflife_hours = decay_halflife_hours
+        self.min_samples_for_drift = min_samples_for_drift
+        self.ema_alpha = ema_alpha
+
+        # Concept tracking
+        self._concept_centroids: dict[str, np.ndarray] = {}
+        self._concept_sample_counts: dict[str, int] = {}
+        self._concept_timestamps: dict[str, list[datetime]] = {}
+
+        # Evolution history
+        self._drift_history: list[SchemaEvolution] = []
+
+        # Lock for thread safety
+        self._lock = asyncio.Lock()
+
+    async def detect_concept_drift(
+        self,
+        concept_name: str,
+        new_embedding: list[float],
+    ) -> DriftResult:
+        """
+        Detect if a concept has drifted from its historical centroid.
+
+        Uses exponential moving average (EMA) for smooth centroid updates
+        and cosine distance for drift magnitude.
+
+        Args:
+            concept_name: Name of the concept to track
+            new_embedding: New embedding vector for this concept
+
+        Returns:
+            DriftResult with drift analysis
+        """
+        async with self._lock:
+            new_vec = np.array(new_embedding)
+            new_vec_normalized = new_vec / (np.linalg.norm(new_vec) + 1e-8)
+
+            # Initialize if new concept
+            if concept_name not in self._concept_centroids:
+                self._concept_centroids[concept_name] = new_vec_normalized.copy()
+                self._concept_sample_counts[concept_name] = 1
+                self._concept_timestamps[concept_name] = [datetime.now()]
+
+                return DriftResult(
+                    concept_name=concept_name,
+                    drift_magnitude=0.0,
+                    drift_direction=new_vec_normalized.tolist(),
+                    samples_analyzed=1,
+                    is_significant=False,
+                    recommended_action="ignore",
+                )
+
+            # Get current centroid
+            current_centroid = self._concept_centroids[concept_name]
+            sample_count = self._concept_sample_counts[concept_name]
+
+            # Calculate drift (cosine distance)
+            dot_product = np.dot(current_centroid, new_vec_normalized)
+            drift_magnitude = 1.0 - max(-1.0, min(1.0, dot_product))
+
+            # Calculate drift direction (unit vector from centroid to new)
+            drift_vec = new_vec_normalized - current_centroid
+            drift_norm = np.linalg.norm(drift_vec)
+            drift_direction = (drift_vec / (drift_norm + 1e-8)).tolist()
+
+            # Update sample count and timestamps
+            self._concept_sample_counts[concept_name] = sample_count + 1
+            self._concept_timestamps[concept_name].append(datetime.now())
+
+            # Keep bounded history
+            if len(self._concept_timestamps[concept_name]) > 1000:
+                self._concept_timestamps[concept_name] = \
+                    self._concept_timestamps[concept_name][-500:]
+
+            # Determine if drift is significant
+            is_significant = (
+                drift_magnitude > self.drift_threshold and
+                sample_count >= self.min_samples_for_drift
+            )
+
+            # Determine recommended action
+            if drift_magnitude > 0.5:
+                recommended_action = "create_branch"
+            elif drift_magnitude > self.drift_threshold:
+                recommended_action = "update_centroid"
+            else:
+                recommended_action = "ignore"
+
+            return DriftResult(
+                concept_name=concept_name,
+                drift_magnitude=drift_magnitude,
+                drift_direction=drift_direction,
+                samples_analyzed=sample_count + 1,
+                is_significant=is_significant,
+                recommended_action=recommended_action,
+            )
+
+    def apply_importance_decay(
+        self,
+        memories: list,
+        current_context: str = "",
+    ) -> list:
+        """
+        Apply time-based importance decay to memories.
+
+        Formula: importance' = importance * (0.5 ^ (age_hours / halflife)) * freq_weight
+        Where freq_weight = log(1 + access_count) / log(10)
+
+        Args:
+            memories: List of MemorySearchResult objects
+            current_context: Current context for relevance boosting
+
+        Returns:
+            Memories with adjusted scores
+        """
+        import math
+
+        context_lower = current_context.lower() if current_context else ""
+
+        for memory in memories:
+            # Get age in hours
+            created_at = memory.metadata.get("created_at")
+            if isinstance(created_at, str):
+                try:
+                    created_at = datetime.fromisoformat(created_at)
+                except ValueError:
+                    created_at = datetime.now()
+            elif not isinstance(created_at, datetime):
+                created_at = datetime.now()
+
+            age_hours = (datetime.now() - created_at).total_seconds() / 3600
+
+            # Time decay factor (half-life decay)
+            time_decay = math.pow(0.5, age_hours / self.decay_halflife_hours)
+
+            # Frequency weight (logarithmic access count boost)
+            access_count = memory.metadata.get("access_count", 1)
+            freq_weight = math.log(1 + access_count) / math.log(10)
+            freq_weight = max(0.5, min(2.0, freq_weight))  # Clamp to [0.5, 2.0]
+
+            # Context relevance boost
+            context_boost = 1.0
+            if context_lower and hasattr(memory, 'content'):
+                # Boost if content is mentioned in current context
+                content_words = memory.content.lower().split()[:5]
+                matches = sum(1 for word in content_words if word in context_lower)
+                context_boost = 1.0 + matches * 0.1
+
+            # Apply decay
+            original_score = memory.score
+            memory.score = original_score * time_decay * freq_weight * context_boost
+
+            # Store decay metadata
+            if not hasattr(memory, 'metadata') or memory.metadata is None:
+                memory.metadata = {}
+            memory.metadata["decay_applied"] = {
+                "time_decay": time_decay,
+                "freq_weight": freq_weight,
+                "context_boost": context_boost,
+                "original_score": original_score,
+            }
+
+        # Re-sort by adjusted scores
+        memories.sort(key=lambda m: m.score, reverse=True)
+        return memories
+
+    async def evolve_schema(
+        self,
+        concept_name: str,
+        detected_drift: DriftResult,
+    ) -> SchemaEvolution:
+        """
+        Evolve schema based on detected drift.
+
+        Actions based on drift magnitude:
+        - High (>0.5): Create new concept branch
+        - Moderate (0.3-0.5): Update centroid with EMA
+        - Low (<0.3): Log and ignore
+
+        Args:
+            concept_name: Name of the concept
+            detected_drift: Result from detect_concept_drift
+
+        Returns:
+            SchemaEvolution record of action taken
+        """
+        async with self._lock:
+            old_centroid = self._concept_centroids.get(
+                concept_name, np.zeros(len(detected_drift.drift_direction))
+            ).tolist()
+
+            action_taken = "none"
+
+            if detected_drift.drift_magnitude > 0.5:
+                # Create new branch (new concept variant)
+                branch_name = f"{concept_name}_v{len(self._drift_history) + 1}"
+                new_centroid = np.array(detected_drift.drift_direction)
+                self._concept_centroids[branch_name] = new_centroid
+                self._concept_sample_counts[branch_name] = 1
+                self._concept_timestamps[branch_name] = [datetime.now()]
+                action_taken = f"create_branch:{branch_name}"
+
+                logger.info(
+                    f"Schema evolution: Created branch '{branch_name}' from '{concept_name}' "
+                    f"(drift={detected_drift.drift_magnitude:.3f})"
+                )
+
+            elif detected_drift.drift_magnitude > self.drift_threshold:
+                # Update centroid using EMA
+                current = self._concept_centroids[concept_name]
+                new_point = np.array(detected_drift.drift_direction)
+                updated = (1 - self.ema_alpha) * current + self.ema_alpha * new_point
+                updated = updated / (np.linalg.norm(updated) + 1e-8)  # Normalize
+                self._concept_centroids[concept_name] = updated
+                action_taken = "update_centroid"
+
+                logger.debug(
+                    f"Schema evolution: Updated centroid for '{concept_name}' "
+                    f"(drift={detected_drift.drift_magnitude:.3f})"
+                )
+
+            else:
+                action_taken = "ignore"
+
+            # Record evolution
+            evolution = SchemaEvolution(
+                timestamp=datetime.now(),
+                concept_name=concept_name,
+                old_centroid=old_centroid,
+                new_centroid=self._concept_centroids.get(
+                    concept_name, np.zeros(len(old_centroid))
+                ).tolist(),
+                drift_magnitude=detected_drift.drift_magnitude,
+                action_taken=action_taken,
+            )
+
+            self._drift_history.append(evolution)
+
+            # Keep bounded history
+            if len(self._drift_history) > 1000:
+                self._drift_history = self._drift_history[-500:]
+
+            # Emit drift signal if significant and Nexus available
+            if detected_drift.is_significant and NEXUS_AVAILABLE and nexus:
+                asyncio.create_task(nexus.emit(
+                    type=SignalType.ANOMALY_DETECTED,
+                    payload={
+                        "event": "concept_drift_detected",
+                        "concept": concept_name,
+                        "drift_magnitude": detected_drift.drift_magnitude,
+                        "action": action_taken,
+                    },
+                    source="adaptive_schema_manager",
+                ))
+
+            return evolution
+
+    def get_stats(self) -> dict:
+        """Get schema manager statistics."""
+        return {
+            "tracked_concepts": len(self._concept_centroids),
+            "total_evolutions": len(self._drift_history),
+            "recent_evolutions": [
+                {
+                    "concept": e.concept_name,
+                    "magnitude": e.drift_magnitude,
+                    "action": e.action_taken,
+                    "timestamp": e.timestamp.isoformat(),
+                }
+                for e in self._drift_history[-5:]
+            ],
+            "drift_threshold": self.drift_threshold,
+            "decay_halflife_hours": self.decay_halflife_hours,
+        }
 
 
 # =============================================================================

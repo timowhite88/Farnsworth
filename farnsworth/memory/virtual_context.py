@@ -20,11 +20,41 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from collections import OrderedDict
 import threading
 
 from loguru import logger
+
+
+# =============================================================================
+# PROACTIVE CONTEXT COMPACTION DATACLASSES
+# =============================================================================
+
+@dataclass
+class CompactionResult:
+    """Result of context compaction operation."""
+    blocks_compacted: int
+    tokens_saved: int
+    original_tokens: int
+    final_tokens: int
+    summaries_created: int
+    archival_links: list[str]  # IDs of offloaded full content
+
+    def compression_ratio(self) -> float:
+        """Calculate compression ratio achieved."""
+        if self.original_tokens == 0:
+            return 1.0
+        return self.final_tokens / self.original_tokens
+
+
+@dataclass
+class AllocationPlan:
+    """Plan for token-aware allocation."""
+    slots_to_evict: list[str]
+    needs_compaction: bool
+    remaining_budget: int
+    can_fit: bool
 
 # Nexus integration for overflow warnings
 try:
@@ -274,6 +304,246 @@ class ContextWindow:
             "blocks": [b.to_dict() for b in self.blocks.values()],
             "current_tokens": self.get_current_tokens(),
         }
+
+    # =========================================================================
+    # PROACTIVE CONTEXT COMPACTION (AGI Upgrade 3)
+    # =========================================================================
+
+    async def compact_context(
+        self,
+        memory_system=None,  # Reference to MemorySystem for archival
+        llm_fn: Optional[Callable] = None,  # LLM for smart summarization
+        compression_strategy: str = "smart",  # "smart", "extractive", "hybrid"
+        preserve_ratio: float = 0.3,
+        importance_threshold: float = 0.3,
+    ) -> CompactionResult:
+        """
+        Compact context by summarizing low-importance blocks.
+
+        Pipeline:
+        1. Identify blocks below importance threshold
+        2. Summarize using LLM (or extractive fallback)
+        3. Store full content in archival with link
+        4. Replace in-context with summary
+        5. Update token budget
+
+        Args:
+            memory_system: Reference to MemorySystem for archival offloading
+            llm_fn: Async function for LLM summarization (text -> summary)
+            compression_strategy: "smart" (LLM), "extractive", or "hybrid"
+            preserve_ratio: Target ratio of tokens to preserve (0.3 = 30%)
+            importance_threshold: Blocks below this score are candidates
+
+        Returns:
+            CompactionResult with statistics
+        """
+        with self._lock:
+            original_tokens = self.get_current_tokens()
+            blocks_compacted = 0
+            summaries_created = 0
+            archival_links = []
+
+            # Find compaction candidates (low importance blocks)
+            candidates = [
+                (block_id, block)
+                for block_id, block in self.blocks.items()
+                if block.importance_score < importance_threshold
+            ]
+
+            # Sort by importance (lowest first)
+            candidates.sort(key=lambda x: x[1].importance_score)
+
+            # Calculate how many tokens we need to free
+            target_tokens = int(self.max_tokens * preserve_ratio)
+            tokens_to_free = max(0, self.get_current_tokens() - target_tokens)
+
+            tokens_freed = 0
+
+            for block_id, block in candidates:
+                if tokens_freed >= tokens_to_free:
+                    break
+
+                block_tokens = self._estimate_tokens(block.content)
+
+                # Store full content to archival if available
+                if memory_system:
+                    try:
+                        archival_id = asyncio.get_event_loop().run_until_complete(
+                            memory_system.remember(
+                                content=block.content,
+                                tags=block.tags + ["compacted"],
+                                importance=block.importance_score,
+                                metadata={"compacted_from_context": True},
+                            )
+                        )
+                        archival_links.append(archival_id)
+                    except Exception as e:
+                        logger.debug(f"Failed to archive block {block_id}: {e}")
+
+                # Generate summary
+                summary = await self._summarize_block(
+                    block, llm_fn, compression_strategy
+                )
+
+                if summary and len(summary) < len(block.content):
+                    # Replace with summary
+                    block.content = summary
+                    block.is_compressed = True
+                    blocks_compacted += 1
+                    summaries_created += 1
+
+                    new_tokens = self._estimate_tokens(summary)
+                    tokens_freed += block_tokens - new_tokens
+
+            final_tokens = self.get_current_tokens()
+
+            result = CompactionResult(
+                blocks_compacted=blocks_compacted,
+                tokens_saved=original_tokens - final_tokens,
+                original_tokens=original_tokens,
+                final_tokens=final_tokens,
+                summaries_created=summaries_created,
+                archival_links=archival_links,
+            )
+
+            logger.info(
+                f"Context compaction: {blocks_compacted} blocks, "
+                f"{result.tokens_saved} tokens saved "
+                f"({100 * (1 - result.compression_ratio()):.1f}% reduction)"
+            )
+
+            return result
+
+    async def _summarize_block(
+        self,
+        block: "MemoryBlock",
+        llm_fn: Optional[Callable],
+        strategy: str,
+    ) -> str:
+        """Generate summary for a block using specified strategy."""
+        content = block.content
+
+        if strategy == "smart" and llm_fn:
+            # Use LLM for intelligent summarization
+            try:
+                prompt = f"Summarize this memory concisely, preserving key information:\n\n{content}"
+                if asyncio.iscoroutinefunction(llm_fn):
+                    summary = await llm_fn(prompt)
+                else:
+                    summary = llm_fn(prompt)
+                return summary
+            except Exception as e:
+                logger.debug(f"LLM summarization failed: {e}, falling back to extractive")
+
+        # Extractive fallback (or explicit extractive strategy)
+        if len(content) > 500:
+            # Keep first sentence + key sentences
+            sentences = content.split('. ')
+            if len(sentences) > 3:
+                # Keep first, middle, and last
+                summary_parts = [
+                    sentences[0],
+                    sentences[len(sentences) // 2],
+                    sentences[-1],
+                ]
+                return '. '.join(summary_parts) + '.'
+
+        return content
+
+    async def predictive_summarize(
+        self,
+        memory_system=None,
+        threshold: float = 0.7,
+    ) -> bool:
+        """
+        Proactively summarize context before hitting overflow.
+
+        Triggers when context usage exceeds threshold percentage.
+
+        Args:
+            memory_system: Reference to MemorySystem for archival
+            threshold: Usage ratio to trigger summarization (0.7 = 70%)
+
+        Returns:
+            True if summarization was triggered, False otherwise
+        """
+        usage_ratio = self.get_current_tokens() / self.max_tokens
+
+        if usage_ratio < threshold:
+            return False
+
+        logger.info(
+            f"Predictive summarization triggered at {usage_ratio*100:.1f}% capacity"
+        )
+
+        await self.compact_context(
+            memory_system=memory_system,
+            compression_strategy="extractive",  # Fast, no LLM needed
+            preserve_ratio=0.5,  # Target 50% after compaction
+            importance_threshold=0.4,
+        )
+
+        return True
+
+    def _token_aware_allocation(
+        self,
+        required_tokens: int,
+        priority: float,
+    ) -> AllocationPlan:
+        """
+        Plan token allocation for incoming content.
+
+        Returns a plan indicating what needs to be evicted or compacted
+        to fit the new content.
+
+        Args:
+            required_tokens: Tokens needed for new content
+            priority: Importance priority of new content (0-1)
+
+        Returns:
+            AllocationPlan with eviction/compaction instructions
+        """
+        available = self.get_available_tokens()
+
+        if available >= required_tokens:
+            # Can fit without eviction
+            return AllocationPlan(
+                slots_to_evict=[],
+                needs_compaction=False,
+                remaining_budget=available - required_tokens,
+                can_fit=True,
+            )
+
+        # Need to make room
+        deficit = required_tokens - available
+        slots_to_evict = []
+        tokens_recovered = 0
+
+        # Find blocks to evict (lower importance than new content)
+        eviction_candidates = sorted(
+            [
+                (block_id, block)
+                for block_id, block in self.blocks.items()
+                if block.importance_score < priority
+            ],
+            key=lambda x: x[1].importance_score,
+        )
+
+        for block_id, block in eviction_candidates:
+            if tokens_recovered >= deficit:
+                break
+            block_tokens = self._estimate_tokens(block.content)
+            slots_to_evict.append(block_id)
+            tokens_recovered += block_tokens
+
+        can_fit = tokens_recovered >= deficit
+
+        return AllocationPlan(
+            slots_to_evict=slots_to_evict,
+            needs_compaction=not can_fit,
+            remaining_budget=max(0, available + tokens_recovered - required_tokens),
+            can_fit=can_fit,
+        )
 
 
 class PageManager:

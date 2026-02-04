@@ -16,10 +16,32 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, TypeVar, Generic
+from typing import Any, Optional, TypeVar, Generic, Callable
 from collections import deque
 
 from loguru import logger
+
+
+# =============================================================================
+# COST-SENSITIVE BUDGET DATACLASSES
+# =============================================================================
+
+@dataclass
+class BudgetStatus:
+    """Token and cost budget status for working memory."""
+    total_tokens_used: int
+    total_tokens_budget: int
+    estimated_cost_used: float
+    daily_cost_limit: float
+    slots_over_budget: list[str]
+    recommendations: list[str]
+
+    def is_over_budget(self) -> bool:
+        """Check if we're over token or cost budget."""
+        return (
+            self.total_tokens_used > self.total_tokens_budget or
+            self.estimated_cost_used > self.daily_cost_limit
+        )
 
 
 class SlotType(Enum):
@@ -402,3 +424,226 @@ class WorkingMemory:
             "snapshot_count": len(self.snapshots),
             "recent_operations": self.history[-5:] if self.history else [],
         }
+
+    # =========================================================================
+    # COST-SENSITIVE TOKEN OPTIMIZATION (AGI Upgrade 4)
+    # =========================================================================
+
+    def _estimate_tokens(self, content: Any) -> int:
+        """Estimate token count for content (rough approximation: ~4 chars per token)."""
+        content_str = str(content)
+        return len(content_str) // 4 + 1
+
+    def _estimate_cost(self, tokens: int, model: str = "gpt-4") -> float:
+        """
+        Estimate cost in USD for token usage.
+
+        Rough estimates per 1K tokens:
+        - GPT-4: $0.03 input, $0.06 output
+        - Claude: $0.015 input, $0.075 output
+        - Gemini: $0.00025 input
+        - Local/HuggingFace: $0.00
+        """
+        cost_per_1k = {
+            "gpt-4": 0.03,
+            "claude": 0.015,
+            "gemini": 0.00025,
+            "huggingface": 0.0,
+            "local": 0.0,
+            "ollama": 0.0,
+            "groq": 0.0001,
+        }
+        rate = cost_per_1k.get(model.lower(), 0.01)
+        return (tokens / 1000) * rate
+
+    async def add_context_with_budget(
+        self,
+        name: str,
+        content: Any,
+        slot_type: SlotType = SlotType.SCRATCH,
+        token_budget: Optional[int] = None,
+        cost_threshold: float = 0.01,  # Max cost per operation in USD
+        model_router: Optional[Callable] = None,
+    ) -> WorkingMemorySlot:
+        """
+        Add content to working memory with budget awareness.
+
+        If content exceeds budget or cost threshold:
+        1. Route to efficient local model for compression
+        2. Store compressed version
+        3. Keep link to full content in archival
+
+        Args:
+            name: Slot name
+            content: Content to store
+            slot_type: Type of content
+            token_budget: Max tokens for this slot (None for unlimited)
+            cost_threshold: Max cost per operation in USD
+            model_router: Optional function to route to efficient models
+
+        Returns:
+            The created/updated slot
+        """
+        content_tokens = self._estimate_tokens(content)
+
+        # Check if we need to compress based on budget
+        needs_compression = False
+        compression_reason = ""
+
+        if token_budget and content_tokens > token_budget:
+            needs_compression = True
+            compression_reason = f"Token budget exceeded ({content_tokens} > {token_budget})"
+
+        estimated_cost = self._estimate_cost(content_tokens)
+        if estimated_cost > cost_threshold:
+            needs_compression = True
+            compression_reason = f"Cost threshold exceeded (${estimated_cost:.4f} > ${cost_threshold})"
+
+        final_content = content
+        model_used = "none"
+
+        if needs_compression:
+            logger.debug(f"Working memory compression needed: {compression_reason}")
+            final_content, model_used = await self._route_to_efficient_model(
+                operation="compress",
+                content=str(content),
+                max_cost=cost_threshold,
+                router=model_router,
+            )
+
+        # Store with compression metadata
+        slot = await self.set(
+            name=name,
+            content=final_content,
+            slot_type=slot_type,
+            importance=0.5,
+        )
+
+        # Add budget metadata
+        slot.budget_metadata = {
+            "original_tokens": content_tokens,
+            "compressed": needs_compression,
+            "compression_reason": compression_reason if needs_compression else None,
+            "model_used": model_used,
+            "estimated_cost": self._estimate_cost(self._estimate_tokens(final_content), model_used),
+        }
+
+        return slot
+
+    async def _route_to_efficient_model(
+        self,
+        operation: str,
+        content: str,
+        max_cost: float,
+        router: Optional[Callable] = None,
+    ) -> tuple[str, str]:
+        """
+        Route operation to most efficient model based on cost.
+
+        Priority: HuggingFace (free) > Ollama/Groq (cheap) > Gemini/Grok > Claude
+
+        Args:
+            operation: Type of operation ("compress", "summarize", etc.)
+            content: Content to process
+            max_cost: Maximum acceptable cost in USD
+            router: Optional external router function
+
+        Returns:
+            Tuple of (processed_content, model_used)
+        """
+        # Model priority list (cheapest first)
+        model_priority = [
+            ("huggingface", 0.0),
+            ("local", 0.0),
+            ("ollama", 0.0),
+            ("groq", 0.0001),
+            ("gemini", 0.00025),
+            ("grok", 0.001),
+            ("claude", 0.015),
+        ]
+
+        # If external router provided, use it
+        if router:
+            try:
+                result = await router(operation, content, max_cost)
+                if result:
+                    return result
+            except Exception as e:
+                logger.debug(f"External router failed: {e}")
+
+        # Fallback: Simple extractive compression (no model needed)
+        if operation == "compress":
+            # Keep first and last portions, summarize middle
+            if len(content) > 2000:
+                # Keep 30% from start, 30% from end
+                keep_chars = int(len(content) * 0.3)
+                compressed = (
+                    content[:keep_chars] +
+                    "\n\n[... content compressed ...]\n\n" +
+                    content[-keep_chars:]
+                )
+                return (compressed, "extractive")
+
+        return (content, "none")
+
+    def get_budget_status(
+        self,
+        token_budget: int = 50000,
+        daily_cost_limit: float = 1.0,
+    ) -> BudgetStatus:
+        """
+        Get current budget consumption across all slots.
+
+        Args:
+            token_budget: Total token budget for working memory
+            daily_cost_limit: Daily cost limit in USD
+
+        Returns:
+            BudgetStatus with current consumption and recommendations
+        """
+        total_tokens = 0
+        total_cost = 0.0
+        slots_over_budget = []
+        recommendations = []
+
+        for name, slot in self.slots.items():
+            slot_tokens = self._estimate_tokens(slot.content)
+            total_tokens += slot_tokens
+
+            # Check for individual slot issues
+            if slot_tokens > 5000:  # Individual slot is large
+                slots_over_budget.append(name)
+
+            # Estimate cost (assume default model)
+            slot_cost = self._estimate_cost(slot_tokens)
+            total_cost += slot_cost
+
+        # Generate recommendations
+        if total_tokens > token_budget * 0.8:
+            recommendations.append(
+                f"Token usage at {total_tokens}/{token_budget} ({100*total_tokens/token_budget:.1f}%). "
+                "Consider compacting old slots."
+            )
+
+        if total_cost > daily_cost_limit * 0.8:
+            recommendations.append(
+                f"Cost at ${total_cost:.4f}/${daily_cost_limit:.2f}. "
+                "Route to local models where possible."
+            )
+
+        if slots_over_budget:
+            recommendations.append(
+                f"Large slots: {', '.join(slots_over_budget)}. Consider compression."
+            )
+
+        if not recommendations:
+            recommendations.append("Budget healthy. No action needed.")
+
+        return BudgetStatus(
+            total_tokens_used=total_tokens,
+            total_tokens_budget=token_budget,
+            estimated_cost_used=total_cost,
+            daily_cost_limit=daily_cost_limit,
+            slots_over_budget=slots_over_budget,
+            recommendations=recommendations,
+        )
