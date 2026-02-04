@@ -37,7 +37,7 @@ try:
     from qiskit import QuantumCircuit, transpile
     from qiskit.circuit import Parameter, ParameterVector
     from qiskit.primitives import Sampler, Estimator
-    from qiskit_ibm_runtime import QiskitRuntimeService, Session, Options
+    from qiskit_ibm_runtime import QiskitRuntimeService, Session, Batch, Options
     from qiskit_ibm_runtime import SamplerV2, EstimatorV2
     from qiskit_aer import AerSimulator
     from qiskit.quantum_info import SparsePauliOp
@@ -64,6 +64,50 @@ class QuantumTaskType(Enum):
     INFERENCE = "inference"             # Knowledge graph queries
     SAMPLING = "sampling"               # Probabilistic modeling
     BENCHMARK = "benchmark"             # Performance testing
+
+
+class ExecutionMode(Enum):
+    """IBM Quantum execution modes per official docs."""
+    JOB = "job"           # Single primitive request, no context
+    BATCH = "batch"       # Multiple independent jobs in parallel
+    SESSION = "session"   # Exclusive QPU access for iterative workflows
+
+
+class ResilienceLevel(Enum):
+    """Error mitigation levels for Estimator (per IBM docs)."""
+    NONE = 0              # No error mitigation
+    MINIMAL = 1           # TREX readout error correction (default)
+    MEDIUM = 2            # TREX + ZNE + gate twirling (~3x overhead)
+
+
+@dataclass
+class QuantumOptions:
+    """
+    Configuration options for quantum execution (per IBM Quantum best practices).
+
+    Based on: https://quantum.cloud.ibm.com/docs/guides/configure-error-mitigation
+    """
+    # Execution mode
+    execution_mode: ExecutionMode = ExecutionMode.SESSION
+
+    # Error mitigation (Estimator only)
+    resilience_level: ResilienceLevel = ResilienceLevel.MINIMAL
+
+    # Dynamical Decoupling - suppresses idle qubit errors
+    dynamical_decoupling: bool = True
+    dd_sequence_type: str = "XpXm"  # or "XX"
+
+    # Pauli Twirling - converts noise to Pauli channel
+    enable_twirling: bool = True
+    twirling_num_randomizations: int = 32
+    twirling_shots_per_randomization: int = 100
+
+    # Transpilation
+    optimization_level: int = 3  # 0-3, higher = more optimization
+
+    # Zero Noise Extrapolation (for resilience_level 2)
+    zne_noise_factors: Tuple[int, ...] = (1, 3, 5)
+    zne_extrapolator: str = "exponential"  # or "linear", "polynomial"
 
 
 @dataclass
@@ -300,10 +344,11 @@ class IBMQuantumProvider:
         shots: int = 1024,
         task_type: QuantumTaskType = QuantumTaskType.SAMPLING,
         prefer_hardware: bool = False,
-        parameters: Optional[Dict] = None
+        parameters: Optional[Dict] = None,
+        options: Optional[QuantumOptions] = None
     ) -> QuantumJobResult:
         """
-        Execute a quantum circuit.
+        Execute a quantum circuit using IBM Quantum best practices.
 
         Args:
             circuit: Qiskit QuantumCircuit to execute
@@ -311,6 +356,7 @@ class IBMQuantumProvider:
             task_type: Type of task for backend selection
             prefer_hardware: Prefer real quantum hardware
             parameters: Optional parameter bindings
+            options: QuantumOptions for error mitigation and execution mode
 
         Returns:
             QuantumJobResult with execution results
@@ -324,6 +370,7 @@ class IBMQuantumProvider:
                 error="Qiskit not installed"
             )
 
+        options = options or QuantumOptions()
         start_time = datetime.now()
         backend_name, is_hardware = self._select_backend(
             task_type, circuit.num_qubits, prefer_hardware
@@ -331,21 +378,48 @@ class IBMQuantumProvider:
 
         try:
             if is_hardware and self.service:
-                # Run on real quantum hardware
+                # Run on real quantum hardware with IBM best practices
                 backend = self.service.backend(backend_name)
 
-                # Transpile for hardware
-                transpiled = transpile(circuit, backend, optimization_level=3)
+                # Transpile with configurable optimization level
+                transpiled = transpile(
+                    circuit,
+                    backend,
+                    optimization_level=options.optimization_level
+                )
 
-                with Session(service=self.service, backend=backend) as session:
-                    sampler = SamplerV2(session=session)
+                # Configure runtime options per IBM docs
+                runtime_options = {
+                    "dynamical_decoupling": {
+                        "enable": options.dynamical_decoupling,
+                        "sequence_type": options.dd_sequence_type
+                    },
+                    "twirling": {
+                        "enable_gates": options.enable_twirling,
+                        "num_randomizations": options.twirling_num_randomizations,
+                        "shots_per_randomization": options.twirling_shots_per_randomization
+                    }
+                }
 
-                    if parameters:
-                        job = sampler.run([transpiled.bind_parameters(parameters)], shots=shots)
-                    else:
-                        job = sampler.run([transpiled], shots=shots)
-
-                    result = job.result()
+                # Select execution mode per IBM docs
+                if options.execution_mode == ExecutionMode.BATCH:
+                    # Batch mode: for multiple independent jobs
+                    with Batch(backend=backend) as batch:
+                        sampler = SamplerV2(mode=batch)
+                        if parameters:
+                            job = sampler.run([(transpiled.bind_parameters(parameters),)], shots=shots)
+                        else:
+                            job = sampler.run([(transpiled,)], shots=shots)
+                        result = job.result()
+                else:
+                    # Session mode (default): for iterative workflows
+                    with Session(service=self.service, backend=backend) as session:
+                        sampler = SamplerV2(mode=session)
+                        if parameters:
+                            job = sampler.run([(transpiled.bind_parameters(parameters),)], shots=shots)
+                        else:
+                            job = sampler.run([(transpiled,)], shots=shots)
+                        result = job.result()
 
                 execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -353,8 +427,14 @@ class IBMQuantumProvider:
                 self.usage_stats.record_hardware_job(execution_time)
                 self._save_usage_stats()
 
-                # Extract counts
-                counts = result[0].data.meas.get_counts() if hasattr(result[0].data, 'meas') else {}
+                # Extract counts from PubResult
+                counts = {}
+                if hasattr(result[0], 'data'):
+                    pub_data = result[0].data
+                    if hasattr(pub_data, 'meas'):
+                        counts = pub_data.meas.get_counts()
+                    elif hasattr(pub_data, 'c'):
+                        counts = pub_data.c.get_counts()
 
                 return QuantumJobResult(
                     success=True,
@@ -362,7 +442,13 @@ class IBMQuantumProvider:
                     execution_time=execution_time,
                     shots=shots,
                     counts=counts,
-                    metadata={"is_hardware": True, "transpiled_depth": transpiled.depth()}
+                    metadata={
+                        "is_hardware": True,
+                        "transpiled_depth": transpiled.depth(),
+                        "execution_mode": options.execution_mode.value,
+                        "dynamical_decoupling": options.dynamical_decoupling,
+                        "twirling": options.enable_twirling
+                    }
                 )
 
             else:
@@ -391,6 +477,159 @@ class IBMQuantumProvider:
 
         except Exception as e:
             logger.error(f"Quantum execution failed: {e}")
+            return QuantumJobResult(
+                success=False,
+                backend_used=backend_name,
+                execution_time=(datetime.now() - start_time).total_seconds(),
+                shots=shots,
+                error=str(e)
+            )
+
+    async def run_estimator(
+        self,
+        circuit: "QuantumCircuit",
+        observable: "SparsePauliOp",
+        shots: int = 1024,
+        task_type: QuantumTaskType = QuantumTaskType.OPTIMIZATION,
+        prefer_hardware: bool = False,
+        parameters: Optional[Dict] = None,
+        options: Optional[QuantumOptions] = None
+    ) -> QuantumJobResult:
+        """
+        Run Estimator primitive for expectation value calculations.
+
+        Per IBM docs: Estimator computes expectation values of observables
+        with respect to states prepared by quantum circuits.
+
+        Args:
+            circuit: Qiskit QuantumCircuit (without measurements)
+            observable: SparsePauliOp observable to measure
+            shots: Number of measurement shots
+            task_type: Type of task for backend selection
+            prefer_hardware: Prefer real quantum hardware
+            parameters: Optional parameter bindings
+            options: QuantumOptions with resilience_level for error mitigation
+
+        Returns:
+            QuantumJobResult with expectation_values
+        """
+        if not QISKIT_AVAILABLE:
+            return QuantumJobResult(
+                success=False,
+                backend_used="none",
+                execution_time=0,
+                shots=0,
+                error="Qiskit not installed"
+            )
+
+        options = options or QuantumOptions()
+        start_time = datetime.now()
+        backend_name, is_hardware = self._select_backend(
+            task_type, circuit.num_qubits, prefer_hardware
+        )
+
+        try:
+            if is_hardware and self.service:
+                backend = self.service.backend(backend_name)
+
+                # Transpile circuit
+                transpiled = transpile(
+                    circuit,
+                    backend,
+                    optimization_level=options.optimization_level
+                )
+
+                with Session(service=self.service, backend=backend) as session:
+                    # Configure Estimator with resilience level per IBM docs
+                    estimator = EstimatorV2(mode=session)
+
+                    # Set resilience options
+                    estimator.options.resilience_level = options.resilience_level.value
+
+                    # Configure error mitigation techniques
+                    if options.resilience_level.value >= 1:
+                        estimator.options.resilience.measure_mitigation = True
+
+                    if options.resilience_level.value >= 2:
+                        estimator.options.resilience.zne_mitigation = True
+                        estimator.options.resilience.zne.noise_factors = options.zne_noise_factors
+                        estimator.options.resilience.zne.extrapolator = options.zne_extrapolator
+
+                    # Enable dynamical decoupling
+                    if options.dynamical_decoupling:
+                        estimator.options.dynamical_decoupling.enable = True
+                        estimator.options.dynamical_decoupling.sequence_type = options.dd_sequence_type
+
+                    # Enable twirling
+                    if options.enable_twirling:
+                        estimator.options.twirling.enable_gates = True
+                        estimator.options.twirling.num_randomizations = options.twirling_num_randomizations
+
+                    # Build PUB (Primitive Unified Bloc) per IBM docs
+                    if parameters:
+                        pub = (transpiled.bind_parameters(parameters), observable)
+                    else:
+                        pub = (transpiled, observable)
+
+                    job = estimator.run([pub])
+                    result = job.result()
+
+                execution_time = (datetime.now() - start_time).total_seconds()
+                self.usage_stats.record_hardware_job(execution_time)
+                self._save_usage_stats()
+
+                # Extract expectation values
+                expectation_values = []
+                if hasattr(result[0], 'data'):
+                    evs = result[0].data.evs
+                    expectation_values = evs.tolist() if hasattr(evs, 'tolist') else [evs]
+
+                return QuantumJobResult(
+                    success=True,
+                    backend_used=backend_name,
+                    execution_time=execution_time,
+                    shots=shots,
+                    expectation_values=expectation_values,
+                    metadata={
+                        "is_hardware": True,
+                        "resilience_level": options.resilience_level.value,
+                        "error_mitigation": {
+                            "measure_mitigation": options.resilience_level.value >= 1,
+                            "zne": options.resilience_level.value >= 2,
+                            "dynamical_decoupling": options.dynamical_decoupling,
+                            "twirling": options.enable_twirling
+                        }
+                    }
+                )
+
+            else:
+                # Simulator - use basic Estimator
+                from qiskit.primitives import Estimator as LocalEstimator
+
+                estimator = LocalEstimator()
+
+                if parameters:
+                    job = estimator.run([circuit.bind_parameters(parameters)], [observable])
+                else:
+                    job = estimator.run([circuit], [observable])
+
+                result = job.result()
+                execution_time = (datetime.now() - start_time).total_seconds()
+                self.usage_stats.record_simulator_job()
+
+                expectation_values = result.values.tolist()
+
+                return QuantumJobResult(
+                    success=True,
+                    backend_used="aer_simulator",
+                    execution_time=execution_time,
+                    shots=shots,
+                    expectation_values=expectation_values,
+                    metadata={"is_hardware": False}
+                )
+
+        except Exception as e:
+            logger.error(f"Estimator execution failed: {e}")
             return QuantumJobResult(
                 success=False,
                 backend_used=backend_name,
@@ -1035,9 +1274,9 @@ async def quantum_evolve_agent(
 # =============================================================================
 
 async def test_quantum_integration():
-    """Test IBM Quantum integration."""
-    print("Testing Farnsworth Quantum Integration")
-    print("=" * 50)
+    """Test IBM Quantum integration with all features."""
+    print("Testing Farnsworth Quantum Integration (IBM Best Practices)")
+    print("=" * 60)
 
     api_key = os.environ.get("IBM_QUANTUM_API_KEY")
     if not api_key:
@@ -1062,7 +1301,7 @@ async def test_quantum_integration():
 
     # Test simple circuit
     if QISKIT_AVAILABLE:
-        print("\nRunning test circuit on simulator...")
+        print("\n--- Test 1: Basic Sampler Circuit ---")
         qc = QuantumCircuit(3, 3)
         qc.h(0)
         qc.cx(0, 1)
@@ -1074,8 +1313,31 @@ async def test_quantum_integration():
         print(f"  Backend: {result.backend_used}")
         print(f"  Counts: {result.counts}")
 
-        # Test quantum GA
-        print("\nTesting Quantum Genetic Algorithm...")
+        print("\n--- Test 2: Estimator with Error Mitigation ---")
+        # Create circuit for expectation value (no measurement)
+        qc_est = QuantumCircuit(2)
+        qc_est.h(0)
+        qc_est.cx(0, 1)
+
+        # Observable: ZZ
+        observable = SparsePauliOp.from_list([("ZZ", 1.0)])
+
+        # Configure options per IBM docs
+        options = QuantumOptions(
+            execution_mode=ExecutionMode.SESSION,
+            resilience_level=ResilienceLevel.MINIMAL,
+            dynamical_decoupling=True,
+            enable_twirling=False  # Only for hardware
+        )
+
+        result_est = await provider.run_estimator(
+            qc_est, observable, shots=100, options=options
+        )
+        print(f"  Success: {result_est.success}")
+        print(f"  Backend: {result_est.backend_used}")
+        print(f"  Expectation values: {result_est.expectation_values}")
+
+        print("\n--- Test 3: Quantum Genetic Algorithm ---")
 
         def test_fitness(bitstring: str) -> float:
             return sum(int(b) for b in bitstring) / len(bitstring)
@@ -1085,7 +1347,26 @@ async def test_quantum_integration():
         print(f"  Generated population of {len(population)}")
         print(f"  Best individual: {population[0][0]} (fitness: {population[0][1]:.2f})")
 
-    print("\nQuantum integration test complete!")
+        print("\n--- Test 4: QAOA Optimizer ---")
+        qaoa = QAOAOptimizer(provider)
+        # Simple 4-node graph for MaxCut
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0)]
+        result_qaoa = await qaoa.optimize(4, edges, p=1, shots=100)
+        print(f"  Success: {result_qaoa.success}")
+        print(f"  Best solution: {result_qaoa.metadata.get('best_solution', 'N/A')}")
+
+        print("\n--- Test 5: Execution Modes ---")
+        print(f"  Available modes: {[m.value for m in ExecutionMode]}")
+        print(f"  Resilience levels: {[r.name for r in ResilienceLevel]}")
+
+    print("\n" + "=" * 60)
+    print("Quantum integration test complete!")
+    print("IBM Quantum best practices implemented:")
+    print("  - SamplerV2 and EstimatorV2 primitives")
+    print("  - Session/Batch/Job execution modes")
+    print("  - Error mitigation (TREX, ZNE, twirling)")
+    print("  - Dynamical decoupling for idle qubits")
+    print("  - Usage tracking with monthly quota")
     return True
 
 

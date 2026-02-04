@@ -3,13 +3,27 @@ Farnsworth Quantum Computing Integration
 =========================================
 
 Provides quantum-enhanced capabilities via IBM Quantum Experience.
+Implementation follows IBM Quantum best practices (2026 docs).
 
 Free Tier Strategy:
 - 10 minutes/month hardware for high-value tasks (evolution, optimization)
 - Unlimited simulators for development and testing
 
+Execution Modes (per IBM docs):
+- JOB: Single primitive request, no context
+- BATCH: Multiple independent jobs in parallel (best for parallel experiments)
+- SESSION: Exclusive QPU access for iterative workflows (VQE, optimization loops)
+
+Error Mitigation (per IBM docs):
+- Level 0: No mitigation
+- Level 1: TREX readout error correction (default)
+- Level 2: TREX + ZNE + gate twirling (~3x overhead)
+
 Quick Start:
-    from farnsworth.integration.quantum import initialize_quantum, quantum_evolve_agent
+    from farnsworth.integration.quantum import (
+        initialize_quantum, quantum_evolve_agent,
+        QuantumOptions, ResilienceLevel, ExecutionMode
+    )
 
     # Initialize (use env var IBM_QUANTUM_API_KEY or pass key)
     await initialize_quantum()
@@ -21,11 +35,20 @@ Quick Start:
         generations=5
     )
 
+    # Configure advanced options
+    options = QuantumOptions(
+        execution_mode=ExecutionMode.SESSION,
+        resilience_level=ResilienceLevel.MEDIUM,
+        dynamical_decoupling=True,
+        enable_twirling=True
+    )
+
 Components:
 - IBMQuantumProvider: Core connection and execution management
 - QuantumGeneticOptimizer: QGA for agent evolution
-- QAOAOptimizer: Combinatorial optimization
+- QAOAOptimizer: Combinatorial optimization (QAOA algorithm)
 - QuantumPatternExtractor: Memory pattern discovery
+- QuantumOptions: Configuration for error mitigation and execution modes
 """
 
 from .ibm_quantum import (
@@ -37,10 +60,13 @@ from .ibm_quantum import (
     # Enums
     QuantumBackend,
     QuantumTaskType,
+    ExecutionMode,
+    ResilienceLevel,
 
     # Data classes
     QuantumUsageStats,
     QuantumJobResult,
+    QuantumOptions,
 
     # Algorithms
     QuantumGeneticOptimizer,
@@ -60,8 +86,11 @@ __all__ = [
     "initialize_quantum",
     "QuantumBackend",
     "QuantumTaskType",
+    "ExecutionMode",
+    "ResilienceLevel",
     "QuantumUsageStats",
     "QuantumJobResult",
+    "QuantumOptions",
     "QuantumGeneticOptimizer",
     "QAOAOptimizer",
     "QuantumPatternExtractor",
