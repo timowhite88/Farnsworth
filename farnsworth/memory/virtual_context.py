@@ -26,6 +26,14 @@ import threading
 
 from loguru import logger
 
+# Nexus integration for overflow warnings
+try:
+    from farnsworth.core.nexus import nexus, SignalType
+    NEXUS_AVAILABLE = True
+except ImportError:
+    NEXUS_AVAILABLE = False
+    nexus = None
+
 
 class MemoryTier(Enum):
     """Memory hierarchy tiers."""
@@ -159,9 +167,54 @@ class ContextWindow:
                 block.tier = MemoryTier.WORKING
                 block.accessed_at = datetime.now()
                 block.access_count += 1
+
+                # v1.4: Check for context overflow warning
+                self._check_overflow_warning()
+
                 return True
 
             return False
+
+    def _check_overflow_warning(self):
+        """
+        v1.4: Emit warning signal when context is getting full.
+        Triggers when less than 20% of context remains available.
+        """
+        usage_ratio = self.get_current_tokens() / self.max_tokens
+
+        if usage_ratio > 0.8:
+            # Less than 20% remaining - emit warning
+            if NEXUS_AVAILABLE and nexus:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._emit_overflow_warning(usage_ratio))
+                except RuntimeError:
+                    # No running loop, skip
+                    pass
+
+            logger.warning(
+                f"Context overflow warning: {usage_ratio*100:.1f}% used "
+                f"({self.get_current_tokens()}/{self.max_tokens} tokens)"
+            )
+
+    async def _emit_overflow_warning(self, usage_ratio: float):
+        """Emit overflow warning via Nexus."""
+        try:
+            await nexus.emit(
+                type=SignalType.ANOMALY_DETECTED,
+                payload={
+                    "event": "context_overflow_warning",
+                    "usage_ratio": usage_ratio,
+                    "tokens_used": self.get_current_tokens(),
+                    "tokens_max": self.max_tokens,
+                    "tokens_available": self.get_available_tokens(),
+                    "blocks_count": len(self.blocks),
+                },
+                source="virtual_context",
+            )
+        except Exception:
+            pass
 
     def _evict_least_important(self) -> Optional[MemoryBlock]:
         """Evict the least important block from the context."""
