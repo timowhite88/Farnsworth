@@ -4,6 +4,15 @@
 oauth2_tokens.json
 *_tokens.json
 
+# Local Claude Code settings (contains server IPs, SSH commands)
+.claude/
+
+# Session memory (contains server-specific info)
+farnsworth/memory/claude_session.json
+
+# Cache directories
+cache/
+
 # Protected source code - NEVER commit (only compiled binaries)
 farnsworth/integration/chain_memory/protected/core.py
 # Keep the compiled binaries for distribution
