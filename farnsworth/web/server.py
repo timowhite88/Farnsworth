@@ -6160,6 +6160,163 @@ async def update_deliberation_limits(request: Request):
         }, status_code=500)
 
 
+# =============================================================================
+# QUANTUM COMPUTING INTEGRATION (IBM Quantum Experience)
+# =============================================================================
+
+@app.get("/api/quantum/status")
+async def quantum_status():
+    """
+    Get IBM Quantum integration status and usage.
+
+    Returns:
+    - Connection status
+    - Hardware usage (seconds used/remaining this month)
+    - Simulator job count
+    - Available backends
+    """
+    try:
+        from farnsworth.integration.quantum import get_quantum_provider, QISKIT_AVAILABLE
+
+        if not QISKIT_AVAILABLE:
+            return JSONResponse({
+                "available": False,
+                "message": "Qiskit not installed. Run: pip install qiskit qiskit-ibm-runtime qiskit-aer"
+            })
+
+        provider = get_quantum_provider()
+        if not provider:
+            return JSONResponse({
+                "available": False,
+                "message": "Quantum provider not initialized. Set IBM_QUANTUM_API_KEY environment variable."
+            })
+
+        usage = provider.get_usage_summary()
+        backends = provider.get_available_backends() if provider._connected else []
+
+        return JSONResponse({
+            "available": True,
+            "connected": usage["connected"],
+            "usage": {
+                "hardware_seconds_used": usage["hardware_seconds_used"],
+                "hardware_seconds_remaining": usage["hardware_seconds_remaining"],
+                "hardware_percentage_used": usage["hardware_percentage_used"],
+                "hardware_jobs_count": usage["hardware_jobs_count"],
+                "simulator_jobs_count": usage["simulator_jobs_count"],
+                "last_hardware_run": usage["last_hardware_run"]
+            },
+            "backends": backends[:10],  # Limit list size
+            "free_tier_limits": {
+                "hardware_seconds_per_month": 600,
+                "simulator_unlimited": True,
+                "recommended_strategy": "95% simulator, 5% hardware for high-value tasks"
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Quantum status error: {e}")
+        return JSONResponse({
+            "available": False,
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.post("/api/quantum/initialize")
+async def quantum_initialize(request: Request):
+    """
+    Initialize IBM Quantum connection.
+
+    Body (optional): {"api_key": "your_ibm_quantum_api_key"}
+    If not provided, uses IBM_QUANTUM_API_KEY environment variable.
+    """
+    try:
+        from farnsworth.integration.quantum import initialize_quantum
+
+        body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+        api_key = body.get("api_key")
+
+        success = await initialize_quantum(api_key)
+
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": "Connected to IBM Quantum Experience"
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "message": "Failed to connect. Check API key and Qiskit installation."
+            }, status_code=400)
+
+    except Exception as e:
+        logger.error(f"Quantum initialization error: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
+@app.post("/api/quantum/evolve")
+async def quantum_evolve_endpoint(request: Request):
+    """
+    Evolve an agent genome using Quantum Genetic Algorithm.
+
+    Body: {
+        "genome": "10110010",           # Binary string representing agent parameters
+        "generations": 5,               # Number of evolution generations
+        "population_size": 20,          # Population size per generation
+        "prefer_hardware": false        # Use real quantum hardware (limited)
+    }
+
+    Returns best genome and fitness score.
+    """
+    try:
+        from farnsworth.integration.quantum import quantum_evolve_agent, get_quantum_provider
+
+        body = await request.json()
+        genome = body.get("genome", "10101010")
+        generations = body.get("generations", 5)
+        population_size = body.get("population_size", 20)
+        prefer_hardware = body.get("prefer_hardware", False)
+
+        # Simple fitness function (count 1s) - in practice, connect to evolution engine
+        def fitness_func(g: str) -> float:
+            return sum(int(b) for b in g) / len(g)
+
+        best_genome, best_fitness = await quantum_evolve_agent(
+            agent_genome=genome,
+            fitness_func=fitness_func,
+            generations=generations,
+            population_size=population_size,
+            prefer_hardware=prefer_hardware
+        )
+
+        # Get updated usage stats
+        provider = get_quantum_provider()
+        usage = provider.get_usage_summary() if provider else {}
+
+        return JSONResponse({
+            "success": True,
+            "result": {
+                "best_genome": best_genome,
+                "best_fitness": best_fitness,
+                "generations_run": generations,
+                "improvement": best_fitness - fitness_func(genome)
+            },
+            "quantum_usage": {
+                "hardware_seconds_remaining": usage.get("hardware_seconds_remaining", 0),
+                "simulator_jobs": usage.get("simulator_jobs_count", 0)
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Quantum evolution error: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
 @app.get("/api/organism/status")
 async def organism_status():
     """Get Collective Organism status - the unified AI consciousness."""
