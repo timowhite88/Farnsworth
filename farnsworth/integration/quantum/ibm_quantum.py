@@ -260,10 +260,18 @@ class IBMQuantumProvider:
 
         try:
             # Initialize IBM Runtime service
-            self.service = QiskitRuntimeService(
-                channel="ibm_quantum",
-                token=self.api_key
-            )
+            # Note: channel changed from "ibm_quantum" to "ibm_quantum_platform" in qiskit-ibm-runtime 0.45+
+            try:
+                self.service = QiskitRuntimeService(
+                    channel="ibm_quantum_platform",
+                    token=self.api_key
+                )
+            except ValueError:
+                # Fallback for older versions
+                self.service = QiskitRuntimeService(
+                    channel="ibm_quantum",
+                    token=self.api_key
+                )
 
             # Initialize local simulator (always available)
             self.simulator = AerSimulator()
