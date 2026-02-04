@@ -36,15 +36,16 @@ from loguru import logger
 try:
     from qiskit import QuantumCircuit, transpile
     from qiskit.circuit import Parameter, ParameterVector
-    from qiskit.primitives import Sampler, Estimator
+    # Qiskit 2.x uses StatevectorSampler/Estimator for local simulation
+    from qiskit.primitives import StatevectorSampler, StatevectorEstimator
     from qiskit_ibm_runtime import QiskitRuntimeService, Session, Batch, Options
     from qiskit_ibm_runtime import SamplerV2, EstimatorV2
     from qiskit_aer import AerSimulator
     from qiskit.quantum_info import SparsePauliOp
     QISKIT_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     QISKIT_AVAILABLE = False
-    logger.warning("Qiskit not installed. Run: pip install qiskit qiskit-ibm-runtime qiskit-aer")
+    logger.warning(f"Qiskit import error: {e}. Run: pip install qiskit qiskit-ibm-runtime qiskit-aer")
 
 
 class QuantumBackend(Enum):
@@ -603,25 +604,28 @@ class IBMQuantumProvider:
                 )
 
             else:
-                # Simulator - use basic Estimator
-                from qiskit.primitives import Estimator as LocalEstimator
-
-                estimator = LocalEstimator()
+                # Simulator - use StatevectorEstimator (Qiskit 2.x)
+                estimator = StatevectorEstimator()
 
                 if parameters:
-                    job = estimator.run([circuit.bind_parameters(parameters)], [observable])
+                    pub = (circuit.bind_parameters(parameters), observable)
                 else:
-                    job = estimator.run([circuit], [observable])
+                    pub = (circuit, observable)
 
+                job = estimator.run([pub])
                 result = job.result()
                 execution_time = (datetime.now() - start_time).total_seconds()
                 self.usage_stats.record_simulator_job()
 
-                expectation_values = result.values.tolist()
+                # Extract expectation values from PubResult
+                expectation_values = []
+                if hasattr(result[0], 'data'):
+                    evs = result[0].data.evs
+                    expectation_values = evs.tolist() if hasattr(evs, 'tolist') else [float(evs)]
 
                 return QuantumJobResult(
                     success=True,
-                    backend_used="aer_simulator",
+                    backend_used="statevector_simulator",
                     execution_time=execution_time,
                     shots=shots,
                     expectation_values=expectation_values,
