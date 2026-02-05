@@ -107,20 +107,19 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
         except Exception as e:
             logger.debug(f"Kimi API unavailable: {e}")
 
-    # Fallback to local Ollama (DeepSeek-R1 14B or Phi-4)
+    # Fallback to local Ollama (DeepSeek-R1 8B or Phi-4)
     try:
         from farnsworth.core.cognition.llm_router import get_completion
-        # Use larger local model for better quality
         result = await get_completion(
             prompt=prompt,
-            model="deepseek-r1:14b",  # Larger model
+            model="deepseek-r1:8b",
             max_tokens=max_tokens
         )
         if result:
-            logger.info(f"Task handled by local Ollama (deepseek-r1:14b)")
+            logger.info(f"Task handled by local Ollama (deepseek-r1:8b)")
             return result
     except Exception as e:
-        logger.debug(f"DeepSeek-R1:14b unavailable: {e}")
+        logger.debug(f"DeepSeek-R1:8b unavailable: {e}")
 
     # Final fallback to smaller model
     try:

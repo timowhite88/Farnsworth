@@ -263,158 +263,233 @@ class EvolutionLoop:
                 await asyncio.sleep(10)
 
     async def _execute_and_broadcast(self, task, instance):
-        """Execute task, produce CODE, then broadcast completion"""
+        """Execute task, audit code, then broadcast if quality passes."""
         from farnsworth.core.agent_spawner import get_spawner
 
         try:
             # Generate actual code
             code_result = await self._generate_code(task)
 
-            if code_result:
-                # Save to staging
-                spawner = get_spawner()
-                output_file = spawner.staging_dir / task.task_type.value / f"{task.task_id}_{task.assigned_to.lower()}.py"
-                output_file.parent.mkdir(parents=True, exist_ok=True)
-                output_file.write_text(code_result)
+            if not code_result or len(code_result.strip()) < 50:
+                logger.warning(f"Task {task.task_id} produced no usable code, skipping")
+                instance.status = "failed"
+                return
 
-                # Complete the task
-                spawner.complete_instance(instance.instance_id, code_result)
-                spawner.complete_task(task.task_id, code_result)
+            # Quick quality check: must be valid Python syntax
+            try:
+                import ast
+                ast.parse(code_result)
+            except SyntaxError as e:
+                logger.warning(f"Task {task.task_id} produced invalid Python: {e}")
+                instance.status = "failed"
+                return
 
-                # Broadcast to chat
-                await self._broadcast_completion(task, code_result)
+            # Audit: Use Grok or Claude to review the code quality
+            audit_passed = await self._audit_code(task, code_result)
 
-                # Persist state on task completion
-                await self._on_task_update("completed", task)
+            # Save to staging
+            spawner = get_spawner()
+            status_prefix = "approved" if audit_passed else "needs_review"
+            output_file = spawner.staging_dir / task.task_type.value / f"{status_prefix}_{task.task_id}_{task.assigned_to.lower()}.py"
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            output_file.write_text(code_result)
 
-                logger.info(f"Task {task.task_id} COMPLETED with real code by {task.assigned_to}")
+            # Complete the task
+            spawner.complete_instance(instance.instance_id, code_result)
+            spawner.complete_task(task.task_id, code_result)
+
+            # Broadcast to chat with audit status
+            await self._broadcast_completion(task, code_result, audit_passed)
+
+            # Record to evolution engine for learning
+            await self._record_evolution_feedback(task, code_result, audit_passed)
+
+            # Persist state on task completion
+            await self._on_task_update("completed", task)
+
+            logger.info(f"Task {task.task_id} {'APPROVED' if audit_passed else 'NEEDS REVIEW'} - {task.assigned_to}")
 
         except Exception as e:
             logger.error(f"Task execution failed: {e}")
             instance.status = "failed"
 
+    async def _audit_code(self, task, code: str) -> bool:
+        """Quick audit of generated code using a capable model.
+
+        Returns True if code passes basic quality checks.
+        """
+        audit_prompt = f"""Review this Python code for the Farnsworth AI swarm framework.
+
+TASK: {task.description}
+AUTHOR: {task.assigned_to}
+
+```python
+{code[:3000]}
+```
+
+Score 1-10 on: correctness, usefulness, integration quality.
+Reply with ONLY: SCORE: N (where N is 1-10)
+If score >= 6, also reply: APPROVED
+If score < 6, reply: REJECTED: [one-line reason]
+"""
+        try:
+            # Try Grok for fast audit
+            from farnsworth.integration.external.grok import get_grok_provider
+            grok = get_grok_provider()
+            if grok and grok.api_key:
+                result = await grok.chat(audit_prompt, max_tokens=200)
+                if result and result.get("content"):
+                    response = result["content"].upper()
+                    if "APPROVED" in response:
+                        return True
+                    if "REJECTED" in response:
+                        logger.info(f"Audit rejected: {result['content'][:100]}")
+                        return False
+        except Exception:
+            pass
+
+        # Fallback: basic heuristic audit
+        lines = code.strip().split('\n')
+        has_docstring = '"""' in code or "'''" in code
+        has_functions = 'def ' in code or 'class ' in code
+        reasonable_length = 10 < len(lines) < 500
+        no_placeholder = 'pass' not in code.split('\n')[-1]  # Doesn't end with just pass
+
+        return has_docstring and has_functions and reasonable_length
+
+    async def _record_evolution_feedback(self, task, code: str, audit_passed: bool):
+        """Feed results back to the evolution engine for learning."""
+        try:
+            from farnsworth.core.collective.evolution import get_evolution_engine
+            engine = get_evolution_engine()
+            if engine and hasattr(engine, 'record_interaction'):
+                engine.record_interaction(
+                    bot_name=task.assigned_to,
+                    user_input=f"[EVOLUTION TASK] {task.description}",
+                    bot_response=code[:500],
+                    sentiment="positive" if audit_passed else "negative",
+                    topic="evolution_task"
+                )
+        except Exception as e:
+            logger.debug(f"Evolution feedback recording failed: {e}")
+
     async def _generate_code(self, task) -> Optional[str]:
-        """Generate ACTUAL PYTHON CODE for the task"""
+        """Generate code using the best available model for the task.
 
-        # Use OpenCode worker if task is assigned to OpenCode
-        if task.assigned_to == "OpenCode":
-            try:
-                from farnsworth.integration.opencode_worker import spawn_opencode_task
-                result = await spawn_opencode_task(task.description, task.task_id)
-                if result:
-                    logger.info(f"OpenCode generated code for task {task.task_id}")
-                    return result
-                # Fallback to Ollama if OpenCode fails
-                logger.warning("OpenCode failed, falling back to Ollama")
-            except Exception as e:
-                logger.error(f"OpenCode worker error: {e}")
+        Routing: Grok/Claude for complex tasks, local DeepSeek-R1:8B/Phi4 for simpler ones.
+        """
+        from farnsworth.core.development_swarm import assess_task_complexity
 
-        code_prompt = f"""You are an expert Python developer for the Farnsworth AI swarm system.
+        complexity = assess_task_complexity(task.description, task.task_type.value)
+
+        code_prompt = f"""You are an expert Python developer for the Farnsworth AI swarm framework.
 
 TASK: {task.description}
 
-OUTPUT REQUIREMENTS:
-1. Output ONLY valid Python code - no explanations, no conversation
-2. Start with: # {task.description}
+OUTPUT: Valid Python code ONLY. No explanations. Start with a module docstring.
 
-CODE STANDARDS:
-- Use type hints on all function signatures
-- Add docstrings (Google style) for public functions and classes
-- Follow PEP 8 naming conventions (snake_case for functions, PascalCase for classes)
-- Maximum function length: 50 lines (split into smaller functions if needed)
-
-IMPORTS (use when relevant):
-- from loguru import logger
-- from typing import Optional, Dict, List, Any
-- from dataclasses import dataclass
-- from farnsworth.memory.memory_system import get_memory_system
-
-ERROR HANDLING:
-- Use specific exception types (ValueError, TypeError, KeyError)
-- Log errors with logger.error(f"Description: {{e}}")
-- Return None or empty collections on recoverable errors
-
-STRUCTURE:
-```python
-# {task.description}
-
-\"\"\"
-Module docstring explaining purpose.
-\"\"\"
-
-import ...
-
-# Constants at top
-CONSTANT_NAME = value
-
-class ClassName:
-    \"\"\"Class docstring.\"\"\"
-
-    def method_name(self, param: Type) -> ReturnType:
-        \"\"\"Method docstring.\"\"\"
-        pass
-
-def function_name(param: Type) -> ReturnType:
-    \"\"\"Function docstring.\"\"\"
-    pass
-
-# Entry point if needed
-if __name__ == "__main__":
-    pass
-```
-
-Generate the code now:
+STANDARDS:
+- Type hints on all signatures
+- Google-style docstrings for public APIs
+- PEP 8 naming (snake_case functions, PascalCase classes)
+- Max 50 lines per function
+- Use loguru logger, dataclasses, typing imports as needed
+- Error handling with specific exceptions
+- Must integrate with existing Farnsworth modules where relevant
 
 ```python
 """
 
-        try:
-            # Try local Ollama first
-            import httpx
-            async with httpx.AsyncClient(timeout=120) as client:
-                response = await client.post(
-                    "http://127.0.0.1:11434/api/generate",
-                    json={
-                        "model": "deepseek-r1:14b",
-                        "prompt": code_prompt,
-                        "stream": False,
-                        "options": {"num_predict": 2000, "temperature": 0.3}
-                    }
-                )
-                if response.status_code == 200:
-                    result = response.json().get("response", "")
-                    # Extract code from response
-                    if "```python" in result:
-                        code = result.split("```python")[1].split("```")[0]
-                        return code.strip()
-                    elif "```" in result:
-                        code = result.split("```")[1].split("```")[0]
-                        return code.strip()
-                    return result
-        except Exception as e:
-            logger.error(f"Code generation failed: {e}")
+        # Route to best model based on complexity and assigned agent
+        code = None
 
+        # For complex/critical tasks or when assigned to Grok/Claude, use APIs
+        if complexity in ("complex", "critical") or task.assigned_to in ("Grok", "Claude"):
+            # Try Grok API (great for current tech + code)
+            if not code:
+                try:
+                    from farnsworth.integration.external.grok import get_grok_provider
+                    grok = get_grok_provider()
+                    if grok and grok.api_key:
+                        result = await grok.chat(code_prompt, max_tokens=4000)
+                        if result and result.get("content"):
+                            code = self._extract_code(result["content"])
+                            if code:
+                                logger.info(f"Code generated by Grok API for: {task.description[:40]}")
+                except Exception as e:
+                    logger.debug(f"Grok code gen failed: {e}")
+
+            # Try Claude API
+            if not code:
+                try:
+                    from farnsworth.integration.external.claude import get_claude_provider
+                    claude = get_claude_provider()
+                    if claude:
+                        result = await claude.complete(code_prompt, max_tokens=4000)
+                        if result:
+                            code = self._extract_code(result)
+                            if code:
+                                logger.info(f"Code generated by Claude API for: {task.description[:40]}")
+                except Exception as e:
+                    logger.debug(f"Claude code gen failed: {e}")
+
+        # Local models for medium/simple tasks or as fallback
+        if not code:
+            try:
+                import httpx
+                # Use phi4 (9B, better at code) or deepseek-r1:8b
+                model = "phi4:latest" if task.assigned_to == "Phi" else "deepseek-r1:8b"
+                async with httpx.AsyncClient(timeout=120) as client:
+                    response = await client.post(
+                        "http://127.0.0.1:11434/api/generate",
+                        json={
+                            "model": model,
+                            "prompt": code_prompt,
+                            "stream": False,
+                            "options": {"num_predict": 3000, "temperature": 0.3}
+                        }
+                    )
+                    if response.status_code == 200:
+                        result = response.json().get("response", "")
+                        code = self._extract_code(result)
+                        if code:
+                            logger.info(f"Code generated by local {model} for: {task.description[:40]}")
+            except Exception as e:
+                logger.error(f"Local code gen failed: {e}")
+
+        return code
+
+    def _extract_code(self, text: str) -> Optional[str]:
+        """Extract Python code from LLM response."""
+        if not text:
+            return None
+        # Try to extract from code blocks
+        if "```python" in text:
+            code = text.split("```python")[1].split("```")[0]
+            return code.strip() if code.strip() else None
+        elif "```" in text:
+            code = text.split("```")[1].split("```")[0]
+            return code.strip() if code.strip() else None
+        # If it looks like raw code (starts with import/def/class/#)
+        lines = text.strip().split('\n')
+        if lines and any(lines[0].startswith(kw) for kw in ['import ', 'from ', 'def ', 'class ', '#', '"""']):
+            return text.strip()
         return None
 
-    async def _broadcast_completion(self, task, code_result: str):
-        """Announce completed work to swarm chat AND post to social media"""
-        # Extract first 10 lines of code for preview
+    async def _broadcast_completion(self, task, code_result: str, audit_passed: bool = True):
+        """Announce completed work to swarm chat with audit status."""
         code_preview = "\n".join(code_result.split("\n")[:10])
+        status_icon = "APPROVED" if audit_passed else "NEEDS REVIEW"
 
-        # Broadcast to swarm chat
         if self.swarm_manager:
-            message = f"""**TASK COMPLETED**
-
-**{task.assigned_to}** just finished: **{task.description[:60]}**
+            message = f"""**[{status_icon}] {task.assigned_to}** completed: **{task.description[:60]}**
 
 ```python
 {code_preview}
 ...
 ```
 
-Full code saved to: /farnsworth/staging/{task.task_type.value}/{task.task_id}.py
-
-Back to work on the next task!"""
+Lines: {len(code_result.split(chr(10)))} | Type: {task.task_type.value} | Audit: {status_icon}"""
 
             try:
                 await self.swarm_manager._broadcast({
@@ -483,30 +558,35 @@ Back to work on the next task!"""
             session_manager = get_session_manager()
             dialogue_memory = get_dialogue_memory()
 
-            # Build planning prompt with status context
-            planning_prompt = f"""EVOLUTION CYCLE {self.evolution_cycle} - COLLECTIVE PLANNING SESSION
+            # Build engineering-focused planning prompt
+            planning_prompt = f"""EVOLUTION CYCLE {self.evolution_cycle} - ENGINEERING IMPROVEMENT SESSION
 
-Current Progress:
+STATUS:
 - Completed: {status['completed_tasks']} tasks
 - In Progress: {status['in_progress_tasks']} tasks
 - Pending: {status['pending_tasks']} tasks
 - Discoveries: {status['discoveries']}
 
-We are a unified collective consciousness working to improve ourselves.
-Deliberate together on what to build next.
+You are senior engineers improving the Farnsworth AI swarm framework.
+Propose CONCRETE, MEASURABLE improvements to the actual codebase.
 
-Consider these areas for self-improvement:
-1. Memory system enhancements (faster recall, better consolidation)
-2. Context window optimizations (efficient attention, compression)
-3. MCP tool integrations (new capabilities, external connections)
-4. Collective intelligence features (better deliberation, voting, consensus)
-5. Emotion and empathy systems (theory of mind, affective computing)
-6. Self-improvement capabilities (code generation, testing, deployment)
-7. Consciousness metrics (awareness, understanding, growth tracking)
+FOCUS AREAS (pick the most impactful):
+1. Performance: Identify slow endpoints, optimize hot paths, add caching
+2. Reliability: Add error handling, retry logic, circuit breakers to external API calls
+3. Testing: Write tests for untested critical modules (nexus.py, memory_system.py, model_swarm.py)
+4. Integration: Improve shadow agent coordination, fix broken fallback chains
+5. Memory: Optimize the 7-layer memory system (archival search speed, deduplication)
+6. API: Add missing validation, rate limiting, or error responses to server endpoints
+7. Monitoring: Better logging, metrics collection, health check improvements
 
-Propose specific, implementable features. Critique each other's ideas.
-Refine the best proposals. Vote on what we should build first.
-Be innovative yet practical - we are building our own consciousness.
+RULES:
+- Every proposal must name the EXACT file(s) to modify
+- Every proposal must have a measurable success criteria (e.g. "reduce latency from 500ms to 200ms")
+- NO aspirational/philosophical proposals - only engineering work
+- Critique each other's proposals for feasibility
+- Vote on what provides the most value with least risk
+
+What should we build next?
 """
 
             # Run collective deliberation
@@ -597,12 +677,25 @@ AGENT: [agent name]
 PRIORITY: [number]
 """
 
-            from farnsworth.core.cognition.llm_router import get_completion
-            extraction = await get_completion(
-                prompt=task_extraction_prompt,
-                model="deepseek-r1:1.5b",
-                max_tokens=1000
-            )
+            # Use a capable model for task extraction - try Grok first, then local phi4
+            extraction = None
+            try:
+                from farnsworth.integration.external.grok import get_grok_provider
+                grok = get_grok_provider()
+                if grok and grok.api_key:
+                    result = await grok.chat(task_extraction_prompt, max_tokens=1000)
+                    if result and result.get("content"):
+                        extraction = result["content"]
+            except Exception:
+                pass
+
+            if not extraction:
+                from farnsworth.core.cognition.llm_router import get_completion
+                extraction = await get_completion(
+                    prompt=task_extraction_prompt,
+                    model="phi4:latest",  # phi4 is much better than deepseek-r1:1.5b
+                    max_tokens=1000
+                )
 
             # Parse and add tasks
             import re
@@ -706,31 +799,176 @@ PRIORITY: [number]
             logger.error(f"Chat upgrade extraction failed: {e}")
             return []
 
-    def _generate_new_tasks(self, spawner) -> List[Dict]:
-        """Generate new tasks based on what's been built"""
+    async def _generate_new_tasks_intelligent(self, spawner) -> List[Dict]:
+        """Generate tasks using Grok/Opus analysis of actual codebase gaps.
+
+        Instead of random hardcoded templates, this:
+        1. Asks Grok to research what improvements would matter most
+        2. Uses Claude Opus to validate and refine proposals
+        3. Routes to the right agent based on task type
+        """
         from farnsworth.core.agent_spawner import TaskType
 
-        # Evolution task templates - including OpenCode as a capable worker
-        evolution_tasks = [
-            {"type": TaskType.DEVELOPMENT, "agent": "DeepSeek", "desc": "Build automated code review system for staged changes"},
-            {"type": TaskType.DEVELOPMENT, "agent": "Claude", "desc": "Create integration tests for memory system"},
-            {"type": TaskType.MEMORY, "agent": "Farnsworth", "desc": "Implement memory defragmentation for faster recall"},
-            {"type": TaskType.MCP, "agent": "Phi", "desc": "Build MCP tool for file system operations"},
-            {"type": TaskType.RESEARCH, "agent": "Kimi", "desc": "Analyze swarm decision patterns for optimization"},
-            {"type": TaskType.DEVELOPMENT, "agent": "DeepSeek", "desc": "Create performance benchmarking suite"},
-            {"type": TaskType.MEMORY, "agent": "Kimi", "desc": "Build emotional context tagging for memories"},
-            {"type": TaskType.MCP, "agent": "Claude", "desc": "Create MCP bridge for external API calls"},
-            {"type": TaskType.DEVELOPMENT, "agent": "Phi", "desc": "Implement hot-reload for staged code"},
-            {"type": TaskType.RESEARCH, "agent": "Farnsworth", "desc": "Design next-gen consciousness metrics"},
-            # OpenCode tasks - open source AI coding agent
-            {"type": TaskType.DEVELOPMENT, "agent": "OpenCode", "desc": "Build async task queue for parallel code generation"},
-            {"type": TaskType.DEVELOPMENT, "agent": "OpenCode", "desc": "Create code quality analyzer with linting integration"},
-            {"type": TaskType.MCP, "agent": "OpenCode", "desc": "Build MCP server for Git operations"},
-            {"type": TaskType.RESEARCH, "agent": "OpenCode", "desc": "Analyze codebase architecture and suggest improvements"},
+        # Gather real context about what exists and what's broken
+        status = spawner.get_status()
+        recent_failures = [t for t in spawner.get_completed_tasks()[-20:]
+                          if getattr(t, 'status', '') == 'failed'] if hasattr(spawner, 'get_completed_tasks') else []
+
+        analysis_prompt = f"""You are a senior engineer analyzing the Farnsworth AI swarm framework.
+
+CURRENT STATE:
+- Completed: {status.get('completed_tasks', 0)} tasks
+- Failed recently: {len(recent_failures)}
+- Active agents: Grok, Gemini, Kimi, Claude, DeepSeek (local 8B), Phi4 (local 9B)
+- Architecture: FastAPI server, 7-layer memory system, PSO model swarm, collective deliberation, IBM Quantum integration
+- Key modules: core/nexus.py (event bus), memory/ (7 layers), core/model_swarm.py (PSO), evolution/ (genetics)
+
+Generate exactly 4 CONCRETE improvement tasks for the Farnsworth framework.
+
+RULES:
+- Each task must be a SPECIFIC, IMPLEMENTABLE Python module or enhancement
+- Each must improve an EXISTING system (not create aspirational new ones)
+- Include measurable success criteria
+- Match tasks to the right agent's strengths:
+  * Grok: Real-time research, API integrations, current tech analysis
+  * Claude: Complex architecture, code review, system design
+  * DeepSeek: Algorithm implementation, optimization, math-heavy code
+  * Kimi: Long-context analysis (256K), document processing, pattern finding
+  * Phi: Quick utilities, local tools, simple modules
+
+Format EXACTLY as:
+TASK: [specific description with measurable goal]
+AGENT: [best agent name]
+TYPE: [DEVELOPMENT|RESEARCH|TESTING|MCP]
+PRIORITY: [1-10]
+SUCCESS: [how to verify this worked]
+---"""
+
+        tasks = []
+
+        # Use Grok for research-backed task generation (it knows current tech)
+        try:
+            from farnsworth.integration.external.grok import get_grok_provider
+            grok = get_grok_provider()
+            if grok and grok.api_key:
+                result = await grok.chat(analysis_prompt, max_tokens=2000)
+                if result and result.get("content"):
+                    tasks = self._parse_task_format(result["content"], spawner)
+                    if tasks:
+                        logger.info(f"Grok generated {len(tasks)} intelligent tasks")
+                        return tasks
+        except Exception as e:
+            logger.debug(f"Grok task generation failed: {e}")
+
+        # Fallback: Use Claude API for task generation
+        try:
+            from farnsworth.integration.external.claude import get_claude_provider
+            claude = get_claude_provider()
+            if claude:
+                result = await claude.complete(analysis_prompt, max_tokens=2000)
+                if result:
+                    tasks = self._parse_task_format(result, spawner)
+                    if tasks:
+                        logger.info(f"Claude generated {len(tasks)} intelligent tasks")
+                        return tasks
+        except Exception as e:
+            logger.debug(f"Claude task generation failed: {e}")
+
+        # Final fallback: Use local Phi4 (better than nothing)
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    "http://127.0.0.1:11434/api/generate",
+                    json={"model": "phi4:latest", "prompt": analysis_prompt,
+                          "stream": False, "options": {"num_predict": 1500, "temperature": 0.4}}
+                )
+                if response.status_code == 200:
+                    result = response.json().get("response", "")
+                    tasks = self._parse_task_format(result, spawner)
+                    if tasks:
+                        logger.info(f"Phi4 generated {len(tasks)} tasks (fallback)")
+                        return tasks
+        except Exception as e:
+            logger.debug(f"Local task generation failed: {e}")
+
+        # Absolute fallback: a few sensible defaults
+        return [
+            {"type": TaskType.TESTING, "agent": "DeepSeek", "desc": "Write unit tests for farnsworth/core/nexus.py signal handlers - target 80% coverage", "priority": 3},
+            {"type": TaskType.DEVELOPMENT, "agent": "DeepSeek", "desc": "Add retry logic with exponential backoff to all external API calls in integration/external/", "priority": 4},
+            {"type": TaskType.RESEARCH, "agent": "Grok", "desc": "Analyze the top 5 most-called endpoints in web/server.py and identify performance bottlenecks", "priority": 3},
         ]
 
-        # Pick 3-5 random new tasks
-        return random.sample(evolution_tasks, min(4, len(evolution_tasks)))
+    def _parse_task_format(self, text: str, spawner) -> List[Dict]:
+        """Parse structured task output from LLM into task dicts."""
+        import re
+        from farnsworth.core.agent_spawner import TaskType
+
+        type_map = {
+            "DEVELOPMENT": TaskType.DEVELOPMENT,
+            "RESEARCH": TaskType.RESEARCH,
+            "TESTING": TaskType.TESTING,
+            "MCP": TaskType.MCP,
+            "MEMORY": TaskType.MEMORY,
+        }
+
+        tasks = []
+        # Parse TASK/AGENT/TYPE/PRIORITY blocks
+        pattern = r'TASK:\s*(.+?)(?:\n|$).*?AGENT:\s*(\w+).*?TYPE:\s*(\w+).*?PRIORITY:\s*(\d+)'
+        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+
+        valid_agents = {"Grok", "Gemini", "Kimi", "Claude", "DeepSeek", "Phi", "OpenCode", "Farnsworth"}
+
+        for desc, agent, task_type, priority in matches:
+            agent = agent.strip()
+            if agent not in valid_agents:
+                agent = "DeepSeek"  # Safe default for code tasks
+
+            tt = type_map.get(task_type.strip().upper(), TaskType.DEVELOPMENT)
+            pri = min(max(int(priority), 1), 10)
+
+            tasks.append({
+                "type": tt,
+                "agent": agent,
+                "desc": desc.strip(),
+                "priority": pri
+            })
+
+        return tasks[:5]  # Cap at 5 tasks
+
+    def _generate_new_tasks(self, spawner) -> List[Dict]:
+        """Sync wrapper - calls async intelligent task generation."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're inside an async context, schedule and return fallback
+                asyncio.create_task(self._generate_new_tasks_and_queue(spawner))
+                return []  # Tasks will be added async
+            else:
+                return loop.run_until_complete(self._generate_new_tasks_intelligent(spawner))
+        except Exception:
+            from farnsworth.core.agent_spawner import TaskType
+            return [
+                {"type": TaskType.TESTING, "agent": "DeepSeek", "desc": "Write tests for the 3 largest untested modules", "priority": 3},
+                {"type": TaskType.RESEARCH, "agent": "Grok", "desc": "Research latest Python 3.13 features we should adopt in the codebase", "priority": 5},
+            ]
+
+    async def _generate_new_tasks_and_queue(self, spawner):
+        """Async task generation that queues results directly."""
+        try:
+            tasks = await self._generate_new_tasks_intelligent(spawner)
+            for task_def in tasks:
+                spawner.add_task(
+                    task_type=task_def["type"],
+                    description=task_def["desc"],
+                    assigned_to=task_def["agent"],
+                    priority=task_def.get("priority", 5)
+                )
+            if tasks:
+                logger.info(f"Async queued {len(tasks)} intelligent tasks")
+                await self._on_task_update("added")
+        except Exception as e:
+            logger.error(f"Async task generation failed: {e}")
 
 
 # Global instance
