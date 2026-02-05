@@ -389,6 +389,15 @@ except ImportError:
     gemini_swarm_respond = None
     GEMINI_AVAILABLE = False
 
+# OpenAI Codex integration (gpt-4.1, o3, codex-mini)
+try:
+    from farnsworth.integration.external.openai_codex import get_openai_codex, OpenAICodexProvider
+    OPENAI_AVAILABLE = True
+except ImportError:
+    get_openai_codex = None
+    OpenAICodexProvider = None
+    OPENAI_AVAILABLE = False
+
 # HuggingFace integration (local + API)
 try:
     from farnsworth.integration.external.huggingface import get_huggingface_provider, HuggingFaceProvider
@@ -2426,8 +2435,12 @@ AUTONOMOUS_TOPICS = [
     "The Claude Teams Fusion (v1.9) delegation pipeline needs real-world testing. What test scenarios should we run?",
     "HuggingFace embeddings for archival memory use MiniLM. Should we upgrade to a better embedding model?",
     "The OpenClaw compatibility layer maps 18 task types but we haven't tested edge cases. What could break?",
-    "Our Solana integration needs better error handling for network congestion and failed transactions.",
-    "The VTuber streaming system uses avatar animation but the WebSocket feed is janky. Performance optimization needed.",
+    "HACKATHON: SwarmOracle records consensus hashes but doesn't submit real Solana transactions. How do we finish on-chain recording?",
+    "HACKATHON: FarsightProtocol combines 5 prediction sources but Polymarket API is mock. Can we use the real API?",
+    "HACKATHON: DegenMob has rug detection and whale watching but no real-time WebSocket mempool monitoring. Should we add it?",
+    "HACKATHON: Our SwarmOracle needs a Solana program (smart contract) for storing prediction consensus. Design the Anchor program.",
+    "HACKATHON: We have quantum entropy from IBM QPU. Can we use it to seed a verifiable random oracle on Solana?",
+    "HACKATHON: Jupiter V6 swap integration works but has no slippage protection or MEV protection. Add Jito bundles?",
     "Can we add distributed tracing (OpenTelemetry) so we can see request flow across all agents and services?",
 ]
 
