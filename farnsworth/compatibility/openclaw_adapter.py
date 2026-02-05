@@ -1108,6 +1108,237 @@ class OpenClawAdapter:
 
 
 # =============================================================================
+# CLAWHUB MARKETPLACE CLIENT
+# =============================================================================
+
+class ClawHubClient:
+    """
+    Client for OpenClaw's ClawHub skills marketplace.
+
+    ClawHub hosts 700+ community-built skills that can be downloaded
+    and executed within Farnsworth's swarm.
+
+    API Endpoints (reverse-engineered from OpenClaw):
+    - GET /skills - List all skills
+    - GET /skills/search?q=<query> - Search skills
+    - GET /skills/<name> - Get skill details
+    - GET /skills/<name>/download - Download skill package
+    """
+
+    BASE_URL = "https://clawhub.openclaw.dev/api/v1"
+    CACHE_DIR = Path(os.path.expanduser("~/.farnsworth/clawhub_cache"))
+
+    def __init__(self):
+        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._session = None
+
+    async def _get_session(self):
+        """Get or create aiohttp session."""
+        if self._session is None:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def search_skills(self, query: str, limit: int = 20) -> List[Dict]:
+        """
+        Search ClawHub marketplace for skills.
+
+        Args:
+            query: Search query
+            limit: Max results to return
+
+        Returns:
+            List of skill metadata dicts
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.BASE_URL}/skills/search",
+                params={"q": query, "limit": limit}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("skills", [])
+                else:
+                    logger.warning(f"ClawHub search failed: {resp.status}")
+                    return []
+        except Exception as e:
+            logger.error(f"ClawHub search error: {e}")
+            return []
+
+    async def list_skills(self, category: str = None, limit: int = 50) -> List[Dict]:
+        """
+        List available skills from ClawHub.
+
+        Args:
+            category: Optional category filter
+            limit: Max results
+
+        Returns:
+            List of skill metadata
+        """
+        try:
+            session = await self._get_session()
+            params = {"limit": limit}
+            if category:
+                params["category"] = category
+
+            async with session.get(
+                f"{self.BASE_URL}/skills",
+                params=params
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("skills", [])
+                return []
+        except Exception as e:
+            logger.error(f"ClawHub list error: {e}")
+            return []
+
+    async def get_skill_details(self, skill_name: str) -> Optional[Dict]:
+        """
+        Get detailed information about a skill.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            Skill details dict or None
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.BASE_URL}/skills/{skill_name}") as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                return None
+        except Exception as e:
+            logger.error(f"ClawHub get details error: {e}")
+            return None
+
+    async def download_skill(self, skill_name: str, install_dir: Path = None) -> Optional[Path]:
+        """
+        Download and install a skill from ClawHub.
+
+        Args:
+            skill_name: Name of the skill to download
+            install_dir: Directory to install to (default: ~/.farnsworth/skills/)
+
+        Returns:
+            Path to installed skill directory, or None on failure
+        """
+        install_dir = install_dir or Path(os.path.expanduser("~/.farnsworth/skills"))
+        install_dir.mkdir(parents=True, exist_ok=True)
+
+        skill_dir = install_dir / skill_name
+
+        try:
+            session = await self._get_session()
+
+            # Download skill package
+            async with session.get(f"{self.BASE_URL}/skills/{skill_name}/download") as resp:
+                if resp.status != 200:
+                    logger.error(f"Skill download failed: {resp.status}")
+                    return None
+
+                # Save to cache first
+                cache_file = self.CACHE_DIR / f"{skill_name}.zip"
+                content = await resp.read()
+
+                with open(cache_file, "wb") as f:
+                    f.write(content)
+
+            # Extract skill
+            import zipfile
+            with zipfile.ZipFile(cache_file, "r") as zf:
+                zf.extractall(skill_dir)
+
+            logger.info(f"Installed skill: {skill_name} -> {skill_dir}")
+            return skill_dir
+
+        except Exception as e:
+            logger.error(f"Skill download error: {e}")
+            return None
+
+    async def get_popular_skills(self, limit: int = 10) -> List[Dict]:
+        """Get most popular skills from ClawHub."""
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.BASE_URL}/skills",
+                params={"sort": "downloads", "limit": limit}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("skills", [])
+                return []
+        except Exception as e:
+            logger.error(f"ClawHub popular error: {e}")
+            return []
+
+    async def get_skill_categories(self) -> List[str]:
+        """Get available skill categories."""
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.BASE_URL}/categories") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("categories", [])
+                return []
+        except Exception as e:
+            logger.error(f"ClawHub categories error: {e}")
+            return []
+
+    async def close(self):
+        """Close the HTTP session."""
+        if self._session:
+            await self._session.close()
+            self._session = None
+
+
+# Global ClawHub client
+_clawhub_client: Optional[ClawHubClient] = None
+
+
+def get_clawhub_client() -> ClawHubClient:
+    """Get or create the global ClawHub client."""
+    global _clawhub_client
+    if _clawhub_client is None:
+        _clawhub_client = ClawHubClient()
+    return _clawhub_client
+
+
+async def search_clawhub_skills(query: str, limit: int = 20) -> List[Dict]:
+    """Search ClawHub marketplace for skills."""
+    client = get_clawhub_client()
+    return await client.search_skills(query, limit)
+
+
+async def download_clawhub_skill(skill_name: str) -> Optional[Path]:
+    """Download and install a skill from ClawHub."""
+    client = get_clawhub_client()
+    return await client.download_skill(skill_name)
+
+
+async def install_and_load_skill(skill_name: str) -> Optional[OpenClawSkill]:
+    """
+    Download a skill from ClawHub and load it into Farnsworth.
+
+    Args:
+        skill_name: Name of the skill to install
+
+    Returns:
+        Loaded OpenClawSkill or None
+    """
+    # Download skill
+    skill_dir = await download_clawhub_skill(skill_name)
+    if not skill_dir:
+        return None
+
+    # Load into adapter
+    return await load_openclaw_skill(str(skill_dir))
+
+
+# =============================================================================
 # SINGLETON AND UTILITY FUNCTIONS
 # =============================================================================
 

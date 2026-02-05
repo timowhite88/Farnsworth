@@ -32,6 +32,12 @@ from .openclaw_adapter import (
     invoke_openclaw_tool,
     load_openclaw_skill,
     OpenClawToolResult,
+    # ClawHub Marketplace
+    ClawHubClient,
+    get_clawhub_client,
+    search_clawhub_skills,
+    download_clawhub_skill,
+    install_and_load_skill,
 )
 
 from .device_node import (
@@ -70,6 +76,12 @@ __all__ = [
     "invoke_openclaw_tool",
     "load_openclaw_skill",
     "OpenClawToolResult",
+    # ClawHub Marketplace
+    "ClawHubClient",
+    "get_clawhub_client",
+    "search_clawhub_skills",
+    "download_clawhub_skill",
+    "install_and_load_skill",
     # Device nodes
     "DeviceNode",
     "get_device_node",
