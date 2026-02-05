@@ -60,14 +60,25 @@ from .visual_canvas import (
     A2UIComponent,
 )
 
-from .voice_interface import (
-    VoiceInterface,
-    get_voice_interface,
-    speech_to_text,
-    text_to_speech,
-    start_voice_wake,
-    stop_voice_wake,
-)
+# Voice interface (optional - requires pyaudio/sounddevice)
+try:
+    from .voice_interface import (
+        VoiceInterface,
+        get_voice_interface,
+        speech_to_text,
+        text_to_speech,
+        start_voice_wake,
+        stop_voice_wake,
+    )
+    VOICE_AVAILABLE = True
+except ImportError:
+    VoiceInterface = None
+    get_voice_interface = None
+    speech_to_text = None
+    text_to_speech = None
+    start_voice_wake = None
+    stop_voice_wake = None
+    VOICE_AVAILABLE = False
 
 from .task_routing import (
     OpenClawTaskType,
