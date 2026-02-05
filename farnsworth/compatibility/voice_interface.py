@@ -19,6 +19,7 @@ Backends Supported:
 
 "When words fail, let us speak for you." - The Collective
 """
+from __future__ import annotations  # Defer type hint evaluation
 
 import os
 import sys
@@ -45,6 +46,7 @@ try:
     import speech_recognition as sr
     SR_AVAILABLE = True
 except ImportError:
+    sr = None  # type: ignore
     SR_AVAILABLE = False
 
 # Optional imports for TTS
