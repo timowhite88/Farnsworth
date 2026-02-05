@@ -108,6 +108,7 @@ class SignalType(Enum):
     DIALOGUE_VOTE = "dialogue.vote"
     DIALOGUE_CONSENSUS = "dialogue.consensus"
     DIALOGUE_COMPLETED = "dialogue.completed"
+    DIALOGUE_DEADLOCK = "dialogue.deadlock"
     DIALOGUE_TOOL_DECISION = "dialogue.tool_decision"
 
     # Collective Resonance Signals (Inter-Collective Communication)
@@ -236,6 +237,31 @@ class SignalType(Enum):
     SUBSWARM_FORM = "subswarm.form"                          # Forming a new sub-swarm
     SUBSWARM_JOIN = "subswarm.join"                          # Agent joining sub-swarm
     SUBSWARM_LEAVE = "subswarm.leave"                        # Agent leaving sub-swarm
+
+    # =========================================================================
+    # Evolution Engine Signals
+    # =========================================================================
+
+    # Evolution Loop Lifecycle
+    EVOLUTION_CYCLE_STARTED = "evolution.cycle_started"        # Evolution cycle began
+    EVOLUTION_CYCLE_COMPLETED = "evolution.cycle_completed"    # Evolution cycle finished
+    EVOLUTION_CODE_GENERATED = "evolution.code_generated"      # Code produced by a worker
+    EVOLUTION_AUDIT_PASSED = "evolution.audit_passed"          # Code passed quality audit
+    EVOLUTION_AUDIT_FAILED = "evolution.audit_failed"          # Code failed quality audit
+    EVOLUTION_TASK_FAILED = "evolution.task_failed"            # Evolution task execution failed
+    EVOLUTION_PLANNING_STARTED = "evolution.planning_started"  # Collective deliberation for planning
+    EVOLUTION_TASKS_DISCOVERED = "evolution.tasks_discovered"  # New tasks generated/discovered
+
+    # Genetic Optimizer Signals
+    EVOLUTION_GENERATION_COMPLETE = "evolution.generation_complete"  # One generation evolved
+    EVOLUTION_FITNESS_IMPROVED = "evolution.fitness_improved"        # Best fitness improved
+    EVOLUTION_STAGNATION = "evolution.stagnation"                    # Fitness stagnation detected
+    EVOLUTION_MUTATION = "evolution.mutation"                        # Mutation applied to genome
+    EVOLUTION_RUN_COMPLETE = "evolution.run_complete"                # Full evolution run finished
+
+    # Personality/Pattern Evolution
+    EVOLUTION_PERSONALITY_EVOLVED = "evolution.personality_evolved"  # Bot personality evolved
+    EVOLUTION_PATTERN_LEARNED = "evolution.pattern_learned"          # New pattern learned
 
 
 # =============================================================================
@@ -1466,6 +1492,7 @@ async def emit_dialogue_event(
         "refine": SignalType.DIALOGUE_REFINE,
         "vote": SignalType.DIALOGUE_VOTE,
         "consensus": SignalType.DIALOGUE_CONSENSUS,
+        "deadlock": SignalType.DIALOGUE_DEADLOCK,
         "completed": SignalType.DIALOGUE_COMPLETED,
     }
 

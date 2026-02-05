@@ -4653,7 +4653,7 @@ async def remember(memory_request: MemoryRequest, request: Request):
         return JSONResponse({
             "success": True,
             "message": "Good news, everyone! Stored in the Memory-Matic 3000!",
-            "memory_id": result.get("id") if isinstance(result, dict) else str(result)
+            "memory_id": str(result)
         })
 
     except Exception as e:
@@ -4678,7 +4678,7 @@ async def recall(request: RecallRequest):
 
         results = await memory.recall(
             query=request.query,
-            limit=request.limit
+            top_k=request.limit
         )
 
         await ws_manager.emit_event(EventType.MEMORY_RECALLED, {

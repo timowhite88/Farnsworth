@@ -143,8 +143,9 @@ class OpenAICodexProvider(ExternalProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        # o3/o4-mini don't support temperature or system messages the same way
-        is_reasoning = model_id in ("o3", "o4-mini")
+        # o3/o4-mini reasoning models use max_completion_tokens (not max_tokens)
+        # and don't support temperature parameter
+        is_reasoning = model_id in ("o3", "o4-mini", "o3-pro", "o3-mini")
 
         try:
             import aiohttp
@@ -156,9 +157,14 @@ class OpenAICodexProvider(ExternalProvider):
                 data = {
                     "model": model_id,
                     "messages": messages,
-                    "max_tokens": max_tokens,
                 }
-                if not is_reasoning:
+                if is_reasoning:
+                    # Reasoning models use max_completion_tokens (includes reasoning + output tokens)
+                    data["max_completion_tokens"] = max_tokens
+                    # Optional: set reasoning effort (low/medium/high)
+                    data["reasoning"] = {"effort": "medium"}
+                else:
+                    data["max_tokens"] = max_tokens
                     data["temperature"] = temperature
 
                 async with session.post(

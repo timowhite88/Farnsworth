@@ -40,9 +40,39 @@ class EvolutionLoop:
         self.swarm_manager = None
         self.completed_count = 0
         self._memory_system = None
+        self._nexus = None
 
         # Ensure state directory exists
         STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _get_nexus(self):
+        """Lazy-load the Nexus event bus and SignalType enum."""
+        if self._nexus is None:
+            try:
+                from farnsworth.core.nexus import nexus, SignalType
+                self._nexus = nexus
+                self._SignalType = SignalType
+            except Exception as e:
+                logger.debug(f"Nexus not available: {e}")
+        return self._nexus
+
+    async def _emit_nexus(self, signal_type_name: str, payload: Dict[str, Any], urgency: float = 0.5):
+        """Emit a signal to the Nexus event bus by signal type name. Fails silently."""
+        try:
+            nexus = self._get_nexus()
+            if nexus is None:
+                return
+            signal_type = getattr(self._SignalType, signal_type_name, None)
+            if signal_type is None:
+                return
+            await nexus.emit(
+                type=signal_type,
+                payload=payload,
+                source="evolution_loop",
+                urgency=urgency,
+            )
+        except Exception as e:
+            logger.debug(f"Nexus emit failed (non-critical): {e}")
 
     def _get_memory_system(self):
         """Lazy-load memory system for persistence."""
@@ -213,12 +243,26 @@ class EvolutionLoop:
         asyncio.create_task(self._task_discovery_loop())
         asyncio.create_task(self._persistence_loop())
 
+        # Emit nexus signal for loop start
+        await self._emit_nexus("EVOLUTION_CYCLE_STARTED", {
+            "cycle": self.evolution_cycle,
+            "completed_count": self.completed_count,
+            "event": "loop_started",
+        }, urgency=0.6)
+
         logger.info(f"Evolution Loop started - recovered cycle={self.evolution_cycle}, completed={self.completed_count}")
 
     async def stop(self):
         """Stop the evolution loop and persist final state"""
         self.running = False
         await self._persist_state()
+
+        await self._emit_nexus("EVOLUTION_CYCLE_COMPLETED", {
+            "cycle": self.evolution_cycle,
+            "completed_count": self.completed_count,
+            "event": "loop_stopped",
+        }, urgency=0.4)
+
         logger.info("Evolution Loop stopped - state persisted")
 
     async def _persistence_loop(self):
@@ -273,6 +317,12 @@ class EvolutionLoop:
             if not code_result or len(code_result.strip()) < 50:
                 logger.warning(f"Task {task.task_id} produced no usable code, skipping")
                 instance.status = "failed"
+                await self._emit_nexus("EVOLUTION_TASK_FAILED", {
+                    "task_id": task.task_id,
+                    "agent": task.assigned_to,
+                    "reason": "no_usable_code",
+                    "description": task.description[:100],
+                }, urgency=0.5)
                 return
 
             # Quick quality check: must be valid Python syntax
@@ -282,10 +332,42 @@ class EvolutionLoop:
             except SyntaxError as e:
                 logger.warning(f"Task {task.task_id} produced invalid Python: {e}")
                 instance.status = "failed"
+                await self._emit_nexus("EVOLUTION_TASK_FAILED", {
+                    "task_id": task.task_id,
+                    "agent": task.assigned_to,
+                    "reason": "syntax_error",
+                    "error": str(e)[:200],
+                    "description": task.description[:100],
+                }, urgency=0.5)
                 return
+
+            # Signal: code was generated successfully
+            await self._emit_nexus("EVOLUTION_CODE_GENERATED", {
+                "task_id": task.task_id,
+                "agent": task.assigned_to,
+                "code_lines": len(code_result.split('\n')),
+                "task_type": task.task_type.value,
+                "description": task.description[:100],
+            }, urgency=0.4)
 
             # Audit: Use Grok or Claude to review the code quality
             audit_passed = await self._audit_code(task, code_result)
+
+            # Signal: audit result
+            if audit_passed:
+                await self._emit_nexus("EVOLUTION_AUDIT_PASSED", {
+                    "task_id": task.task_id,
+                    "agent": task.assigned_to,
+                    "code_lines": len(code_result.split('\n')),
+                    "description": task.description[:100],
+                }, urgency=0.4)
+            else:
+                await self._emit_nexus("EVOLUTION_AUDIT_FAILED", {
+                    "task_id": task.task_id,
+                    "agent": task.assigned_to,
+                    "code_lines": len(code_result.split('\n')),
+                    "description": task.description[:100],
+                }, urgency=0.6)
 
             # Save to staging
             spawner = get_spawner()
@@ -312,6 +394,12 @@ class EvolutionLoop:
         except Exception as e:
             logger.error(f"Task execution failed: {e}")
             instance.status = "failed"
+            await self._emit_nexus("EVOLUTION_TASK_FAILED", {
+                "task_id": getattr(task, 'task_id', 'unknown'),
+                "agent": getattr(task, 'assigned_to', 'unknown'),
+                "reason": "exception",
+                "error": str(e)[:200],
+            }, urgency=0.7)
 
     async def _audit_code(self, task, code: str) -> bool:
         """Audit generated code using Grok (fast) or Claude Opus 4.6 (thorough).
@@ -599,6 +687,14 @@ Lines: {len(code_result.split(chr(10)))} | Type: {task.task_type.value} | Audit:
         """
         self.evolution_cycle += 1
 
+        # Signal: new evolution planning cycle starting
+        await self._emit_nexus("EVOLUTION_PLANNING_STARTED", {
+            "cycle": self.evolution_cycle,
+            "completed_tasks": status.get("completed_tasks", 0),
+            "pending_tasks": status.get("pending_tasks", 0),
+            "in_progress_tasks": status.get("in_progress_tasks", 0),
+        }, urgency=0.6)
+
         # Use collective deliberation for planning decisions
         try:
             from farnsworth.core.collective.session_manager import get_session_manager
@@ -795,6 +891,14 @@ PRIORITY: [number]
                             priority=task_def.get("priority", 6)
                         )
                     logger.info(f"Generated {len(new_tasks)} new evolution tasks")
+
+                    # Signal: new tasks discovered
+                    if new_tasks:
+                        await self._emit_nexus("EVOLUTION_TASKS_DISCOVERED", {
+                            "count": len(new_tasks),
+                            "cycle": self.evolution_cycle,
+                            "agents": list(set(t.get("agent", "unknown") for t in new_tasks)),
+                        }, urgency=0.4)
 
                     # Persist after adding new tasks
                     await self._on_task_update("added")

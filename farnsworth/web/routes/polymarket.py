@@ -33,7 +33,7 @@ async def get_polymarket_predictions(limit: int = 10):
         }
     except Exception as e:
         logger.error(f"Failed to get predictions: {e}")
-        return {"error": str(e), "predictions": []}
+        return JSONResponse({"error": str(e), "predictions": []}, status_code=500)
 
 
 @router.get("/api/polymarket/stats")
@@ -52,7 +52,7 @@ async def get_polymarket_stats():
         }
     except Exception as e:
         logger.error(f"Failed to get stats: {e}")
-        return {"error": str(e), "stats": {}}
+        return JSONResponse({"error": str(e), "stats": {}}, status_code=500)
 
 
 @router.post("/api/polymarket/generate")
@@ -70,4 +70,4 @@ async def trigger_polymarket_predictions():
         }
     except Exception as e:
         logger.error(f"Failed to generate predictions: {e}")
-        return {"success": False, "error": str(e)}
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)

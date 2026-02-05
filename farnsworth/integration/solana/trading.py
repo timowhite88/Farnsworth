@@ -24,13 +24,30 @@ class SolanaTradingSkill:
         self._load_wallet()
 
     def _load_wallet(self):
-        """Load Solana private key from environment."""
+        """Load Solana private key from environment.
+
+        Supports multiple key formats:
+        - Base58-encoded string (standard Solana CLI export)
+        - JSON byte array string, e.g. "[12,34,56,...]" (Solana keygen file format)
+        """
         pk_str = os.environ.get("SOLANA_PRIVATE_KEY")
         if pk_str:
             try:
-                # Expecting base58 encoded private key
-                self.keypair = Keypair.from_base58_string(pk_str)
+                pk_str = pk_str.strip()
+
+                # Try JSON byte array format first (e.g. from solana-keygen)
+                if pk_str.startswith("["):
+                    key_bytes = bytes(json.loads(pk_str))
+                    if len(key_bytes) not in (32, 64):
+                        raise ValueError(f"Invalid key length: {len(key_bytes)} bytes (expected 32 or 64)")
+                    self.keypair = Keypair.from_bytes(key_bytes)
+                else:
+                    # Base58-encoded private key
+                    self.keypair = Keypair.from_base58_string(pk_str)
+
                 logger.info(f"Solana: Wallet loaded: {self.keypair.pubkey()}")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Solana: Invalid key format: {e}")
             except Exception as e:
                 logger.error(f"Solana: Failed to load wallet: {e}")
 
@@ -71,11 +88,10 @@ class SolanaTradingSkill:
             # Jupiter V6 returns swapTransaction as base64
             raw_tx = base64.b64decode(swap_data["swapTransaction"])
             tx = VersionedTransaction.from_bytes(raw_tx)
-            
-            # Sign with our keypair
-            signature = self.keypair.sign_message(tx.message.to_bytes())
-            signed_tx = VersionedTransaction(tx.message, [signature])
-            
+
+            # Sign the transaction properly (not sign_message which is for arbitrary data)
+            signed_tx = VersionedTransaction(tx.message, [self.keypair])
+
             # Send to the blockchain
             try:
                 tx_sig = await self.client.send_raw_transaction(bytes(signed_tx))
@@ -116,8 +132,8 @@ class SolanaTradingSkill:
                 # Sign and send
                 try:
                     tx = VersionedTransaction.from_bytes(tx_bytes)
-                    signature = self.keypair.sign_message(tx.message.to_bytes())
-                    signed_tx = VersionedTransaction(tx.message, [signature])
+                    # Sign the transaction properly (not sign_message which is for arbitrary data)
+                    signed_tx = VersionedTransaction(tx.message, [self.keypair])
                     
                     tx_sig = await self.client.send_raw_transaction(bytes(signed_tx))
                     return {

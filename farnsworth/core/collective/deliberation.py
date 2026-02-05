@@ -29,6 +29,9 @@ _cross_agent_memory = None
 _swarm_namespace_id = None
 _dynamic_limits = None  # Lazy import for dynamic limits
 
+# Nexus dialogue signal helper (imported from core)
+from farnsworth.core.nexus import emit_dialogue_event
+
 
 class DeliberationRound(Enum):
     """The phases of deliberation."""
@@ -365,6 +368,19 @@ class DeliberationRoom:
 
         logger.info(f"[Deliberation {deliberation_id}] Starting with {len(agents)} agents: {agents}")
 
+        # Emit DIALOGUE_STARTED signal via Nexus
+        await emit_dialogue_event(
+            event_type="started",
+            session_id=deliberation_id,
+            content={
+                "prompt": prompt[:200],
+                "agents": agents,
+                "max_rounds": max_rounds,
+                "require_consensus": require_consensus,
+            },
+            urgency=0.5,
+        )
+
         rounds: Dict[str, List[AgentTurn]] = {
             DeliberationRound.PROPOSE.value: [],
             DeliberationRound.CRITIQUE.value: [],
@@ -383,6 +399,20 @@ class DeliberationRoom:
             proposals = await self._round_propose(agents, full_prompt, max_tokens)
             rounds[DeliberationRound.PROPOSE.value] = proposals
 
+            # Emit DIALOGUE_PROPOSE signal for each proposal
+            for proposal in proposals:
+                await emit_dialogue_event(
+                    event_type="propose",
+                    session_id=deliberation_id,
+                    content={
+                        "agent_name": proposal.agent_id,
+                        "content_summary": proposal.content[:200],
+                        "turn_id": proposal.turn_id,
+                        "total_proposals": len(proposals),
+                    },
+                    urgency=0.5,
+                )
+
             if len(proposals) == 0:
                 raise ValueError("No proposals received from any agent")
 
@@ -392,6 +422,21 @@ class DeliberationRoom:
                 critiques = await self._round_critique(agents, full_prompt, proposals, max_tokens)
                 rounds[DeliberationRound.CRITIQUE.value] = critiques
 
+                # Emit DIALOGUE_CRITIQUE signal for each critique
+                for critique in critiques:
+                    await emit_dialogue_event(
+                        event_type="critique",
+                        session_id=deliberation_id,
+                        content={
+                            "agent_name": critique.agent_id,
+                            "content_summary": critique.content[:200],
+                            "turn_id": critique.turn_id,
+                            "references": critique.references,
+                            "total_critiques": len(critiques),
+                        },
+                        urgency=0.5,
+                    )
+
                 # ROUND 3: REFINE (if max_rounds >= 3)
                 if max_rounds >= 3 and len(critiques) > 0:
                     logger.info(f"[Deliberation {deliberation_id}] ROUND 3: REFINE")
@@ -399,6 +444,21 @@ class DeliberationRoom:
                         agents, full_prompt, proposals, critiques, max_tokens
                     )
                     rounds[DeliberationRound.REFINE.value] = refinements
+
+                    # Emit DIALOGUE_REFINE signal for each refinement
+                    for refinement in refinements:
+                        await emit_dialogue_event(
+                            event_type="refine",
+                            session_id=deliberation_id,
+                            content={
+                                "agent_name": refinement.agent_id,
+                                "content_summary": refinement.content[:200],
+                                "turn_id": refinement.turn_id,
+                                "references": refinement.references,
+                                "total_refinements": len(refinements),
+                            },
+                            urgency=0.5,
+                        )
 
             # VOTE: Select best response
             logger.info(f"[Deliberation {deliberation_id}] VOTING...")
@@ -413,6 +473,47 @@ class DeliberationRoom:
             winner, vote_breakdown, consensus = await self._round_vote(
                 final_candidates, require_consensus
             )
+
+            # Emit DIALOGUE_VOTE signal with full breakdown
+            await emit_dialogue_event(
+                event_type="vote",
+                session_id=deliberation_id,
+                content={
+                    "vote_breakdown": vote_breakdown,
+                    "winning_agent": winner.agent_id,
+                    "winning_score": vote_breakdown.get(winner.agent_id, 0.0),
+                    "num_candidates": len(final_candidates),
+                    "consensus_reached": consensus,
+                },
+                urgency=0.6,
+            )
+
+            # Emit DIALOGUE_CONSENSUS or DIALOGUE_DEADLOCK based on result
+            if consensus:
+                await emit_dialogue_event(
+                    event_type="consensus",
+                    session_id=deliberation_id,
+                    content={
+                        "winning_agent": winner.agent_id,
+                        "content_summary": winner.content[:200],
+                        "vote_breakdown": vote_breakdown,
+                        "participating_agents": [t.agent_id for t in proposals],
+                    },
+                    urgency=0.6,
+                )
+            else:
+                await emit_dialogue_event(
+                    event_type="deadlock",
+                    session_id=deliberation_id,
+                    content={
+                        "winning_agent": winner.agent_id,
+                        "content_summary": winner.content[:200],
+                        "vote_breakdown": vote_breakdown,
+                        "reason": "No clear consensus - winner selected by highest score",
+                        "participating_agents": [t.agent_id for t in proposals],
+                    },
+                    urgency=0.5,
+                )
 
             # Calculate duration
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
@@ -432,6 +533,21 @@ class DeliberationRoom:
             logger.info(
                 f"[Deliberation {deliberation_id}] COMPLETE: "
                 f"Winner={winner.agent_id}, Consensus={consensus}, Duration={duration_ms:.0f}ms"
+            )
+
+            # Emit DIALOGUE_COMPLETED signal
+            await emit_dialogue_event(
+                event_type="completed",
+                session_id=deliberation_id,
+                content={
+                    "winning_agent": winner.agent_id,
+                    "consensus_reached": consensus,
+                    "vote_breakdown": vote_breakdown,
+                    "participating_agents": [t.agent_id for t in proposals],
+                    "total_duration_ms": duration_ms,
+                    "rounds_completed": sum(1 for r in rounds.values() if r),
+                },
+                urgency=0.5,
             )
 
             # AGI v1.8: Record evolution metrics for learning

@@ -98,10 +98,38 @@ class EvolutionEngine:
         self.auto_evolve_threshold = 100  # Evolve every N learnings
         self._learnings_since_evolution = 0
 
+        # Nexus integration (lazy-loaded)
+        self._nexus = None
+        self._SignalType = None
+
         # Load existing data
         self._load_state()
 
         logger.info(f"EvolutionEngine initialized - {len(self.patterns)} patterns, {self.evolution_cycles} cycles")
+
+    def _fire_nexus(self, signal_type_name: str, payload: Dict[str, Any], urgency: float = 0.5):
+        """Fire-and-forget a signal to the Nexus event bus. Safe to call from sync code."""
+        try:
+            if self._nexus is None:
+                from farnsworth.core.nexus import nexus, SignalType
+                self._nexus = nexus
+                self._SignalType = SignalType
+            signal_type = getattr(self._SignalType, signal_type_name, None)
+            if signal_type is None:
+                return
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._nexus.emit(
+                    type=signal_type,
+                    payload=payload,
+                    source="evolution_engine",
+                    urgency=urgency,
+                ))
+            except RuntimeError:
+                # No running event loop -- skip emission
+                pass
+        except Exception as e:
+            logger.debug(f"Nexus emit failed (non-critical): {e}")
 
     def _load_state(self):
         """Load persisted evolution state."""
@@ -378,9 +406,17 @@ class EvolutionEngine:
                 self.patterns[pattern_id] = pattern
 
         # Clear buffer and save
+        processed_count = len(self.learning_buffer)
         self.learning_buffer = []
         self._save_state()
         logger.info(f"Processed learnings: {len(self.patterns)} patterns total")
+
+        # Emit nexus signal for new patterns learned
+        self._fire_nexus("EVOLUTION_PATTERN_LEARNED", {
+            "patterns_total": len(self.patterns),
+            "topics_processed": list(topic_groups.keys()),
+            "learnings_processed": processed_count,
+        }, urgency=0.4)
 
     def evolve(self):
         """Run an evolution cycle to improve patterns and personalities."""
@@ -430,11 +466,20 @@ class EvolutionEngine:
         self._save_state()
         logger.info(f"Evolution cycle {self.evolution_cycles} complete")
 
-        return {
+        result = {
             "cycle": self.evolution_cycles,
             "patterns_count": len(self.patterns),
             "personalities_evolved": list(self.personalities.keys())
         }
+
+        # Emit nexus signal for personality evolution
+        self._fire_nexus("EVOLUTION_PERSONALITY_EVOLVED", {
+            "cycle": self.evolution_cycles,
+            "personalities_evolved": list(self.personalities.keys()),
+            "patterns_count": len(self.patterns),
+        }, urgency=0.5)
+
+        return result
 
     def get_evolved_context(self, bot_name: str, topic: str = None) -> str:
         """Get evolved context/prompts for a bot based on learnings."""

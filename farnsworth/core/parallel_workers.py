@@ -400,7 +400,7 @@ ACCEPTANCE CRITERIA:
             # Import here to avoid circular deps
             from farnsworth.integration.external.kimi import kimi_swarm_respond
             if kimi_swarm_respond:
-                return await kimi_swarm_respond(prompt, [], "Kimi")
+                return await kimi_swarm_respond([], "Kimi", prompt)
         except Exception as e:
             logger.error(f"Kimi call failed: {e}")
         return None
@@ -410,7 +410,7 @@ ACCEPTANCE CRITERIA:
         try:
             from farnsworth.integration.external.claude_code import claude_swarm_respond
             if claude_swarm_respond:
-                return await claude_swarm_respond(prompt, [], "Claude")
+                return await claude_swarm_respond([], "Claude", prompt)
         except Exception as e:
             logger.error(f"Claude call failed: {e}")
         return None

@@ -541,6 +541,29 @@ class GeneticOptimizer:
             data_dir=data_dir,
         )
 
+        # Nexus integration (lazy-loaded)
+        self._nexus = None
+        self._SignalType = None
+
+    async def _emit_nexus(self, signal_type_name: str, payload: dict, urgency: float = 0.5):
+        """Emit a signal to the Nexus event bus. Fails silently."""
+        try:
+            if self._nexus is None:
+                from farnsworth.core.nexus import nexus, SignalType
+                self._nexus = nexus
+                self._SignalType = SignalType
+            signal_type = getattr(self._SignalType, signal_type_name, None)
+            if signal_type is None:
+                return
+            await self._nexus.emit(
+                type=signal_type,
+                payload=payload,
+                source="genetic_optimizer",
+                urgency=urgency,
+            )
+        except Exception as e:
+            logger.debug(f"Nexus emit failed (non-critical): {e}")
+
     def define_gene(
         self,
         name: str,
@@ -860,6 +883,16 @@ class GeneticOptimizer:
         # Store operator for later tracking
         child.genes["_mutation_op"] = operator  # type: ignore
 
+        # Emit mutation signal for quantum mutations (lightweight: skip classical to avoid flood)
+        if operator == "mutation_quantum":
+            await self._emit_nexus("EVOLUTION_MUTATION", {
+                "genome_id": child.id,
+                "operator": operator,
+                "generation": self.generation,
+                "parent_id": genome.id,
+                "genes_mutated": sum(1 for n in new_genes if n != genome.genes.get(n)),
+            }, urgency=0.3)
+
         return child
 
     def _nsga2_sort(self, population: list[Genome]) -> list[Genome]:
@@ -1003,13 +1036,28 @@ class GeneticOptimizer:
         if best_fitness <= self.stats["best_fitness_ever"]:
             self.stats["stagnation_count"] += 1
         else:
+            # Fitness improved -- emit signal
+            improvement = best_fitness - self.stats["best_fitness_ever"]
             self.stats["best_fitness_ever"] = best_fitness
             self.stats["stagnation_count"] = 0
+            await self._emit_nexus("EVOLUTION_FITNESS_IMPROVED", {
+                "generation": self.generation,
+                "best_fitness": best_fitness,
+                "improvement": improvement,
+                "population_size": len(sorted_pop),
+            }, urgency=0.6)
 
         # Adaptive mutation
         if self.config.adaptive_mutation and self.stats["stagnation_count"] >= self.config.stagnation_threshold:
             self.config.mutation_prob = min(0.5, self.config.mutation_prob * 1.5)
             logger.info(f"Increasing mutation rate to {self.config.mutation_prob:.2f}")
+            # Emit stagnation signal
+            await self._emit_nexus("EVOLUTION_STAGNATION", {
+                "generation": self.generation,
+                "stagnation_count": self.stats["stagnation_count"],
+                "new_mutation_prob": self.config.mutation_prob,
+                "best_fitness": best_fitness,
+            }, urgency=0.7)
         else:
             self.config.mutation_prob = max(0.1, self.config.mutation_prob * 0.95)
 
@@ -1050,6 +1098,15 @@ class GeneticOptimizer:
 
         self.population = new_population
         self.stats["generations_completed"] += 1
+
+        # Emit generation complete signal
+        await self._emit_nexus("EVOLUTION_GENERATION_COMPLETE", {
+            "generation": self.generation,
+            "best_fitness": best_fitness,
+            "avg_fitness": self.fitness_history[-1]["avg_fitness"] if self.fitness_history else 0,
+            "population_size": len(self.population),
+            "mutation_prob": self.config.mutation_prob,
+        }, urgency=0.4)
 
         # Log evolution step with hash chain
         self._log_evolution_step(sorted_pop[0] if sorted_pop else None)
@@ -1147,12 +1204,24 @@ class GeneticOptimizer:
             },
         )
 
+        duration = time.time() - start_time
+
+        # Emit evolution run complete signal
+        await self._emit_nexus("EVOLUTION_RUN_COMPLETE", {
+            "generations_run": self.generation,
+            "best_fitness": best_genome.total_fitness(),
+            "duration_seconds": round(duration, 2),
+            "early_stopped": early_stopped,
+            "population_size": len(self.population),
+            "total_evaluations": self.stats["total_evaluations"],
+        }, urgency=0.6)
+
         return EvolutionResult(
             best_genome=best_genome,
             final_population=self.population,
             generations_run=self.generation,
             fitness_history=self.fitness_history,
-            duration_seconds=time.time() - start_time,
+            duration_seconds=duration,
         )
 
     def get_best_genome(self) -> Optional[Genome]:
