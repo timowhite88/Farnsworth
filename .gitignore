@@ -1,5 +1,6 @@
 # Secrets - NEVER commit
 .env
+.env.*
 *.env
 oauth2_tokens.json
 *_tokens.json

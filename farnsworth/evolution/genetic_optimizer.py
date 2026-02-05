@@ -230,14 +230,16 @@ class MetaLearner:
         # Cross-problem knowledge
         self.knowledge_base: dict[str, EvolutionKnowledge] = {}
 
-        # Current strategy weights
+        # Current strategy weights (AGI v1.8: includes quantum operators)
         self.strategy_weights = {
-            "crossover_uniform": 0.33,
-            "crossover_two_point": 0.34,
-            "crossover_blend": 0.33,
-            "mutation_gaussian": 0.5,
+            "crossover_uniform": 0.30,
+            "crossover_two_point": 0.30,
+            "crossover_blend": 0.30,
+            "crossover_quantum": 0.10,
+            "mutation_gaussian": 0.40,
             "mutation_uniform": 0.25,
             "mutation_adaptive": 0.25,
+            "mutation_quantum": 0.10,
         }
 
         # Hyperparameter learning
@@ -341,9 +343,12 @@ class MetaLearner:
         if not self.config.enabled:
             return
 
-        # Compute weights from success rates
+        # Compute weights from success rates (AGI v1.8: includes quantum operators)
         crossover_ops = ["crossover_uniform", "crossover_two_point", "crossover_blend"]
         mutation_ops = ["mutation_gaussian", "mutation_uniform", "mutation_adaptive"]
+        if self._quantum_available:
+            crossover_ops.append("crossover_quantum")
+            mutation_ops.append("mutation_quantum")
 
         for op_group in [crossover_ops, mutation_ops]:
             total_success = sum(
@@ -627,15 +632,16 @@ class GeneticOptimizer:
         contestants = random.sample(self.population, min(k, len(self.population)))
         return max(contestants, key=lambda g: g.total_fitness())
 
-    def _crossover(self, parent1: Genome, parent2: Genome) -> tuple[Genome, Genome]:
+    async def _crossover(self, parent1: Genome, parent2: Genome) -> tuple[Genome, Genome]:
         """
         Crossover with meta-learned operator selection.
 
         AGI v1.5: Selects crossover method based on learned performance.
+        AGI v1.8: Real quantum crossover via IBM Quantum with classical fallback.
         """
         gene_names = list(self.gene_definitions.keys())
         if len(gene_names) < 2:
-            return self._mutate(parent1), self._mutate(parent2)
+            return await self._mutate(parent1), await self._mutate(parent2)
 
         # AGI v1.5: Select crossover operator using meta-learning
         operator = self.meta_learner.select_crossover_operator()
@@ -671,26 +677,66 @@ class GeneticOptimizer:
                 )
 
         elif operator == "crossover_quantum" and self.meta_learner._quantum_available:
-            # AGI v1.8: Quantum crossover using superposition
-            # For genes where parents differ, create superposition and collapse
-            for name in gene_names:
-                g1, g2 = parent1.genes[name], parent2.genes[name]
-                if abs(g1.value - g2.value) < 0.001:
-                    # Values are same, no quantum effect needed
-                    genes1[name] = Gene(**{**g1.__dict__})
-                    genes2[name] = Gene(**{**g2.__dict__})
-                else:
-                    # Quantum entanglement effect: blend with interference
-                    # Simulate quantum superposition collapse
-                    phase = random.random() * 2 * 3.14159  # Random phase
-                    amplitude1 = abs(0.5 * (1 + abs(complex(1, 0) * (0.5 + 0.5 * random.random()))))
-                    amplitude2 = 1.0 - amplitude1
+            # AGI v1.8: Real quantum crossover via IBM Quantum
+            # Convert gene values to bitstrings, run quantum crossover, convert back
+            quantum_success = False
+            try:
+                qopt = self.meta_learner._quantum_optimizer
+                if qopt:
+                    # Encode parent genes as bitstrings (8 bits per gene)
+                    bits_per_gene = 8
+                    parent1_bits = ""
+                    parent2_bits = ""
+                    for name in gene_names:
+                        g1, g2 = parent1.genes[name], parent2.genes[name]
+                        norm1 = (g1.value - g1.min_val) / max(0.001, g1.max_val - g1.min_val)
+                        norm2 = (g2.value - g2.min_val) / max(0.001, g2.max_val - g2.min_val)
+                        parent1_bits += format(int(min(255, max(0, norm1 * 255))), '08b')
+                        parent2_bits += format(int(min(255, max(0, norm2 * 255))), '08b')
 
-                    # Child 1 gets weighted blend
-                    blend1 = amplitude1 * g1.value + amplitude2 * g2.value
-                    # Child 2 gets complementary blend (entanglement)
-                    blend2 = amplitude2 * g1.value + amplitude1 * g2.value
+                    # Run real quantum crossover (prefer simulator to save hardware budget)
+                    child1_bits = await qopt.quantum_crossover(
+                        parent1_bits, parent2_bits, prefer_hardware=False
+                    )
+                    child2_bits = await qopt.quantum_crossover(
+                        parent2_bits, parent1_bits, prefer_hardware=False
+                    )
 
+                    # Decode bitstrings back to gene values
+                    for idx, name in enumerate(gene_names):
+                        g1 = parent1.genes[name]
+                        start = idx * bits_per_gene
+                        end = start + bits_per_gene
+
+                        c1_gene_bits = child1_bits[start:end] if end <= len(child1_bits) else '10000000'
+                        c2_gene_bits = child2_bits[start:end] if end <= len(child2_bits) else '10000000'
+
+                        norm1 = int(c1_gene_bits, 2) / 255.0
+                        norm2 = int(c2_gene_bits, 2) / 255.0
+
+                        val1 = g1.min_val + norm1 * (g1.max_val - g1.min_val)
+                        val2 = g1.min_val + norm2 * (g1.max_val - g1.min_val)
+
+                        genes1[name] = Gene(
+                            name=name, value=val1,
+                            min_val=g1.min_val, max_val=g1.max_val, mutation_sigma=g1.mutation_sigma
+                        )
+                        genes2[name] = Gene(
+                            name=name, value=val2,
+                            min_val=g1.min_val, max_val=g1.max_val, mutation_sigma=g1.mutation_sigma
+                        )
+                    quantum_success = True
+                    logger.debug("Quantum crossover succeeded via IBM Quantum")
+            except Exception as e:
+                logger.warning(f"Quantum crossover failed, using classical blend: {e}")
+
+            if not quantum_success:
+                # Classical blend fallback
+                alpha = 0.5
+                for name in gene_names:
+                    g1, g2 = parent1.genes[name], parent2.genes[name]
+                    blend1 = alpha * g1.value + (1 - alpha) * g2.value
+                    blend2 = (1 - alpha) * g1.value + alpha * g2.value
                     genes1[name] = Gene(
                         name=name, value=blend1,
                         min_val=g1.min_val, max_val=g1.max_val, mutation_sigma=g1.mutation_sigma
@@ -731,12 +777,12 @@ class GeneticOptimizer:
 
         return child1, child2
 
-    def _mutate(self, genome: Genome) -> Genome:
+    async def _mutate(self, genome: Genome) -> Genome:
         """
         Mutate a genome with meta-learned operator selection.
 
         AGI v1.5: Selects mutation method based on learned performance.
-        AGI v1.8: Includes quantum mutation using IBM Quantum.
+        AGI v1.8: Real quantum mutation via IBM Quantum with classical fallback.
         """
         # AGI v1.5: Select mutation operator using meta-learning
         operator = self.meta_learner.select_mutation_operator()
@@ -770,29 +816,34 @@ class GeneticOptimizer:
                     )
 
                 elif operator == "mutation_quantum" and self.meta_learner._quantum_available:
-                    # AGI v1.8: Quantum mutation using superposition
-                    # Normalize value to 0-1 range
-                    normalized = (gene.value - gene.min_val) / (gene.max_val - gene.min_val)
-                    # Create binary representation (8 bits)
-                    bits = int(normalized * 255)
-                    bitstring = format(bits, '08b')
+                    # AGI v1.8: Real quantum mutation via IBM Quantum
+                    quantum_mutated = False
+                    try:
+                        qopt = self.meta_learner._quantum_optimizer
+                        if qopt:
+                            normalized = (gene.value - gene.min_val) / max(0.001, gene.max_val - gene.min_val)
+                            bitstring = format(int(min(255, max(0, normalized * 255))), '08b')
 
-                    # Apply quantum mutation (async, so use sync fallback for now)
-                    # Quantum effect: probabilistic bit flip using rotation gates
-                    mutated_bits = list(bitstring)
-                    for i in range(len(mutated_bits)):
-                        if random.random() < gene.mutation_sigma:
-                            # Simulate quantum RY rotation effect
-                            mutated_bits[i] = '0' if mutated_bits[i] == '1' else '1'
+                            # Real quantum mutation with RY rotation gates
+                            mutated_bitstring = await qopt.quantum_mutation(
+                                bitstring, mutation_rate=gene.mutation_sigma, prefer_hardware=False
+                            )
 
-                    new_bits = int(''.join(mutated_bits), 2)
-                    new_normalized = new_bits / 255.0
-                    new_value = gene.min_val + new_normalized * (gene.max_val - gene.min_val)
-                    new_genes[name] = Gene(
-                        name=name, value=new_value,
-                        min_val=gene.min_val, max_val=gene.max_val,
-                        mutation_sigma=gene.mutation_sigma
-                    )
+                            new_normalized = int(mutated_bitstring, 2) / 255.0
+                            new_value = gene.min_val + new_normalized * (gene.max_val - gene.min_val)
+                            new_value = max(gene.min_val, min(gene.max_val, new_value))
+                            new_genes[name] = Gene(
+                                name=name, value=new_value,
+                                min_val=gene.min_val, max_val=gene.max_val,
+                                mutation_sigma=gene.mutation_sigma
+                            )
+                            quantum_mutated = True
+                    except Exception as e:
+                        logger.debug(f"Quantum mutation fallback for gene {name}: {e}")
+
+                    if not quantum_mutated:
+                        # Classical fallback: gaussian mutation
+                        new_genes[name] = gene.mutate()
 
                 else:  # mutation_gaussian (default)
                     new_genes[name] = gene.mutate()
@@ -988,10 +1039,10 @@ class GeneticOptimizer:
             parent2 = self._tournament_select()
 
             if random.random() < self.config.crossover_prob:
-                child1, child2 = self._crossover(parent1, parent2)
+                child1, child2 = await self._crossover(parent1, parent2)
             else:
-                child1 = self._mutate(parent1)
-                child2 = self._mutate(parent2)
+                child1 = await self._mutate(parent1)
+                child2 = await self._mutate(parent2)
 
             new_population.append(child1)
             if len(new_population) < self.config.population_size:

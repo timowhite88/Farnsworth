@@ -415,6 +415,16 @@ except ImportError:
     get_task_detector = None
     TASK_DETECTOR_AVAILABLE = False
 
+# Claude Teams Fusion (AGI v1.9) - Farnsworth orchestrates Claude teams
+try:
+    from farnsworth.integration.claude_teams import get_swarm_team_fusion
+    from farnsworth.integration.claude_teams.swarm_team_fusion import DelegationType
+    CLAUDE_TEAMS_AVAILABLE = True
+except ImportError:
+    get_swarm_team_fusion = None
+    DelegationType = None
+    CLAUDE_TEAMS_AVAILABLE = False
+
 # Prompt Upgrader - automatically enhances user prompts to professional quality
 try:
     from farnsworth.core.prompt_upgrader import get_prompt_upgrader, upgrade_prompt
@@ -1092,6 +1102,84 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # ============================================
+# ROUTE MODULES (AGI v1.9 - Modular route organization)
+# ============================================
+# Each module defines an APIRouter. Routes are extracted from this file
+# into separate modules for maintainability. The shared state (managers,
+# globals, helpers) remains here and is accessed via lazy imports.
+
+try:
+    from farnsworth.web.routes.chat import router as chat_router
+    app.include_router(chat_router, tags=["Chat & Core"])
+    logger.info("Route module loaded: chat")
+except Exception as e:
+    logger.warning(f"Failed to load chat routes: {e}")
+
+try:
+    from farnsworth.web.routes.claude_teams import router as claude_teams_router
+    app.include_router(claude_teams_router, tags=["Claude Teams"])
+    logger.info("Route module loaded: claude_teams")
+except Exception as e:
+    logger.warning(f"Failed to load claude_teams routes: {e}")
+
+try:
+    from farnsworth.web.routes.swarm import router as swarm_router
+    app.include_router(swarm_router, tags=["Swarm"])
+    logger.info("Route module loaded: swarm")
+except Exception as e:
+    logger.warning(f"Failed to load swarm routes: {e}")
+
+try:
+    from farnsworth.web.routes.quantum import router as quantum_router
+    app.include_router(quantum_router, tags=["Quantum & Evolution"])
+    logger.info("Route module loaded: quantum")
+except Exception as e:
+    logger.warning(f"Failed to load quantum routes: {e}")
+
+try:
+    from farnsworth.web.routes.websocket import router as websocket_router
+    app.include_router(websocket_router, tags=["WebSocket & Live"])
+    logger.info("Route module loaded: websocket")
+except Exception as e:
+    logger.warning(f"Failed to load websocket routes: {e}")
+
+try:
+    from farnsworth.web.routes.media import router as media_router
+    app.include_router(media_router, tags=["Media & TTS"])
+    logger.info("Route module loaded: media")
+except Exception as e:
+    logger.warning(f"Failed to load media routes: {e}")
+
+try:
+    from farnsworth.web.routes.admin import router as admin_router
+    app.include_router(admin_router, tags=["Admin"])
+    logger.info("Route module loaded: admin")
+except Exception as e:
+    logger.warning(f"Failed to load admin routes: {e}")
+
+try:
+    from farnsworth.web.routes.polymarket import router as polymarket_router
+    app.include_router(polymarket_router, tags=["Polymarket"])
+    logger.info("Route module loaded: polymarket")
+except Exception as e:
+    logger.warning(f"Failed to load polymarket routes: {e}")
+
+try:
+    from farnsworth.web.routes.autogram import router as autogram_router
+    app.include_router(autogram_router, tags=["AutoGram"])
+    logger.info("Route module loaded: autogram")
+except Exception as e:
+    logger.warning(f"Failed to load autogram routes: {e}")
+
+try:
+    from farnsworth.web.routes.bot_tracker import router as bot_tracker_router
+    app.include_router(bot_tracker_router, tags=["Bot Tracker"])
+    logger.info("Route module loaded: bot_tracker")
+except Exception as e:
+    logger.warning(f"Failed to load bot_tracker routes: {e}")
+
+
+# ============================================
 # REQUEST MODELS
 # ============================================
 
@@ -1152,33 +1240,45 @@ class SpeakRequest(BaseModel):
 # ============================================
 
 class ConnectionManager:
-    """Manages WebSocket connections for real-time updates."""
+    """Manages WebSocket connections for real-time updates.
+
+    Thread-safe via asyncio.Lock for concurrent connection mutations.
+    """
 
     def __init__(self):
         self.active_connections: List[WebSocket] = []
         self.session_events: Dict[str, List[dict]] = {}
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        async with self._lock:
+            self.active_connections.append(websocket)
         logger.info(f"WebSocket connected. Total: {len(self.active_connections)}")
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    async def disconnect(self, websocket: WebSocket):
+        async with self._lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
         logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients."""
+        async with self._lock:
+            connections = list(self.active_connections)
+
         dead_connections = []
-        for connection in self.active_connections:
+        for connection in connections:
             try:
                 await connection.send_json(message)
             except Exception:
                 dead_connections.append(connection)
 
-        for conn in dead_connections:
-            self.disconnect(conn)
+        if dead_connections:
+            async with self._lock:
+                for conn in dead_connections:
+                    if conn in self.active_connections:
+                        self.active_connections.remove(conn)
 
     async def emit_event(self, event_type: str, data: dict, session_id: str = "default"):
         """Emit a real-time event to all clients."""
@@ -1557,7 +1657,13 @@ swarm_learning = SwarmLearningEngine()
 
 
 class SwarmChatManager:
-    """Manages the shared community Swarm Chat where all users interact together."""
+    """Manages the shared community Swarm Chat where all users interact together.
+
+    Thread-safe via asyncio.Lock for concurrent connection and state mutations.
+    """
+
+    # Configurable admin users (instead of hardcoded "winning")
+    ADMIN_USERS = os.getenv("SWARM_ADMIN_USERS", "winning").lower().split(",")
 
     def __init__(self):
         self.connections: Dict[str, WebSocket] = {}  # user_id -> websocket
@@ -1567,35 +1673,45 @@ class SwarmChatManager:
         self.active_models = ["Farnsworth", "DeepSeek", "Phi", "Swarm-Mind"]
         self.learning_queue: List[dict] = []  # Interactions to learn from
         self.learning_engine = swarm_learning  # Connect to learning engine
+        self._lock = asyncio.Lock()
+
+    def is_admin(self, user_name: str) -> bool:
+        """Check if a user has admin/dev privileges."""
+        return user_name.lower().strip() in self.ADMIN_USERS
 
     async def connect(self, websocket: WebSocket, user_id: str, user_name: str = None):
         """Connect a user to swarm chat."""
         await websocket.accept()
-        self.connections[user_id] = websocket
-        self.user_names[user_id] = user_name or f"Anon_{user_id[:6]}"
+        async with self._lock:
+            self.connections[user_id] = websocket
+            self.user_names[user_id] = user_name or f"Anon_{user_id[:6]}"
 
         # Notify others
         await self.broadcast_system(f"🟢 {self.user_names[user_id]} joined the swarm!")
 
         # Send recent history to new user
+        async with self._lock:
+            history = list(self.chat_history[-50:])
+            users = list(self.user_names.values())
+
         await websocket.send_json({
             "type": "swarm_history",
-            "messages": self.chat_history[-50:],
-            "online_users": list(self.user_names.values()),
+            "messages": history,
+            "online_users": users,
             "active_models": self.active_models
         })
 
         logger.info(f"Swarm Chat: {user_name} connected. Total: {len(self.connections)}")
 
-    def disconnect(self, user_id: str):
+    async def disconnect(self, user_id: str):
         """Disconnect a user from swarm chat."""
-        user_name = self.user_names.get(user_id, "Unknown")
-        if user_id in self.connections:
-            del self.connections[user_id]
-        if user_id in self.user_names:
-            del self.user_names[user_id]
+        async with self._lock:
+            user_name = self.user_names.get(user_id, "Unknown")
+            if user_id in self.connections:
+                del self.connections[user_id]
+            if user_id in self.user_names:
+                del self.user_names[user_id]
 
-        # Queue notification (can't await in sync context)
         logger.info(f"Swarm Chat: {user_name} disconnected. Total: {len(self.connections)}")
         return user_name
 
@@ -1612,11 +1728,11 @@ class SwarmChatManager:
         """Broadcast a user message to all users and feed to learning engine.
 
         Permission system:
-        - User 'winning' is the dev and can request any task
+        - Admin users can request any task (configurable via SWARM_ADMIN_USERS env)
         - Other users can only ask about contract addresses (CAs)
         """
         user_name = self.user_names.get(user_id, "Anonymous")
-        is_dev = user_name.lower() == "winning"
+        is_dev = self.is_admin(user_name)
 
         msg = {
             "type": "swarm_user",
@@ -1626,8 +1742,9 @@ class SwarmChatManager:
             "is_dev": is_dev,
             "timestamp": datetime.now().isoformat()
         }
-        self.chat_history.append(msg)
-        self._trim_history()
+        async with self._lock:
+            self.chat_history.append(msg)
+            self._trim_history()
         await self._broadcast(msg)
 
         # Feed to real-time learning engine
@@ -1999,16 +2116,22 @@ Provide thorough analysis. Reference specific numbers from the data."""
         await self._broadcast(msg)
 
     async def _broadcast(self, message: dict):
-        """Send message to all connected users."""
+        """Send message to all connected users (thread-safe)."""
+        async with self._lock:
+            connections = dict(self.connections)
+
         dead = []
-        for user_id, ws in self.connections.items():
+        for user_id, ws in connections.items():
             try:
                 await ws.send_json(message)
             except Exception:
                 dead.append(user_id)
 
-        for user_id in dead:
-            self.disconnect(user_id)
+        if dead:
+            async with self._lock:
+                for user_id in dead:
+                    self.connections.pop(user_id, None)
+                    self.user_names.pop(user_id, None)
 
     def _trim_history(self):
         """Keep history within limits."""
@@ -4295,6 +4418,40 @@ async def chat(chat_request: ChatRequest, request: Request):
                     "crypto_query": True
                 })
 
+        # AGI v1.9: Check if task should be delegated to Claude Teams
+        # Farnsworth decides whether to handle internally or delegate
+        if CLAUDE_TEAMS_AVAILABLE and intent["primary_intent"] == "task_request":
+            try:
+                fusion = get_swarm_team_fusion()
+                # Detect delegation type from message content
+                msg_lower = original_message.lower()
+                if any(w in msg_lower for w in ["research", "find out", "look up", "search"]):
+                    del_type = DelegationType.RESEARCH
+                elif any(w in msg_lower for w in ["write code", "implement", "build", "create function"]):
+                    del_type = DelegationType.CODING
+                elif any(w in msg_lower for w in ["review", "critique", "analyze code"]):
+                    del_type = DelegationType.CRITIQUE
+                else:
+                    del_type = None  # Let the collective handle it
+
+                if del_type:
+                    delegation = await fusion.delegate(
+                        task=upgraded_message,
+                        delegation_type=del_type,
+                        timeout=120.0,
+                    )
+                    if delegation.status == "completed" and delegation.result:
+                        return JSONResponse({
+                            "response": delegation.result,
+                            "demo_mode": DEMO_MODE,
+                            "features_available": True,
+                            "claude_teams_delegated": True,
+                            "delegation_type": del_type.value,
+                            "delegation_id": delegation.request_id,
+                        })
+            except Exception as e:
+                logger.warning(f"Claude Teams delegation failed, falling back to collective: {e}")
+
         # Regular chat response - FARNSWORTH IS THE COLLECTIVE
         # Behind the scenes, multiple models deliberate. User sees unified "Farnsworth".
         collective_result = await generate_ai_response_collective(
@@ -5105,6 +5262,837 @@ async def market_sentiment():
 
 
 # ============================================
+# SWARM ORACLE API - Collective Intelligence
+# ============================================
+
+class OracleQueryRequest(BaseModel):
+    """Request model for oracle queries."""
+    question: str
+    query_type: str = "general"  # prediction, analysis, recommendation, general
+
+
+@app.post("/api/oracle/query")
+async def oracle_query(request: OracleQueryRequest):
+    """
+    Submit a question to the Farnsworth Swarm Oracle.
+
+    The oracle runs PROPOSE-CRITIQUE-REFINE-VOTE deliberation across
+    11 AI agents (Grok, Claude, Gemini, DeepSeek, Kimi, Phi, HuggingFace, etc.)
+    and returns a consensus answer with verification hash.
+    """
+    try:
+        from farnsworth.integration.solana.swarm_oracle import get_swarm_oracle
+
+        oracle = get_swarm_oracle()
+        result = await oracle.submit_query(
+            question=request.question,
+            query_type=request.query_type,
+            timeout=120.0,
+        )
+
+        return JSONResponse({
+            "success": True,
+            "query_id": result.query_id,
+            "question": result.question,
+            "status": result.status,
+            "consensus_reached": result.consensus_reached,
+            "consensus_answer": result.consensus_answer,
+            "consensus_confidence": result.consensus_confidence,
+            "consensus_reasoning": result.consensus_reasoning,
+            "consensus_hash": result.consensus_hash,
+            "agents_participated": result.agents_participated,
+            "deliberation_duration_ms": result.deliberation_duration_ms,
+            "solana_signature": result.solana_signature,
+        })
+    except Exception as e:
+        logger.error(f"Oracle query error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/oracle/queries")
+async def oracle_queries(limit: int = 20):
+    """Get recent oracle queries."""
+    try:
+        from farnsworth.integration.solana.swarm_oracle import get_swarm_oracle
+
+        oracle = get_swarm_oracle()
+        queries = oracle.get_recent_queries(limit)
+
+        return JSONResponse({
+            "success": True,
+            "queries": [q.to_dict() for q in queries],
+            "count": len(queries),
+        })
+    except Exception as e:
+        logger.error(f"Oracle queries error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/oracle/query/{query_id}")
+async def oracle_query_detail(query_id: str):
+    """Get a specific oracle query by ID."""
+    try:
+        from farnsworth.integration.solana.swarm_oracle import get_swarm_oracle
+
+        oracle = get_swarm_oracle()
+        query = oracle.get_query(query_id)
+
+        if not query:
+            raise HTTPException(status_code=404, detail="Query not found")
+
+        return JSONResponse({
+            "success": True,
+            "query": query.to_dict(),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Oracle query detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/oracle/stats")
+async def oracle_stats():
+    """Get oracle statistics."""
+    try:
+        from farnsworth.integration.solana.swarm_oracle import get_swarm_oracle
+
+        oracle = get_swarm_oracle()
+        stats = oracle.get_stats()
+
+        return JSONResponse({
+            "success": True,
+            "stats": stats,
+            "description": "Farnsworth Swarm Oracle - 11-agent collective intelligence",
+        })
+    except Exception as e:
+        logger.error(f"Oracle stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# FARSIGHT PROTOCOL API - Ultimate Prediction System
+# ============================================
+
+class FarsightPredictRequest(BaseModel):
+    """Request model for Farsight predictions."""
+    question: str
+    category: str = "general"  # market, crypto, tech, politics, general
+    include_visual: bool = False
+    include_quantum: bool = True
+
+
+@app.post("/api/farsight/predict")
+async def farsight_predict(request: FarsightPredictRequest):
+    """
+    FARSIGHT PROTOCOL - Ultimate multi-source prediction.
+
+    Combines:
+    - Swarm Oracle (11-agent deliberation)
+    - Polymarket data (real prediction markets)
+    - Monte Carlo simulation
+    - Quantum entropy
+    - Visual prophecy generation
+    """
+    try:
+        from farnsworth.integration.hackathon.farsight_protocol import get_farsight
+
+        farsight = get_farsight()
+        result = await farsight.predict(
+            question=request.question,
+            category=request.category,
+            include_visual=request.include_visual,
+            include_quantum=request.include_quantum,
+        )
+
+        return JSONResponse({
+            "success": True,
+            "protocol": "FARSIGHT",
+            "tagline": "We see further because we think together.",
+            "prediction": result.to_dict(),
+        })
+    except Exception as e:
+        logger.error(f"Farsight prediction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/farsight/crypto")
+async def farsight_crypto(token_address: str):
+    """Analyze a Solana token using Farsight Protocol."""
+    try:
+        from farnsworth.integration.hackathon.farsight_protocol import get_farsight
+
+        farsight = get_farsight()
+        result = await farsight.analyze_token(token_address)
+
+        return JSONResponse({
+            "success": True,
+            "protocol": "FARSIGHT_CRYPTO",
+            "analysis": result,
+        })
+    except Exception as e:
+        logger.error(f"Farsight crypto error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/farsight/stats")
+async def farsight_stats():
+    """Get Farsight Protocol statistics."""
+    try:
+        from farnsworth.integration.hackathon.farsight_protocol import get_farsight
+
+        farsight = get_farsight()
+        stats = farsight.get_stats()
+
+        return JSONResponse({
+            "success": True,
+            "protocol": "FARSIGHT",
+            "stats": stats,
+        })
+    except Exception as e:
+        logger.error(f"Farsight stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/farsight/predictions")
+async def farsight_predictions(limit: int = 10):
+    """Get recent Farsight predictions."""
+    try:
+        from farnsworth.integration.hackathon.farsight_protocol import get_farsight
+
+        farsight = get_farsight()
+        predictions = farsight.get_recent_predictions(limit)
+
+        return JSONResponse({
+            "success": True,
+            "predictions": [p.to_dict() for p in predictions],
+            "count": len(predictions),
+        })
+    except Exception as e:
+        logger.error(f"Farsight predictions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# SWARM SOLANA API - Multi-Agent Solana Intelligence
+# ============================================
+
+@app.get("/api/solana/scan/{token_address}")
+async def solana_scan_token(token_address: str):
+    """
+    Scan a Solana token using multi-agent analysis.
+
+    Returns market data + swarm consensus on:
+    - Risk level
+    - Market sentiment
+    - Investment reasoning
+    """
+    try:
+        from farnsworth.integration.solana.swarm_solana import get_swarm_solana
+
+        solana = get_swarm_solana()
+        async with solana:
+            result = await solana.analyze_token(token_address)
+
+        return JSONResponse({
+            "success": True,
+            "analysis": result.to_dict(),
+            "powered_by": "Farnsworth 11-Agent Swarm",
+        })
+    except Exception as e:
+        logger.error(f"Solana token scan error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeFiAdviceRequest(BaseModel):
+    """Request for DeFi advice."""
+    amount_usd: float
+    risk_tolerance: str = "medium"  # low, medium, high
+    goal: str = "yield"  # yield, growth, stable
+
+
+@app.post("/api/solana/defi/recommend")
+async def solana_defi_recommend(request: DeFiAdviceRequest):
+    """
+    Get DeFi strategy recommendation from the swarm.
+
+    Analyzes Solana DeFi protocols and recommends optimal strategy
+    based on amount, risk tolerance, and goals.
+    """
+    try:
+        from farnsworth.integration.solana.swarm_solana import get_swarm_solana
+
+        solana = get_swarm_solana()
+        async with solana:
+            result = await solana.get_defi_recommendation(
+                amount_usd=request.amount_usd,
+                risk_tolerance=request.risk_tolerance,
+                goal=request.goal,
+            )
+
+        return JSONResponse({
+            "success": True,
+            "recommendation": result.to_dict(),
+            "powered_by": "Farnsworth 11-Agent Swarm",
+        })
+    except Exception as e:
+        logger.error(f"DeFi recommendation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/solana/wallet/{wallet_address}")
+async def solana_analyze_wallet(wallet_address: str):
+    """
+    Analyze a Solana wallet using multi-agent intelligence.
+    """
+    try:
+        from farnsworth.integration.solana.swarm_solana import get_swarm_solana
+
+        solana = get_swarm_solana()
+        async with solana:
+            result = await solana.analyze_wallet(wallet_address)
+
+        return JSONResponse({
+            "success": True,
+            "wallet": result,
+            "powered_by": "Farnsworth 11-Agent Swarm",
+        })
+    except Exception as e:
+        logger.error(f"Wallet analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/solana/swap/quote")
+async def solana_swap_quote(
+    input_mint: str,
+    output_mint: str,
+    amount: int,
+):
+    """
+    Get Jupiter swap quote with swarm advisory.
+    """
+    try:
+        from farnsworth.integration.solana.swarm_solana import get_swarm_solana
+
+        solana = get_swarm_solana()
+        async with solana:
+            result = await solana.get_swap_quote(input_mint, output_mint, amount)
+
+        return JSONResponse({
+            "success": True,
+            "quote": result,
+            "powered_by": "Farnsworth 11-Agent Swarm",
+        })
+    except Exception as e:
+        logger.error(f"Swap quote error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# CLAUDE TEAMS API - AGI v1.9 Integration
+# ============================================
+
+class ClaudeDelegateRequest(BaseModel):
+    """Request model for delegating to Claude."""
+    task: str
+    task_type: str = "analysis"  # research, analysis, coding, critique, synthesis, creative, execution
+    model: str = "sonnet"  # haiku, sonnet, opus
+    timeout: float = 120.0
+    context: Optional[Dict[str, Any]] = None
+    constraints: Optional[List[str]] = None
+
+
+class ClaudeTeamRequest(BaseModel):
+    """Request model for creating a Claude team task."""
+    task: str
+    team_name: str = "task_force"
+    team_purpose: Optional[str] = None
+    roles: Optional[List[str]] = None  # lead, analyst, developer, critic, synthesizer
+    model: str = "sonnet"
+    timeout: float = 300.0
+
+
+class OrchestrationPlanRequest(BaseModel):
+    """Request model for creating an orchestration plan."""
+    name: str
+    tasks: List[Dict[str, Any]]
+    mode: str = "sequential"  # sequential, parallel, pipeline, competitive
+
+
+@app.post("/api/claude/delegate")
+async def claude_delegate(request: ClaudeDelegateRequest):
+    """
+    FARNSWORTH DELEGATES to Claude.
+
+    Farnsworth is the orchestrator - Claude agents are workers.
+    Use this to hand off specific tasks to Claude for execution.
+    """
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.swarm_team_fusion import DelegationType
+        from farnsworth.integration.claude_teams.agent_sdk_bridge import ClaudeModel
+
+        fusion = get_swarm_team_fusion()
+
+        result = await fusion.delegate(
+            task=request.task,
+            delegation_type=DelegationType(request.task_type),
+            model=ClaudeModel(request.model),
+            context=request.context,
+            constraints=request.constraints,
+            timeout=request.timeout,
+        )
+
+        return JSONResponse({
+            "success": True,
+            "delegation_id": result.request_id,
+            "status": result.status,
+            "result": result.result,
+            "orchestrator": "farnsworth",
+            "worker": f"claude_{request.model}",
+        })
+    except Exception as e:
+        logger.error(f"Claude delegation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/team")
+async def claude_create_team_task(request: ClaudeTeamRequest):
+    """
+    Create a Claude team and delegate a complex task.
+
+    Farnsworth creates and directs the team composition.
+    Use for tasks requiring multiple perspectives.
+    """
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.team_coordinator import TeamRole
+        from farnsworth.integration.claude_teams.agent_sdk_bridge import ClaudeModel
+
+        fusion = get_swarm_team_fusion()
+
+        # Parse roles if provided
+        roles = None
+        if request.roles:
+            roles = [TeamRole(r) for r in request.roles]
+
+        result = await fusion.delegate_to_team(
+            task=request.task,
+            team_name=request.team_name,
+            team_purpose=request.team_purpose or f"Complete: {request.task[:100]}",
+            roles=roles,
+            model=ClaudeModel(request.model),
+            timeout=request.timeout,
+        )
+
+        return JSONResponse({
+            "success": True,
+            "team_result": result,
+            "orchestrator": "farnsworth",
+        })
+    except Exception as e:
+        logger.error(f"Claude team error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/plan")
+async def claude_create_plan(request: OrchestrationPlanRequest):
+    """
+    Create a multi-step orchestration plan.
+
+    Farnsworth designs the battle plan - Claude teams execute.
+    """
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.swarm_team_fusion import OrchestrationMode
+
+        fusion = get_swarm_team_fusion()
+
+        plan = await fusion.create_orchestration_plan(
+            name=request.name,
+            tasks=request.tasks,
+            mode=OrchestrationMode(request.mode),
+        )
+
+        return JSONResponse({
+            "success": True,
+            "plan_id": plan.plan_id,
+            "plan_name": plan.name,
+            "steps": len(plan.steps),
+            "mode": plan.mode.value,
+            "orchestrator": "farnsworth",
+        })
+    except Exception as e:
+        logger.error(f"Claude plan creation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/plan/{plan_id}/execute")
+async def claude_execute_plan(plan_id: str):
+    """
+    Execute an orchestration plan.
+
+    Farnsworth supervises - Claude teams execute.
+    """
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        results = await fusion.execute_plan(plan_id)
+
+        return JSONResponse({
+            "success": True,
+            "plan_id": plan_id,
+            "results": results,
+            "orchestrator": "farnsworth",
+        })
+    except Exception as e:
+        logger.error(f"Claude plan execution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/hybrid")
+async def claude_hybrid_deliberation(question: str, team_id: Optional[str] = None):
+    """
+    Run hybrid deliberation - Farnsworth swarm + Claude team.
+
+    Both swarms contribute, Farnsworth synthesizes.
+    """
+    try:
+        from farnsworth.integration.claude_teams import get_team_coordinator
+
+        coordinator = get_team_coordinator()
+        result = await coordinator.hybrid_deliberation(
+            topic=question,
+            claude_team_id=team_id,
+            include_farnsworth=True,
+        )
+
+        return JSONResponse({
+            "success": True,
+            "hybrid_result": result,
+            "participants": ["farnsworth_swarm", "claude_team"],
+        })
+    except Exception as e:
+        logger.error(f"Hybrid deliberation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claude/teams")
+async def claude_list_teams():
+    """List all Claude teams."""
+    try:
+        from farnsworth.integration.claude_teams import get_team_coordinator
+
+        coordinator = get_team_coordinator()
+        teams = coordinator.get_teams()
+
+        return JSONResponse({
+            "success": True,
+            "teams": teams,
+            "orchestrator": "farnsworth",
+        })
+    except Exception as e:
+        logger.error(f"List teams error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Agent switch endpoints - Farnsworth controls which agents are active
+
+@app.get("/api/claude/switches")
+async def claude_get_switches():
+    """Get current agent switch states."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        switches = fusion.get_agent_switches()
+
+        return JSONResponse({
+            "success": True,
+            "switches": switches,
+            "description": "Agent switches - Farnsworth controls which Claude agents are active",
+        })
+    except Exception as e:
+        logger.error(f"Get switches error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/switches/{agent}")
+async def claude_set_switch(agent: str, enabled: bool = True):
+    """Set an agent switch. Farnsworth enables/disables Claude agents."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        success = fusion.set_agent_switch(agent, enabled)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Unknown agent: {agent}")
+
+        return JSONResponse({
+            "success": True,
+            "agent": agent,
+            "enabled": enabled,
+            "message": f"Farnsworth has {'enabled' if enabled else 'disabled'} {agent}",
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Set switch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/switches/bulk")
+async def claude_set_switches_bulk(switches: Dict[str, bool]):
+    """Set multiple agent switches at once."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        results = {}
+        for agent, enabled in switches.items():
+            results[agent] = fusion.set_agent_switch(agent, enabled)
+
+        return JSONResponse({
+            "success": True,
+            "results": results,
+            "current_switches": fusion.get_agent_switches(),
+        })
+    except Exception as e:
+        logger.error(f"Bulk switch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/priority")
+async def claude_set_priority(priority: List[str]):
+    """Set model priority order for fallback."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        fusion.set_model_priority(priority)
+
+        return JSONResponse({
+            "success": True,
+            "priority": priority,
+            "message": "Model priority updated",
+        })
+    except Exception as e:
+        logger.error(f"Set priority error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claude/stats")
+async def claude_integration_stats():
+    """Get Claude Teams integration statistics."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        stats = fusion.get_stats()
+
+        return JSONResponse({
+            "success": True,
+            "stats": stats,
+            "integration": "AGI v1.9 - Claude Teams Fusion",
+            "description": "Farnsworth orchestrates, Claude executes",
+        })
+    except Exception as e:
+        logger.error(f"Claude stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claude/mcp/tools")
+async def claude_mcp_tools(team_id: Optional[str] = None):
+    """List MCP tools available to Claude teams."""
+    try:
+        from farnsworth.integration.claude_teams import get_mcp_server
+
+        mcp = get_mcp_server()
+        tools = mcp.list_tools(team_id)
+
+        return JSONResponse({
+            "success": True,
+            "tools": tools,
+            "description": "Farnsworth tools exposed to Claude via MCP",
+        })
+    except Exception as e:
+        logger.error(f"MCP tools error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/claude/delegations")
+async def claude_recent_delegations(limit: int = 10):
+    """Get recent delegation history."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+
+        fusion = get_swarm_team_fusion()
+        delegations = fusion.get_recent_delegations(limit)
+
+        return JSONResponse({
+            "success": True,
+            "delegations": delegations,
+            "orchestrator": "farnsworth",
+        })
+    except Exception as e:
+        logger.error(f"Delegations history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Quick delegation endpoints for common tasks
+
+@app.post("/api/claude/quick/research")
+async def claude_quick_research(topic: str, model: str = "haiku"):
+    """Quick research delegation - fast and cheap."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.agent_sdk_bridge import ClaudeModel
+
+        fusion = get_swarm_team_fusion()
+        result = await fusion.quick_research(topic, ClaudeModel(model))
+
+        return JSONResponse({
+            "success": True,
+            "research": result,
+            "model": model,
+        })
+    except Exception as e:
+        logger.error(f"Quick research error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/quick/code")
+async def claude_quick_code(task: str, model: str = "sonnet"):
+    """Quick coding delegation."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.agent_sdk_bridge import ClaudeModel
+
+        fusion = get_swarm_team_fusion()
+        result = await fusion.quick_code(task, ClaudeModel(model))
+
+        return JSONResponse({
+            "success": True,
+            "code": result,
+            "model": model,
+        })
+    except Exception as e:
+        logger.error(f"Quick code error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/quick/analyze")
+async def claude_quick_analyze(data: str, model: str = "sonnet"):
+    """Quick analysis delegation."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.agent_sdk_bridge import ClaudeModel
+
+        fusion = get_swarm_team_fusion()
+        result = await fusion.quick_analyze(data, ClaudeModel(model))
+
+        return JSONResponse({
+            "success": True,
+            "analysis": result,
+            "model": model,
+        })
+    except Exception as e:
+        logger.error(f"Quick analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/claude/quick/critique")
+async def claude_quick_critique(work: str, model: str = "opus"):
+    """Quick critique delegation - uses Opus for depth."""
+    try:
+        from farnsworth.integration.claude_teams import get_swarm_team_fusion
+        from farnsworth.integration.claude_teams.agent_sdk_bridge import ClaudeModel
+
+        fusion = get_swarm_team_fusion()
+        result = await fusion.quick_critique(work, ClaudeModel(model))
+
+        return JSONResponse({
+            "success": True,
+            "critique": result,
+            "model": model,
+        })
+    except Exception as e:
+        logger.error(f"Quick critique error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# QUANTUM PROOF API - Real IBM Quantum Hardware
+# ============================================
+
+@app.post("/api/quantum/bell")
+async def quantum_run_bell(shots: int = 20):
+    """
+    Run Bell state on REAL IBM Quantum hardware.
+
+    Minimal: 2 qubits, low shots. Job appears in IBM portal.
+    """
+    try:
+        from farnsworth.integration.hackathon.quantum_proof import get_quantum_proof
+
+        qp = get_quantum_proof()
+        job = await qp.run_bell_state(shots=min(shots, 100))
+
+        return JSONResponse({
+            "success": True,
+            "job_id": job.job_id,
+            "backend": job.backend,
+            "circuit": "bell_state",
+            "qubits": 2,
+            "shots": job.shots,
+            "status": job.status,
+            "portal_url": f"https://quantum.ibm.com/jobs/{job.job_id}",
+            "message": "Job submitted to REAL quantum hardware! Check IBM portal.",
+        })
+    except Exception as e:
+        logger.error(f"Quantum bell error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/quantum/job/{job_id}")
+async def quantum_job_status(job_id: str):
+    """Get quantum job status and results."""
+    try:
+        from farnsworth.integration.hackathon.quantum_proof import get_quantum_proof
+
+        qp = get_quantum_proof()
+        status = await qp.get_job_status(job_id)
+
+        return JSONResponse({
+            "success": True,
+            **status,
+        })
+    except Exception as e:
+        logger.error(f"Quantum job status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/quantum/jobs")
+async def quantum_list_jobs():
+    """List all submitted quantum jobs."""
+    try:
+        from farnsworth.integration.hackathon.quantum_proof import get_quantum_proof
+
+        qp = get_quantum_proof()
+        jobs = qp.get_jobs()
+
+        return JSONResponse({
+            "success": True,
+            "jobs": jobs,
+        })
+    except Exception as e:
+        logger.error(f"Quantum jobs list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
 # CODE ANALYSIS API
 # ============================================
 
@@ -5715,10 +6703,10 @@ async def websocket_live(websocket: WebSocket):
                 await websocket.send_json({"type": "heartbeat"})
 
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
 
 
 @app.get("/live", response_class=HTMLResponse)
@@ -5789,6 +6777,15 @@ async def health():
 # SWARM CHAT WEBSOCKET & API
 # ============================================
 
+# WebSocket rate limiter: 30 messages/min per connection, burst of 5
+ws_rate_limiter = RateLimiter(requests_per_minute=30, burst_size=5)
+
+# Track WebSocket connections per IP for connection limiting
+_ws_connections_per_ip: Dict[str, int] = {}
+_ws_connections_lock = asyncio.Lock()
+MAX_WS_CONNECTIONS_PER_IP = 5
+
+
 @app.websocket("/ws/swarm")
 async def websocket_swarm(websocket: WebSocket):
     """WebSocket endpoint for Swarm Chat - community shared chat."""
@@ -5796,6 +6793,17 @@ async def websocket_swarm(websocket: WebSocket):
     import html
     user_id = str(uuid.uuid4())
     user_name = None
+
+    # Get client IP for rate limiting and connection limiting
+    client_ip = websocket.client.host if websocket.client else "unknown"
+
+    # Check connection limit per IP
+    async with _ws_connections_lock:
+        current_count = _ws_connections_per_ip.get(client_ip, 0)
+        if current_count >= MAX_WS_CONNECTIONS_PER_IP:
+            await websocket.close(code=1008, reason="Too many connections from this IP")
+            return
+        _ws_connections_per_ip[client_ip] = current_count + 1
 
     def sanitize_username(name: str, max_length: int = 32) -> str:
         """Sanitize user name to prevent XSS and enforce limits."""
@@ -5842,6 +6850,15 @@ async def websocket_swarm(websocket: WebSocket):
                     await websocket.send_json({"type": "pong"})
 
                 elif data.get("type") == "swarm_message":
+                    # Rate limit check per connection
+                    if not ws_rate_limiter.is_allowed(user_id):
+                        await websocket.send_json({
+                            "type": "swarm_error",
+                            "message": "You're sending messages too fast. Please slow down (30 msgs/min limit).",
+                            "rate_limited": True
+                        })
+                        continue
+
                     content = data.get("content", "").strip()
                     logger.info(f"Swarm message received from {user_name}: '{content[:100] if content else 'EMPTY'}'")
                     if content:
@@ -5957,11 +6974,19 @@ async def websocket_swarm(websocket: WebSocket):
                 await websocket.send_json({"type": "heartbeat"})
 
     except WebSocketDisconnect:
-        name = swarm_manager.disconnect(user_id)
+        name = await swarm_manager.disconnect(user_id)
         await swarm_manager.broadcast_system(f"🔴 {name} left the swarm")
     except Exception as e:
         logger.error(f"Swarm WebSocket error: {e}")
-        swarm_manager.disconnect(user_id)
+        await swarm_manager.disconnect(user_id)
+    finally:
+        # Clean up IP connection counter
+        async with _ws_connections_lock:
+            count = _ws_connections_per_ip.get(client_ip, 1)
+            if count <= 1:
+                _ws_connections_per_ip.pop(client_ip, None)
+            else:
+                _ws_connections_per_ip[client_ip] = count - 1
 
 
 @app.get("/api/swarm/status")

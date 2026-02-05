@@ -1,0 +1,19 @@
+"""
+Farnsworth Web Routes - Modular API route definitions.
+
+Each module defines an APIRouter that gets included into the main FastAPI app.
+Shared state (managers, globals, helpers) lives in server.py and is imported
+by each route module as needed via the _get_shared() lazy import pattern.
+
+Route Modules:
+- chat.py         - Main chat, memory, notes, snippets, focus, profiles, health, tools, crypto, oracle, solana
+- claude_teams.py - Claude Teams AGI v1.9 integration (delegate, team, plan, switches, stats)
+- swarm.py        - Swarm Chat WebSocket, status, history, learning, memory bridge, dedup, limits
+- quantum.py      - Quantum computing (IBM), quantum proof, organism, orchestrator, evolution engine
+- websocket.py    - WebSocket live feed, sessions, health check
+- media.py        - TTS voice cloning, multi-voice, code analysis, AirLLM
+- admin.py        - Workers, staging, evolution loop, cognition, heartbeat
+- polymarket.py   - Polymarket prediction engine
+- autogram.py     - AutoGram social network for AI agents
+- bot_tracker.py  - Bot Tracker token ID registration & verification
+"""

@@ -2,21 +2,29 @@
 Farnsworth IBM Quantum Integration
 ===================================
 
-Quantum computing integration for enhanced AI capabilities using IBM Quantum Experience.
+Quantum computing integration for enhanced AI capabilities using IBM Quantum Platform.
 
-Free Tier Limits (as of 2026):
-- Hardware: 10 minutes/month (~10-20 jobs)
-- Simulators: Unlimited
-- Qubits: 5-127 (Falcon/Eagle architectures)
+IBM Quantum Open Plan (Free Tier) - as of 2026:
+- QPU Hardware: 10 minutes per 28-day rolling window (NOT calendar month)
+- QPU Access: Heron r1/r2/r3 processors (133-156 qubits), us-east region only
+- Cloud Simulators: RETIRED (May 2024) - use local AerSimulator instead
+- Local Simulators: Unlimited (AerSimulator, FakeBackends with noise models)
+- Execution Modes: Job and Batch ONLY (Session mode requires paid plan)
+- Channel: ibm_quantum_platform (ibm_quantum channel is DEAD as of July 2025)
 
-Strategy: 95% simulators (development), 5% hardware (high-value tasks)
+Current QPU Backends (2026):
+- ibm_fez, ibm_torino, ibm_marrakesh, ibm_kingston, ibm_pittsburgh (Heron)
+- RETIRED: ibm_brisbane (Nov 2025), ibm_kyoto, ibm_sherbrooke (July 2025)
+
+Strategy: Local AerSimulator for development, QPU hardware for high-value SAGI tasks
+Budget: 40% evolution, 30% optimization, 20% benchmark, 10% other
 
 Use Cases:
-- Quantum Genetic Algorithm (QGA) for agent evolution
-- QAOA for multi-objective optimization
+- Quantum Genetic Algorithm (QGA) for agent evolution toward SAGI
+- QAOA for multi-objective swarm optimization
 - VQE for variational simulations
 - Quantum-inspired pattern extraction for memory dreaming
-- Probabilistic modeling for financial risk assessment
+- Noise-aware simulation via FakeBackends (mimics real QPU noise, unlimited)
 
 "When classical optimization hits a wall, we go quantum." - Farnsworth Collective
 """
@@ -73,11 +81,14 @@ async def _emit_quantum_signal(signal_type: str, data: Dict[str, Any]) -> None:
 
 
 class QuantumBackend(Enum):
-    """Available quantum backends."""
-    SIMULATOR_IDEAL = "aer_simulator"           # Noise-free, unlimited
+    """Available quantum backends (updated 2026)."""
+    SIMULATOR_IDEAL = "aer_simulator"           # Noise-free local, unlimited
     SIMULATOR_NOISY = "aer_simulator_noisy"     # With noise model, unlimited
-    HARDWARE_SMALL = "ibm_brisbane"             # 127 qubits, limited
-    HARDWARE_FAST = "ibm_kyoto"                 # Fast queue, limited
+    FAKE_BACKEND = "fake_backend"               # FakeBackend with real QPU noise, unlimited
+    # Current Heron QPUs (Open Plan, us-east)
+    HARDWARE_FEZ = "ibm_fez"                    # Heron, 156 qubits
+    HARDWARE_TORINO = "ibm_torino"              # Heron, 133 qubits
+    HARDWARE_MARRAKESH = "ibm_marrakesh"        # Heron, 156 qubits
     AUTO = "auto"                               # Auto-select based on task
 
 
@@ -92,10 +103,13 @@ class QuantumTaskType(Enum):
 
 
 class ExecutionMode(Enum):
-    """IBM Quantum execution modes per official docs."""
-    JOB = "job"           # Single primitive request, no context
-    BATCH = "batch"       # Multiple independent jobs in parallel
-    SESSION = "session"   # Exclusive QPU access for iterative workflows
+    """IBM Quantum execution modes per official docs (2026).
+
+    Open Plan (free): Job and Batch ONLY. Session requires paid plan.
+    """
+    JOB = "job"           # Single primitive request - Open Plan OK
+    BATCH = "batch"       # Multiple independent jobs in parallel - Open Plan OK
+    SESSION = "session"   # Exclusive QPU access - PAID PLANS ONLY
 
 
 class ResilienceLevel(Enum):
@@ -112,8 +126,8 @@ class QuantumOptions:
 
     Based on: https://quantum.cloud.ibm.com/docs/guides/configure-error-mitigation
     """
-    # Execution mode
-    execution_mode: ExecutionMode = ExecutionMode.SESSION
+    # Execution mode - BATCH is default (Open Plan compatible, cheaper than Session)
+    execution_mode: ExecutionMode = ExecutionMode.BATCH
 
     # Error mitigation (Estimator only)
     resilience_level: ResilienceLevel = ResilienceLevel.MINIMAL
@@ -137,33 +151,58 @@ class QuantumOptions:
 
 @dataclass
 class QuantumUsageStats:
-    """Track quantum resource usage against free tier limits."""
+    """Track quantum resource usage against IBM Open Plan free tier.
+
+    IBM uses a 28-day ROLLING window (not calendar month).
+    10 minutes (600s) of QPU time per rolling 28-day period.
+    """
     hardware_seconds_used: float = 0.0
     hardware_jobs_count: int = 0
     simulator_jobs_count: int = 0
     last_hardware_run: Optional[datetime] = None
-    month_start: datetime = field(default_factory=lambda: datetime.now().replace(day=1, hour=0, minute=0, second=0))
+    window_start: datetime = field(default_factory=datetime.now)
 
-    # Free tier limits
-    MONTHLY_HARDWARE_SECONDS: int = 600  # 10 minutes
-    MAX_HARDWARE_JOBS_RECOMMENDED: int = 20
+    # Free tier limits - 28-day rolling window
+    ROLLING_WINDOW_DAYS: int = 28
+    WINDOW_HARDWARE_SECONDS: int = 600  # 10 minutes per 28-day window
+    # Keep old name as alias for backward compat
+    MONTHLY_HARDWARE_SECONDS: int = 600
 
     @property
     def hardware_seconds_remaining(self) -> float:
-        """Remaining hardware time this month."""
-        return max(0, self.MONTHLY_HARDWARE_SECONDS - self.hardware_seconds_used)
+        """Remaining hardware time in current 28-day window."""
+        return max(0, self.WINDOW_HARDWARE_SECONDS - self.hardware_seconds_used)
 
     @property
     def hardware_percentage_used(self) -> float:
-        """Percentage of monthly hardware quota used."""
-        return (self.hardware_seconds_used / self.MONTHLY_HARDWARE_SECONDS) * 100
+        """Percentage of 28-day window hardware quota used."""
+        return (self.hardware_seconds_used / self.WINDOW_HARDWARE_SECONDS) * 100
+
+    @property
+    def days_until_reset(self) -> int:
+        """Days until the 28-day rolling window resets."""
+        elapsed = (datetime.now() - self.window_start).days
+        return max(0, self.ROLLING_WINDOW_DAYS - elapsed)
 
     def can_use_hardware(self, estimated_seconds: float = 30) -> bool:
-        """Check if hardware can be used for estimated job duration."""
-        return self.hardware_seconds_remaining >= estimated_seconds
+        """Hard check: block hardware if quota would be exceeded."""
+        self.reset_if_window_expired()
+        if self.hardware_seconds_used >= self.WINDOW_HARDWARE_SECONDS:
+            logger.warning(f"HARD BLOCK: 28-day hardware quota exhausted ({self.hardware_seconds_used:.0f}/{self.WINDOW_HARDWARE_SECONDS}s, resets in {self.days_until_reset}d)")
+            return False
+        if self.hardware_seconds_remaining < estimated_seconds:
+            logger.warning(f"HARD BLOCK: Not enough quota for {estimated_seconds:.0f}s job ({self.hardware_seconds_remaining:.0f}s remaining, resets in {self.days_until_reset}d)")
+            return False
+        return True
 
     def record_hardware_job(self, duration_seconds: float):
-        """Record a hardware job execution."""
+        """Record a hardware job execution. Raises if quota exceeded."""
+        if self.hardware_seconds_used + duration_seconds > self.WINDOW_HARDWARE_SECONDS + 60:
+            # Allow 60s grace for jobs that ran slightly over estimate
+            raise RuntimeError(
+                f"Quantum hardware quota exceeded: {self.hardware_seconds_used + duration_seconds:.0f}s "
+                f"would exceed {self.WINDOW_HARDWARE_SECONDS}s per 28-day window"
+            )
         self.hardware_seconds_used += duration_seconds
         self.hardware_jobs_count += 1
         self.last_hardware_run = datetime.now()
@@ -187,15 +226,24 @@ class QuantumUsageStats:
         """Record a simulator job (unlimited)."""
         self.simulator_jobs_count += 1
 
-    def reset_if_new_month(self):
-        """Reset counters if new month started."""
+    def reset_if_window_expired(self):
+        """Reset counters if 28-day rolling window has expired."""
         now = datetime.now()
-        if now.month != self.month_start.month or now.year != self.month_start.year:
-            logger.info(f"Quantum usage reset for new month. Previous: {self.hardware_seconds_used:.1f}s hardware, {self.simulator_jobs_count} simulator jobs")
+        elapsed = (now - self.window_start).days
+        if elapsed >= self.ROLLING_WINDOW_DAYS:
+            logger.info(
+                f"Quantum 28-day window reset. Previous window: "
+                f"{self.hardware_seconds_used:.1f}s hardware, {self.simulator_jobs_count} simulator jobs"
+            )
             self.hardware_seconds_used = 0.0
             self.hardware_jobs_count = 0
             self.simulator_jobs_count = 0
-            self.month_start = now.replace(day=1, hour=0, minute=0, second=0)
+            self.window_start = now
+
+    # Backward compat alias
+    def reset_if_new_month(self):
+        """Alias for reset_if_window_expired (legacy compat)."""
+        self.reset_if_window_expired()
 
     def to_dict(self) -> Dict:
         """Serialize for persistence."""
@@ -204,7 +252,8 @@ class QuantumUsageStats:
             "hardware_jobs_count": self.hardware_jobs_count,
             "simulator_jobs_count": self.simulator_jobs_count,
             "last_hardware_run": self.last_hardware_run.isoformat() if self.last_hardware_run else None,
-            "month_start": self.month_start.isoformat()
+            "window_start": self.window_start.isoformat(),
+            "rolling_window_days": self.ROLLING_WINDOW_DAYS
         }
 
     @classmethod
@@ -216,10 +265,129 @@ class QuantumUsageStats:
         stats.simulator_jobs_count = data.get("simulator_jobs_count", 0)
         if data.get("last_hardware_run"):
             stats.last_hardware_run = datetime.fromisoformat(data["last_hardware_run"])
-        if data.get("month_start"):
-            stats.month_start = datetime.fromisoformat(data["month_start"])
-        stats.reset_if_new_month()
+        # Support both old month_start and new window_start keys
+        window_key = data.get("window_start") or data.get("month_start")
+        if window_key:
+            stats.window_start = datetime.fromisoformat(window_key)
+        stats.reset_if_window_expired()
         return stats
+
+
+class HardwareBudgetAllocator:
+    """
+    Strategic hardware budget allocation for maximum innovation impact.
+
+    Distributes 600s/month across quantum operations by priority:
+    1. Evolution final generations (40%) - real quantum noise drives genuine mutation diversity
+    2. QAOA optimization (30%) - hardware finds better optima than simulator
+    3. Benchmark/validation (20%) - compare hardware vs simulator results
+    4. Pattern extraction (10%) - quantum sampling for memory consolidation
+
+    Each category has a budget cap. Once a category is exhausted, it falls back
+    to simulator. This ensures the most impactful operations always get hardware.
+    """
+
+    # Budget allocation (fraction of MONTHLY_HARDWARE_SECONDS)
+    BUDGET_ALLOCATION = {
+        QuantumTaskType.EVOLUTION: 0.40,    # 240s - evolution final gens
+        QuantumTaskType.OPTIMIZATION: 0.30, # 180s - QAOA/VQE
+        QuantumTaskType.BENCHMARK: 0.20,    # 120s - validation runs
+        QuantumTaskType.PATTERN: 0.05,      #  30s - memory patterns
+        QuantumTaskType.INFERENCE: 0.03,    #  18s - KG queries
+        QuantumTaskType.SAMPLING: 0.02,     #  12s - probabilistic
+    }
+
+    def __init__(self, usage_stats: "QuantumUsageStats"):
+        self.usage_stats = usage_stats
+        self._category_usage: Dict[str, float] = {}
+        self._category_usage_file = Path("data/quantum_budget_usage.json")
+        self._load_category_usage()
+
+    def _load_category_usage(self):
+        """Load per-category usage from disk."""
+        try:
+            if self._category_usage_file.exists():
+                data = json.loads(self._category_usage_file.read_text())
+                month_key = datetime.now().strftime("%Y-%m")
+                if data.get("month") == month_key:
+                    self._category_usage = data.get("usage", {})
+                else:
+                    self._category_usage = {}
+        except Exception:
+            self._category_usage = {}
+
+    def _save_category_usage(self):
+        """Persist per-category usage to disk."""
+        try:
+            self._category_usage_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "month": datetime.now().strftime("%Y-%m"),
+                "usage": self._category_usage,
+                "total_hardware_used": self.usage_stats.hardware_seconds_used,
+                "updated": datetime.now().isoformat()
+            }
+            self._category_usage_file.write_text(json.dumps(data, indent=2))
+        except Exception as e:
+            logger.debug(f"Could not save budget usage: {e}")
+
+    def get_category_budget(self, task_type: QuantumTaskType) -> float:
+        """Get total hardware budget for a task category (seconds)."""
+        fraction = self.BUDGET_ALLOCATION.get(task_type, 0.0)
+        return self.usage_stats.MONTHLY_HARDWARE_SECONDS * fraction
+
+    def get_category_remaining(self, task_type: QuantumTaskType) -> float:
+        """Get remaining hardware budget for a category."""
+        budget = self.get_category_budget(task_type)
+        used = self._category_usage.get(task_type.value, 0.0)
+        return max(0, budget - used)
+
+    def should_use_hardware(self, task_type: QuantumTaskType, estimated_seconds: float = 30) -> bool:
+        """
+        Decide if this task should use hardware based on strategic budget.
+
+        Returns True only if:
+        1. Overall quota allows it
+        2. This category still has budget
+        """
+        if not self.usage_stats.can_use_hardware(estimated_seconds):
+            return False
+        remaining = self.get_category_remaining(task_type)
+        if remaining < estimated_seconds:
+            logger.info(
+                f"Hardware budget exhausted for {task_type.value}: "
+                f"{remaining:.0f}s remaining of {self.get_category_budget(task_type):.0f}s allocation"
+            )
+            return False
+        return True
+
+    def record_usage(self, task_type: QuantumTaskType, duration_seconds: float):
+        """Record hardware usage against a category budget."""
+        current = self._category_usage.get(task_type.value, 0.0)
+        self._category_usage[task_type.value] = current + duration_seconds
+        self._save_category_usage()
+        logger.info(
+            f"Hardware budget {task_type.value}: {duration_seconds:.1f}s used, "
+            f"{self.get_category_remaining(task_type):.0f}s remaining"
+        )
+
+    def get_budget_report(self) -> Dict[str, Any]:
+        """Get full budget status report."""
+        report = {
+            "total_budget_seconds": self.usage_stats.MONTHLY_HARDWARE_SECONDS,
+            "total_used_seconds": self.usage_stats.hardware_seconds_used,
+            "total_remaining_seconds": self.usage_stats.hardware_seconds_remaining,
+            "categories": {}
+        }
+        for task_type, fraction in self.BUDGET_ALLOCATION.items():
+            budget = self.usage_stats.MONTHLY_HARDWARE_SECONDS * fraction
+            used = self._category_usage.get(task_type.value, 0.0)
+            report["categories"][task_type.value] = {
+                "budget": budget,
+                "used": used,
+                "remaining": max(0, budget - used),
+                "percentage_used": (used / budget * 100) if budget > 0 else 0
+            }
+        return report
 
 
 @dataclass
@@ -254,12 +422,16 @@ class IBMQuantumProvider:
         self.api_key = api_key or os.environ.get("IBM_QUANTUM_API_KEY")
         self.service: Optional[QiskitRuntimeService] = None
         self.simulator: Optional[AerSimulator] = None
+        self.fake_backend = None  # Noise-aware fake backend for realistic local sim
         self.usage_stats = QuantumUsageStats()
         self._connected = False
         self._usage_file = Path("data/quantum_usage.json")
 
         # Load persisted usage stats
         self._load_usage_stats()
+
+        # Strategic hardware budget allocator
+        self.budget = HardwareBudgetAllocator(self.usage_stats)
 
     def _load_usage_stats(self):
         """Load usage stats from disk."""
@@ -298,31 +470,52 @@ class IBMQuantumProvider:
 
         try:
             # Initialize IBM Runtime service
-            # Note: channel changed from "ibm_quantum" to "ibm_quantum_platform" in qiskit-ibm-runtime 0.45+
-            try:
-                self.service = QiskitRuntimeService(
-                    channel="ibm_quantum_platform",
-                    token=self.api_key
-                )
-            except ValueError:
-                # Fallback for older versions
-                self.service = QiskitRuntimeService(
-                    channel="ibm_quantum",
-                    token=self.api_key
-                )
+            # Channel: ibm_quantum_platform (ibm_quantum was removed July 2025)
+            self.service = QiskitRuntimeService(
+                channel="ibm_quantum_platform",
+                token=self.api_key
+            )
 
-            # Initialize local simulator (always available)
+            # Initialize local simulator (always available, unlimited)
             self.simulator = AerSimulator()
 
+            # Initialize noise-aware fake backend for realistic local simulation
+            try:
+                from qiskit_ibm_runtime.fake_provider import FakeTorino
+                self.fake_backend = FakeTorino()  # 133-qubit Heron noise model
+                logger.info("FakeTorino noise model loaded for realistic local simulation")
+            except ImportError:
+                self.fake_backend = None
+                logger.debug("Fake backends not available, using ideal simulator")
+
             self._connected = True
-            logger.info("Connected to IBM Quantum Experience")
-            logger.info(f"Hardware quota: {self.usage_stats.hardware_seconds_remaining:.1f}s remaining this month")
+
+            # List available real backends
+            try:
+                backends = self.service.backends(operational=True, simulator=False)
+                backend_names = [b.name for b in backends]
+                logger.info(f"Connected to IBM Quantum Platform (us-east)")
+                logger.info(f"Available QPUs: {backend_names}")
+            except Exception:
+                logger.info("Connected to IBM Quantum Platform")
+
+            logger.info(
+                f"Hardware quota: {self.usage_stats.hardware_seconds_remaining:.0f}s remaining "
+                f"({self.usage_stats.days_until_reset}d until window reset)"
+            )
 
             return True
 
         except Exception as e:
-            logger.error(f"Failed to connect to IBM Quantum: {e}")
+            logger.error(f"Failed to connect to IBM Quantum Platform: {e}")
+            # Still initialize local simulator even without cloud connection
+            self.simulator = AerSimulator()
+            logger.info("Local AerSimulator initialized (cloud connection failed, simulator-only mode)")
             return False
+
+    def get_hardware_budget_report(self) -> Dict[str, Any]:
+        """Get strategic hardware budget allocation report."""
+        return self.budget.get_budget_report()
 
     def get_available_backends(self) -> List[str]:
         """Get list of available quantum backends."""
@@ -366,23 +559,40 @@ class IBMQuantumProvider:
         # Estimate job duration (simple heuristic)
         estimated_seconds = 30 + (num_qubits * 2)  # Base + per-qubit overhead
 
-        # Decision logic
+        # Decision logic - hard block if quota exceeded, budget-aware
         use_hardware = (
             prefer_hardware and
             task_type in high_value_tasks and
-            self.usage_stats.can_use_hardware(estimated_seconds) and
             self._connected and
-            self.service is not None
+            self.service is not None and
+            self.budget.should_use_hardware(task_type, estimated_seconds)  # Budget + hard cap
         )
 
-        if use_hardware:
-            # Select appropriate hardware backend
-            if num_qubits <= 27:
-                return ("ibm_kyoto", True)  # Faster queue for small circuits
-            else:
-                return ("ibm_brisbane", True)  # 127 qubits for larger
+        if prefer_hardware and not use_hardware:
+            logger.info(
+                f"Hardware requested but denied for {task_type.value} "
+                f"(overall: {self.usage_stats.hardware_seconds_remaining:.0f}s remaining, "
+                f"category: {self.budget.get_category_remaining(task_type):.0f}s remaining). "
+                f"Falling back to simulator."
+            )
 
-        # Default to simulator
+        if use_hardware:
+            # Select current Heron QPU backend (2026 - us-east region)
+            # ibm_brisbane retired Nov 2025, ibm_kyoto retired 2025
+            # Try to pick least busy from available backends
+            try:
+                backend = self.service.least_busy(
+                    operational=True, simulator=False, min_num_qubits=num_qubits
+                )
+                return (backend.name, True)
+            except Exception:
+                # Fallback to known current backends
+                if num_qubits <= 133:
+                    return ("ibm_torino", True)
+                else:
+                    return ("ibm_fez", True)  # 156 qubits Heron r2/r3
+
+        # Default to local simulator (unlimited, always available)
         return ("aer_simulator", False)
 
     async def run_circuit(
@@ -458,20 +668,22 @@ class IBMQuantumProvider:
                     }
                 }
 
-                # Select execution mode per IBM docs
-                if options.execution_mode == ExecutionMode.BATCH:
-                    # Batch mode: for multiple independent jobs
+                # Execution mode: Open Plan only supports Job and Batch (NOT Session)
+                if options.execution_mode == ExecutionMode.SESSION:
+                    logger.warning("Session mode not available on Open Plan, using Batch instead")
+
+                if options.execution_mode == ExecutionMode.JOB:
+                    # Job mode: single primitive request, simplest
+                    sampler = SamplerV2(mode=backend)
+                    if parameters:
+                        job = sampler.run([(transpiled.bind_parameters(parameters),)], shots=shots)
+                    else:
+                        job = sampler.run([(transpiled,)], shots=shots)
+                    result = job.result()
+                else:
+                    # Batch mode (default): parallel compilation, Open Plan compatible
                     with Batch(backend=backend) as batch:
                         sampler = SamplerV2(mode=batch)
-                        if parameters:
-                            job = sampler.run([(transpiled.bind_parameters(parameters),)], shots=shots)
-                        else:
-                            job = sampler.run([(transpiled,)], shots=shots)
-                        result = job.result()
-                else:
-                    # Session mode (default): for iterative workflows
-                    with Session(service=self.service, backend=backend) as session:
-                        sampler = SamplerV2(mode=session)
                         if parameters:
                             job = sampler.run([(transpiled.bind_parameters(parameters),)], shots=shots)
                         else:
@@ -480,8 +692,9 @@ class IBMQuantumProvider:
 
                 execution_time = (datetime.now() - start_time).total_seconds()
 
-                # Record usage
+                # Record usage against overall quota and category budget
                 self.usage_stats.record_hardware_job(execution_time)
+                self.budget.record_usage(task_type, execution_time)
                 self._save_usage_stats()
 
                 # Extract counts from PubResult
@@ -521,13 +734,23 @@ class IBMQuantumProvider:
                 return job_result
 
             else:
-                # Run on simulator (unlimited)
-                transpiled = transpile(circuit, self.simulator, optimization_level=1)
+                # Run on local simulator (unlimited, free)
+                # Use noise-aware fake backend when available for realistic results
+                sim_backend = self.simulator
+                backend_label = "aer_simulator"
+                use_noise = hasattr(self, 'fake_backend') and self.fake_backend is not None
+
+                if use_noise and circuit.num_qubits <= 133:
+                    # Noise-aware simulation using real QPU noise model
+                    sim_backend = AerSimulator.from_backend(self.fake_backend)
+                    backend_label = "aer_simulator_noisy(FakeTorino)"
+
+                transpiled = transpile(circuit, sim_backend, optimization_level=1)
 
                 if parameters:
                     transpiled = transpiled.bind_parameters(parameters)
 
-                job = self.simulator.run(transpiled, shots=shots)
+                job = sim_backend.run(transpiled, shots=shots)
                 result = job.result()
 
                 execution_time = (datetime.now() - start_time).total_seconds()
@@ -537,11 +760,15 @@ class IBMQuantumProvider:
 
                 job_result = QuantumJobResult(
                     success=True,
-                    backend_used="aer_simulator",
+                    backend_used=backend_label,
                     execution_time=execution_time,
                     shots=shots,
                     counts=counts,
-                    metadata={"is_hardware": False, "circuit_depth": transpiled.depth()}
+                    metadata={
+                        "is_hardware": False,
+                        "noise_aware": use_noise,
+                        "circuit_depth": transpiled.depth()
+                    }
                 )
 
                 # Emit result signal for simulator
@@ -628,31 +855,47 @@ class IBMQuantumProvider:
                     optimization_level=options.optimization_level
                 )
 
-                with Session(service=self.service, backend=backend) as session:
+                # Open Plan: use Batch mode (Session not available)
+                if options.execution_mode == ExecutionMode.SESSION:
+                    logger.warning("Session mode not available on Open Plan, using Batch for Estimator")
+
+                with Batch(backend=backend) as batch:
                     # Configure Estimator with resilience level per IBM docs
-                    estimator = EstimatorV2(mode=session)
+                    estimator = EstimatorV2(mode=batch)
 
                     # Set resilience options
-                    estimator.options.resilience_level = options.resilience_level.value
+                    try:
+                        estimator.options.resilience_level = options.resilience_level.value
+                    except Exception:
+                        pass  # Some versions don't support this
 
                     # Configure error mitigation techniques
-                    if options.resilience_level.value >= 1:
-                        estimator.options.resilience.measure_mitigation = True
+                    try:
+                        if options.resilience_level.value >= 1:
+                            estimator.options.resilience.measure_mitigation = True
 
-                    if options.resilience_level.value >= 2:
-                        estimator.options.resilience.zne_mitigation = True
-                        estimator.options.resilience.zne.noise_factors = options.zne_noise_factors
-                        estimator.options.resilience.zne.extrapolator = options.zne_extrapolator
+                        if options.resilience_level.value >= 2:
+                            estimator.options.resilience.zne_mitigation = True
+                            estimator.options.resilience.zne.noise_factors = options.zne_noise_factors
+                            estimator.options.resilience.zne.extrapolator = options.zne_extrapolator
+                    except Exception:
+                        pass  # Resilience options vary by version
 
                     # Enable dynamical decoupling
-                    if options.dynamical_decoupling:
-                        estimator.options.dynamical_decoupling.enable = True
-                        estimator.options.dynamical_decoupling.sequence_type = options.dd_sequence_type
+                    try:
+                        if options.dynamical_decoupling:
+                            estimator.options.dynamical_decoupling.enable = True
+                            estimator.options.dynamical_decoupling.sequence_type = options.dd_sequence_type
+                    except Exception:
+                        pass
 
                     # Enable twirling
-                    if options.enable_twirling:
-                        estimator.options.twirling.enable_gates = True
-                        estimator.options.twirling.num_randomizations = options.twirling_num_randomizations
+                    try:
+                        if options.enable_twirling:
+                            estimator.options.twirling.enable_gates = True
+                            estimator.options.twirling.num_randomizations = options.twirling_num_randomizations
+                    except Exception:
+                        pass
 
                     # Build PUB (Primitive Unified Bloc) per IBM docs
                     if parameters:
@@ -665,6 +908,7 @@ class IBMQuantumProvider:
 
                 execution_time = (datetime.now() - start_time).total_seconds()
                 self.usage_stats.record_hardware_job(execution_time)
+                self.budget.record_usage(task_type, execution_time)
                 self._save_usage_stats()
 
                 # Extract expectation values
@@ -732,7 +976,7 @@ class IBMQuantumProvider:
 
     def get_usage_summary(self) -> Dict:
         """Get current usage summary."""
-        self.usage_stats.reset_if_new_month()
+        self.usage_stats.reset_if_window_expired()
         return {
             "hardware_seconds_used": self.usage_stats.hardware_seconds_used,
             "hardware_seconds_remaining": self.usage_stats.hardware_seconds_remaining,
@@ -740,7 +984,12 @@ class IBMQuantumProvider:
             "hardware_jobs_count": self.usage_stats.hardware_jobs_count,
             "simulator_jobs_count": self.usage_stats.simulator_jobs_count,
             "last_hardware_run": self.usage_stats.last_hardware_run.isoformat() if self.usage_stats.last_hardware_run else None,
-            "connected": self._connected
+            "connected": self._connected,
+            "days_until_reset": self.usage_stats.days_until_reset,
+            "rolling_window_days": self.usage_stats.ROLLING_WINDOW_DAYS,
+            "noise_aware_sim": self.fake_backend is not None,
+            "execution_mode": "batch (Open Plan)",
+            "budget": self.budget.get_budget_report() if hasattr(self, 'budget') else None
         }
 
 
@@ -1336,13 +1585,17 @@ async def quantum_evolve_agent(
         # Selection (tournament)
         selected = population[:population_size // 2]
 
+        # Strategic hardware usage: first gen (seed diversity) and last gen (finalize)
+        # Middle generations use simulator to conserve budget
+        use_hw_this_gen = prefer_hardware and (gen == 0 or gen == generations - 1)
+
         # Crossover and mutation
         offspring = []
         for i in range(0, len(selected) - 1, 2):
             child = await qga.quantum_crossover(
                 selected[i][0],
                 selected[i + 1][0],
-                prefer_hardware=prefer_hardware and gen == generations - 1  # Hardware on last gen
+                prefer_hardware=use_hw_this_gen
             )
             child = await qga.quantum_mutation(child, mutation_rate=0.1)
             fitness = fitness_func(child)

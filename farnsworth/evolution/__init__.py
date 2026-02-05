@@ -7,6 +7,7 @@ Genetic optimization for self-improvement with:
 - LoRA adapter breeding and merging
 - Hash-chain evolution logging for integrity
 - Federated population evolution across P2P (AGI Cohesion)
+- Quantum-enhanced evolution via IBM Quantum (AGI v1.8)
 """
 
 from farnsworth.evolution.genetic_optimizer import GeneticOptimizer
@@ -18,6 +19,11 @@ from farnsworth.evolution.federated_population import (
     FederatedEvolutionConfig,
     setup_federated_evolution,
 )
+from farnsworth.evolution.quantum_evolution import (
+    QuantumEvolutionEngine,
+    get_quantum_evolution_engine,
+    quantum_evolve_agent_params,
+)
 
 __all__ = [
     "GeneticOptimizer",
@@ -27,4 +33,7 @@ __all__ = [
     "FederatedPopulationManager",
     "FederatedEvolutionConfig",
     "setup_federated_evolution",
+    "QuantumEvolutionEngine",
+    "get_quantum_evolution_engine",
+    "quantum_evolve_agent_params",
 ]

@@ -858,7 +858,7 @@ class Nexus:
             if handlers:
                 type_invoked = len(handlers)
                 await asyncio.gather(
-                    *[h(signal) for h in handlers],
+                    *[_safe_invoke_handler(h, signal) for h in handlers],
                     return_exceptions=True
                 )
 
