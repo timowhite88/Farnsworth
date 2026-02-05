@@ -49,6 +49,24 @@ try:
 except ImportError:
     FITNESS_AVAILABLE = False
 
+# Nexus integration for signal emission
+try:
+    from farnsworth.core.nexus import get_nexus
+    NEXUS_AVAILABLE = True
+except ImportError:
+    NEXUS_AVAILABLE = False
+
+
+async def _emit_evolution_signal(signal_type: str, data: Dict[str, Any]) -> None:
+    """Emit evolution-related signals to Nexus."""
+    if not NEXUS_AVAILABLE:
+        return
+    try:
+        nexus = get_nexus()
+        await nexus.emit(signal_type, data)
+    except Exception:
+        pass
+
 
 @dataclass
 class QuantumEvolutionResult:
@@ -190,6 +208,16 @@ class QuantumEvolutionEngine:
             QuantumEvolutionResult with best parameters and statistics
         """
         start_time = datetime.now()
+
+        # Emit evolution started signal
+        asyncio.create_task(_emit_evolution_signal("quantum.evolution_started", {
+            "agent_id": agent_id,
+            "generations": generations,
+            "population_size": population_size,
+            "use_quantum": use_quantum,
+            "prefer_hardware": prefer_hardware,
+            "timestamp": datetime.now().isoformat()
+        }))
 
         # Default fitness function using fitness tracker
         if fitness_func is None:
@@ -349,6 +377,20 @@ class QuantumEvolutionEngine:
             f"fitness {initial_fitness:.4f} -> {best_fitness:.4f} "
             f"(+{result.improvement:.4f}), {quantum_jobs} quantum jobs"
         )
+
+        # Emit evolution completed signal
+        asyncio.create_task(_emit_evolution_signal("quantum.evolution_complete", {
+            "agent_id": agent_id,
+            "method": method,
+            "initial_fitness": initial_fitness,
+            "best_fitness": best_fitness,
+            "improvement": result.improvement,
+            "generations": generations,
+            "quantum_jobs": quantum_jobs,
+            "hardware_used": hardware_used,
+            "execution_time": execution_time,
+            "timestamp": datetime.now().isoformat()
+        }))
 
         return result
 

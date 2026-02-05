@@ -169,6 +169,18 @@ class SignalType(Enum):
     A2A_CONTEXT_SHARED = "a2a.context_shared"                # Context shared between agents
     A2A_SKILL_TRANSFERRED = "a2a.skill_transferred"          # Skill transferred
 
+    # Quantum Computing Signals (AGI v1.8.2)
+    QUANTUM_JOB_SUBMITTED = "quantum.job_submitted"          # Circuit submitted to backend
+    QUANTUM_JOB_COMPLETED = "quantum.job_completed"          # Circuit execution finished
+    QUANTUM_RESULT = "quantum.result"                        # Measurement results available
+    QUANTUM_ERROR = "quantum.error"                          # Quantum execution error
+    QUANTUM_CALIBRATION = "quantum.calibration"              # Backend calibration data
+    QUANTUM_USAGE_WARNING = "quantum.usage_warning"          # Hardware quota warning
+    QUANTUM_EVOLUTION_STARTED = "quantum.evolution_started"  # QGA evolution started
+    QUANTUM_EVOLUTION_COMPLETE = "quantum.evolution_complete"  # QGA evolution finished
+    QUANTUM_PROOF_GENERATED = "quantum.proof_generated"      # Proof image generated
+    QUANTUM_PROOF_POSTED = "quantum.proof_posted"            # Proof posted to X
+
 
 # =============================================================================
 # NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)

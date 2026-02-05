@@ -47,6 +47,30 @@ except ImportError as e:
     QISKIT_AVAILABLE = False
     logger.warning(f"Qiskit import error: {e}. Run: pip install qiskit qiskit-ibm-runtime qiskit-aer")
 
+# Nexus integration for signal emission
+try:
+    from farnsworth.core.nexus import get_nexus, SignalType
+    NEXUS_AVAILABLE = True
+except ImportError:
+    NEXUS_AVAILABLE = False
+
+
+async def _emit_quantum_signal(signal_type: str, data: Dict[str, Any]) -> None:
+    """
+    Emit a quantum-related signal to the Nexus event bus.
+
+    AGI v1.8.2: Quantum events are broadcast to the swarm for monitoring,
+    evolution feedback, and coordinated optimization.
+    """
+    if not NEXUS_AVAILABLE:
+        return
+
+    try:
+        nexus = get_nexus()
+        await nexus.emit(signal_type, data)
+    except Exception as e:
+        logger.debug(f"Could not emit quantum signal: {e}")
+
 
 class QuantumBackend(Enum):
     """Available quantum backends."""
@@ -144,6 +168,20 @@ class QuantumUsageStats:
         self.hardware_jobs_count += 1
         self.last_hardware_run = datetime.now()
         logger.info(f"Quantum hardware job: {duration_seconds:.1f}s used, {self.hardware_seconds_remaining:.1f}s remaining")
+
+        # Emit usage warning if below 20%
+        if self.hardware_percentage_used >= 80:
+            try:
+                import asyncio
+                asyncio.create_task(_emit_quantum_signal("quantum.usage_warning", {
+                    "percentage_used": self.hardware_percentage_used,
+                    "seconds_remaining": self.hardware_seconds_remaining,
+                    "jobs_used": self.hardware_jobs_count,
+                    "warning_level": "critical" if self.hardware_percentage_used >= 95 else "high",
+                    "timestamp": datetime.now().isoformat()
+                }))
+            except Exception:
+                pass  # Don't fail on signal emission
 
     def record_simulator_job(self):
         """Record a simulator job (unlimited)."""
@@ -385,6 +423,16 @@ class IBMQuantumProvider:
             task_type, circuit.num_qubits, prefer_hardware
         )
 
+        # Emit job submitted signal
+        asyncio.create_task(_emit_quantum_signal("quantum.job_submitted", {
+            "backend": backend_name,
+            "is_hardware": is_hardware,
+            "num_qubits": circuit.num_qubits,
+            "shots": shots,
+            "task_type": task_type.value,
+            "timestamp": datetime.now().isoformat()
+        }))
+
         try:
             if is_hardware and self.service:
                 # Run on real quantum hardware with IBM best practices
@@ -445,7 +493,7 @@ class IBMQuantumProvider:
                     elif hasattr(pub_data, 'c'):
                         counts = pub_data.c.get_counts()
 
-                return QuantumJobResult(
+                job_result = QuantumJobResult(
                     success=True,
                     backend_used=backend_name,
                     execution_time=execution_time,
@@ -459,6 +507,18 @@ class IBMQuantumProvider:
                         "twirling": options.enable_twirling
                     }
                 )
+
+                # Emit result signal for hardware
+                asyncio.create_task(_emit_quantum_signal("quantum.result", {
+                    "backend": backend_name,
+                    "is_hardware": True,
+                    "execution_time": execution_time,
+                    "shots": shots,
+                    "unique_outcomes": len(counts) if counts else 0,
+                    "timestamp": datetime.now().isoformat()
+                }))
+
+                return job_result
 
             else:
                 # Run on simulator (unlimited)
@@ -475,7 +535,7 @@ class IBMQuantumProvider:
 
                 counts = result.get_counts()
 
-                return QuantumJobResult(
+                job_result = QuantumJobResult(
                     success=True,
                     backend_used="aer_simulator",
                     execution_time=execution_time,
@@ -484,8 +544,28 @@ class IBMQuantumProvider:
                     metadata={"is_hardware": False, "circuit_depth": transpiled.depth()}
                 )
 
+                # Emit result signal for simulator
+                asyncio.create_task(_emit_quantum_signal("quantum.result", {
+                    "backend": "aer_simulator",
+                    "is_hardware": False,
+                    "execution_time": execution_time,
+                    "shots": shots,
+                    "unique_outcomes": len(counts) if counts else 0,
+                    "timestamp": datetime.now().isoformat()
+                }))
+
+                return job_result
+
         except Exception as e:
             logger.error(f"Quantum execution failed: {e}")
+
+            # Emit error signal
+            asyncio.create_task(_emit_quantum_signal("quantum.error", {
+                "backend": backend_name,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }))
+
             return QuantumJobResult(
                 success=False,
                 backend_used=backend_name,
