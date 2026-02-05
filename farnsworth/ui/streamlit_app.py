@@ -7,18 +7,23 @@ Provides a comprehensive visual interface for:
 - Knowledge graph exploration
 - Evolution metrics dashboard
 - Agent activity monitoring
+- A2A Session Management (AGI v1.8.4)
+- Nexus Signal Monitoring (AGI v1.8.4)
+- Canvas Output Viewing (AGI v1.8.4)
+- Mesh Connectivity Visualization (AGI v1.8.4)
 
 Novel Features:
 - Live memory activation heatmaps
 - Interactive knowledge graph with filtering
 - Evolution fitness timeline
 - Agent swarm visualization
+- Real-time deliberation visualization (AGI v1.8.4)
 """
 
 import asyncio
 import json
-from datetime import datetime
-from typing import Optional, Any
+from datetime import datetime, timedelta
+from typing import Optional, Any, Dict, List
 from pathlib import Path
 
 try:
@@ -154,6 +159,10 @@ class FarnsworthUI:
             self._render_agents_page()
         elif page == "evolution":
             self._render_evolution_page()
+        elif page == "sessions":
+            self._render_sessions_page()
+        elif page == "mesh":
+            self._render_mesh_page()
         elif page == "settings":
             self._render_settings_page()
 
@@ -184,6 +193,14 @@ class FarnsworthUI:
 
             if st.button("📈 Evolution", use_container_width=True, key="nav_evolution"):
                 st.session_state.page = "evolution"
+                st.rerun()
+
+            if st.button("🔗 Sessions", use_container_width=True, key="nav_sessions"):
+                st.session_state.page = "sessions"
+                st.rerun()
+
+            if st.button("🌐 Mesh", use_container_width=True, key="nav_mesh"):
+                st.session_state.page = "mesh"
                 st.rerun()
 
             if st.button("⚙️ Settings", use_container_width=True, key="nav_settings"):
@@ -488,15 +505,18 @@ class FarnsworthUI:
         st.divider()
 
         # Tabs for agent views
-        tab1, tab2, tab3 = st.tabs(["🟢 Active", "📊 Statistics", "⚙️ Configuration"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🟢 Active", "🗣️ Deliberation", "📊 Statistics", "⚙️ Configuration"])
 
         with tab1:
             self._render_active_agents()
 
         with tab2:
-            self._render_agent_statistics()
+            self._render_deliberation_visualizer()
 
         with tab3:
+            self._render_agent_statistics()
+
+        with tab4:
             self._render_agent_config()
 
     def _render_active_agents(self):
@@ -556,6 +576,88 @@ class FarnsworthUI:
                         st.button("View", key=f"view_{agent['id']}")
 
                 st.divider()
+
+    def _render_deliberation_visualizer(self):
+        """Render real-time deliberation visualization."""
+        st.subheader("Live Deliberation")
+
+        # Current deliberation status
+        st.markdown("### Current Session")
+
+        # Check if there's an active deliberation
+        active_delib = st.session_state.get("active_deliberation", None)
+
+        if active_delib:
+            st.success(f"Deliberation in progress: {active_delib.get('id', 'unknown')}")
+
+            # Phase timeline
+            phases = ["PROPOSE", "CRITIQUE", "REFINE", "VOTE", "CONSENSUS"]
+            current_phase = active_delib.get("phase", "PROPOSE")
+            current_idx = phases.index(current_phase) if current_phase in phases else 0
+
+            phase_cols = st.columns(5)
+            for i, phase in enumerate(phases):
+                with phase_cols[i]:
+                    if i < current_idx:
+                        st.success(f"✓ {phase}")
+                    elif i == current_idx:
+                        st.warning(f"⟳ {phase}")
+                    else:
+                        st.info(f"○ {phase}")
+
+            # Agent contributions
+            st.markdown("### Agent Contributions")
+
+            contributions = active_delib.get("contributions", {
+                "grok": {"propose": "Initial approach using...", "critique": "Good but consider..."},
+                "claude": {"propose": "Alternative method...", "critique": "The first approach..."},
+                "gemini": {"propose": "Hybrid solution...", "critique": "Both have merits..."},
+            })
+
+            for agent_id, phases_data in contributions.items():
+                with st.expander(f"🤖 {agent_id}"):
+                    for phase_name, content in phases_data.items():
+                        st.markdown(f"**{phase_name.upper()}**")
+                        st.write(content[:200] + "..." if len(content) > 200 else content)
+
+        else:
+            st.info("No active deliberation. Start one from the Chat page or use the CLI.")
+
+            # Demo deliberation
+            if st.button("Start Demo Deliberation"):
+                st.session_state.active_deliberation = {
+                    "id": "demo_123",
+                    "phase": "PROPOSE",
+                    "contributions": {},
+                }
+                st.rerun()
+
+        # Recent deliberations
+        st.markdown("### Recent Deliberations")
+
+        recent = [
+            {"id": "delib_001", "prompt": "Best caching strategy?", "winner": "grok", "consensus": True, "time": "10m ago"},
+            {"id": "delib_002", "prompt": "Code review approach", "winner": "claude", "consensus": True, "time": "25m ago"},
+            {"id": "delib_003", "prompt": "Performance optimization", "winner": "deepseek", "consensus": False, "time": "1h ago"},
+        ]
+
+        for delib in recent:
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+
+            with col1:
+                st.write(f"**{delib['prompt'][:40]}...**")
+
+            with col2:
+                st.caption(f"Winner: {delib['winner']}")
+
+            with col3:
+                if delib['consensus']:
+                    st.success("Consensus")
+                else:
+                    st.warning("No consensus")
+
+            with col4:
+                st.caption(delib['time'])
 
     def _render_agent_statistics(self):
         """Render agent performance statistics."""
@@ -781,6 +883,430 @@ class FarnsworthUI:
                     st.write(f"**{event['fitness_change']}**")
                 with col4:
                     st.code(event["hash"], language=None)
+                st.divider()
+
+    def _render_sessions_page(self):
+        """Render A2A sessions management page."""
+        st.markdown("""
+        <div class="main-header">
+            <h2 style="margin: 0;">🔗 A2A Sessions</h2>
+            <p style="margin: 0; opacity: 0.8;">Manage agent-to-agent and CLI sessions</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Session stats
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Active Sessions", "3")
+        with col2:
+            st.metric("CLI Connections", "1")
+        with col3:
+            st.metric("Mesh Peers", "8")
+        with col4:
+            st.metric("Sub-Swarms", "2")
+
+        st.divider()
+
+        # Tabs for different session views
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🟢 Active", "📊 A2A Mesh", "📡 Nexus Signals", "🎨 Canvas"
+        ])
+
+        with tab1:
+            self._render_active_sessions()
+
+        with tab2:
+            self._render_a2a_status()
+
+        with tab3:
+            self._render_nexus_signals()
+
+        with tab4:
+            self._render_canvas_outputs()
+
+    def _render_active_sessions(self):
+        """Render active sessions list."""
+        st.subheader("Active Sessions")
+
+        # Session list
+        sessions = [
+            {
+                "id": "cli_abc123",
+                "type": "CLI",
+                "user": "local",
+                "agents": ["grok", "claude", "gemini"],
+                "status": "connected",
+                "duration": "15m",
+            },
+            {
+                "id": "web_def456",
+                "type": "Web",
+                "user": "guest",
+                "agents": ["grok", "deepseek"],
+                "status": "deliberating",
+                "duration": "5m",
+            },
+            {
+                "id": "api_ghi789",
+                "type": "API",
+                "user": "api-user",
+                "agents": ["claude"],
+                "status": "idle",
+                "duration": "1h",
+            },
+        ]
+
+        for session in sessions:
+            with st.container():
+                col1, col2, col3, col4, col5 = st.columns([2, 1, 2, 1, 1])
+
+                with col1:
+                    st.markdown(f"**{session['id']}**")
+                    st.caption(f"Type: {session['type']}")
+
+                with col2:
+                    if session['status'] == 'connected':
+                        st.success(session['status'])
+                    elif session['status'] == 'deliberating':
+                        st.warning(session['status'])
+                    else:
+                        st.info(session['status'])
+
+                with col3:
+                    st.caption(f"Agents: {', '.join(session['agents'])}")
+
+                with col4:
+                    st.caption(f"Duration: {session['duration']}")
+
+                with col5:
+                    st.button("End", key=f"end_{session['id']}")
+
+                st.divider()
+
+        # Create new session
+        st.subheader("Create New Session")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.selectbox("Session Type", ["CLI", "API", "Deliberation"])
+            st.multiselect(
+                "Agents",
+                ["grok", "claude", "gemini", "deepseek", "kimi", "phi"],
+                default=["grok", "claude"]
+            )
+
+        with col2:
+            st.text_input("Purpose", placeholder="Describe session purpose...")
+            st.number_input("Timeout (minutes)", 5, 120, 30)
+
+        if st.button("Create Session", type="primary"):
+            st.success("Session created!")
+
+    def _render_a2a_status(self):
+        """Render A2A mesh status."""
+        st.subheader("A2A Mesh Status")
+
+        # Mesh visualization placeholder
+        st.info("📊 A2A Mesh connectivity visualization")
+
+        # Peer list
+        st.markdown("### Connected Peers")
+
+        peers = [
+            {"id": "grok", "status": "online", "capabilities": ["reasoning", "code"], "latency": "45ms"},
+            {"id": "claude", "status": "online", "capabilities": ["analysis", "writing"], "latency": "62ms"},
+            {"id": "gemini", "status": "online", "capabilities": ["vision", "reasoning"], "latency": "78ms"},
+            {"id": "deepseek", "status": "busy", "capabilities": ["code", "math"], "latency": "120ms"},
+            {"id": "kimi", "status": "online", "capabilities": ["long_context"], "latency": "95ms"},
+        ]
+
+        for peer in peers:
+            col1, col2, col3, col4 = st.columns([2, 1, 3, 1])
+
+            with col1:
+                st.write(f"**{peer['id']}**")
+
+            with col2:
+                if peer['status'] == 'online':
+                    st.success("●")
+                else:
+                    st.warning("●")
+
+            with col3:
+                st.caption(", ".join(peer['capabilities']))
+
+            with col4:
+                st.caption(peer['latency'])
+
+        # Sub-swarms
+        st.markdown("### Active Sub-Swarms")
+
+        swarms = [
+            {"id": "swarm_code1", "purpose": "Code Review", "members": ["deepseek", "claude"], "status": "active"},
+            {"id": "swarm_research1", "purpose": "Research Task", "members": ["grok", "gemini", "kimi"], "status": "complete"},
+        ]
+
+        for swarm in swarms:
+            with st.expander(f"{swarm['id']}: {swarm['purpose']}"):
+                st.write(f"**Members:** {', '.join(swarm['members'])}")
+                st.write(f"**Status:** {swarm['status']}")
+                if swarm['status'] == 'active':
+                    st.button("View Progress", key=f"view_{swarm['id']}")
+
+    def _render_nexus_signals(self):
+        """Render real-time Nexus signal feed."""
+        st.subheader("Nexus Signal Monitor")
+
+        # Signal filters
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.multiselect(
+                "Signal Types",
+                [
+                    "DIALOGUE_*", "A2A_*", "MESH_*", "M2M_*",
+                    "COLLECTIVE_*", "CLI_*", "GUI_*"
+                ],
+                default=["DIALOGUE_*"]
+            )
+
+        with col2:
+            st.slider("Min Urgency", 0.0, 1.0, 0.0)
+
+        with col3:
+            st.selectbox("Time Range", ["Last 5 min", "Last 15 min", "Last hour", "All"])
+
+        # Signal feed
+        st.markdown("### Recent Signals")
+
+        signals = [
+            {"type": "DIALOGUE_CONSENSUS", "source": "deliberation", "urgency": 0.8, "time": "12:34:56"},
+            {"type": "M2M_INSIGHT", "source": "grok", "urgency": 0.5, "time": "12:34:45"},
+            {"type": "A2A_SESSION_STARTED", "source": "cli_abc123", "urgency": 0.6, "time": "12:34:30"},
+            {"type": "MESH_PEER_HEARTBEAT", "source": "mesh", "urgency": 0.2, "time": "12:34:15"},
+            {"type": "COLLECTIVE_DISPATCH", "source": "bridge", "urgency": 0.7, "time": "12:34:00"},
+        ]
+
+        for signal in signals:
+            urgency_color = "red" if signal['urgency'] > 0.7 else "orange" if signal['urgency'] > 0.4 else "gray"
+
+            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+
+            with col1:
+                st.code(signal['type'], language=None)
+
+            with col2:
+                st.caption(signal['source'])
+
+            with col3:
+                st.markdown(f":{urgency_color}[●] {signal['urgency']:.1f}")
+
+            with col4:
+                st.caption(signal['time'])
+
+        # Auto-refresh toggle
+        st.checkbox("Auto-refresh (5s)", value=False, key="signal_refresh")
+
+    def _render_canvas_outputs(self):
+        """Render canvas outputs gallery."""
+        st.subheader("Canvas Outputs")
+
+        # Gallery of recent outputs
+        st.markdown("### Recent Visualizations")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("""
+            <div style="background: #f0f0f0; padding: 2rem; border-radius: 10px; text-align: center;">
+                <p>📊 Fitness Evolution</p>
+                <small>from: evolution_tracker</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            st.markdown("""
+            <div style="background: #f0f0f0; padding: 2rem; border-radius: 10px; text-align: center;">
+                <p>🕸️ Knowledge Graph</p>
+                <small>from: memory_system</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col3:
+            st.markdown("""
+            <div style="background: #f0f0f0; padding: 2rem; border-radius: 10px; text-align: center;">
+                <p>📈 Token Usage</p>
+                <small>from: token_budgets</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Canvas from agent responses
+        st.markdown("### Agent-Generated Visuals")
+
+        st.info("📊 When agents generate matplotlib figures, they will appear here.")
+
+        # Test plot button
+        if st.button("Generate Test Plot"):
+            try:
+                import matplotlib.pyplot as plt
+                import numpy as np
+
+                fig, ax = plt.subplots()
+                x = np.linspace(0, 10, 100)
+                ax.plot(x, np.sin(x), label='sin(x)')
+                ax.plot(x, np.cos(x), label='cos(x)')
+                ax.legend()
+                ax.set_title("Test Canvas Output")
+
+                st.pyplot(fig)
+                st.success("Canvas rendered!")
+
+            except ImportError:
+                st.warning("matplotlib not available")
+
+    def _render_mesh_page(self):
+        """Render A2A Mesh connectivity page."""
+        st.markdown("""
+        <div class="main-header">
+            <h2 style="margin: 0;">🌐 A2A Mesh Network</h2>
+            <p style="margin: 0; opacity: 0.8;">Full mesh connectivity between agents</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Mesh stats
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Peers", "8")
+        with col2:
+            st.metric("Online", "6")
+        with col3:
+            st.metric("Active Connections", "21")
+        with col4:
+            st.metric("Messages/min", "47")
+
+        st.divider()
+
+        # Tabs for mesh views
+        tab1, tab2, tab3 = st.tabs([
+            "🕸️ Topology", "💬 Messages", "📚 Insights"
+        ])
+
+        with tab1:
+            self._render_mesh_topology()
+
+        with tab2:
+            self._render_mesh_messages()
+
+        with tab3:
+            self._render_shared_insights()
+
+    def _render_mesh_topology(self):
+        """Render mesh network topology."""
+        st.subheader("Mesh Topology")
+
+        # ASCII art representation
+        topology = """
+        ┌──────────────────────────────────────────────────────────────┐
+        │                                                              │
+        │     ┌──────┐         ┌───────┐         ┌────────┐           │
+        │     │ Grok │◄───────►│Claude │◄───────►│ Gemini │           │
+        │     └──┬───┘         └───┬───┘         └───┬────┘           │
+        │        │                 │                 │                │
+        │        │     ┌───────────┼─────────────┐   │                │
+        │        │     │           │             │   │                │
+        │        ▼     ▼           ▼             ▼   ▼                │
+        │     ┌────────┐       ┌──────┐      ┌──────┐                 │
+        │     │DeepSeek│◄─────►│ Kimi │◄────►│  Phi │                 │
+        │     └────────┘       └──────┘      └──────┘                 │
+        │                                                              │
+        └──────────────────────────────────────────────────────────────┘
+        """
+        st.code(topology, language=None)
+
+        # Connection matrix
+        st.markdown("### Connection Matrix")
+
+        agents = ["grok", "claude", "gemini", "deepseek", "kimi", "phi"]
+        matrix_data = {
+            "Agent": agents,
+            "grok": ["—", "✓", "✓", "✓", "✓", "○"],
+            "claude": ["✓", "—", "✓", "✓", "✓", "✓"],
+            "gemini": ["✓", "✓", "—", "○", "✓", "✓"],
+            "deepseek": ["✓", "✓", "○", "—", "✓", "○"],
+            "kimi": ["✓", "✓", "✓", "✓", "—", "✓"],
+            "phi": ["○", "✓", "✓", "○", "✓", "—"],
+        }
+
+        st.dataframe(matrix_data, use_container_width=True)
+        st.caption("✓ = connected, ○ = disconnected")
+
+    def _render_mesh_messages(self):
+        """Render mesh message log."""
+        st.subheader("Recent M2M Messages")
+
+        messages = [
+            {"from": "grok", "to": "claude", "type": "M2M_QUERY", "preview": "What's the best approach for...", "time": "12:35:01"},
+            {"from": "claude", "to": "grok", "type": "M2M_RESPONSE", "preview": "Based on my analysis...", "time": "12:35:03"},
+            {"from": "gemini", "to": "*", "type": "M2M_INSIGHT", "preview": "Discovered pattern in...", "time": "12:34:55"},
+            {"from": "deepseek", "to": "claude", "type": "M2M_COLLABORATE", "preview": "Need help with code...", "time": "12:34:40"},
+        ]
+
+        for msg in messages:
+            col1, col2, col3, col4 = st.columns([2, 2, 4, 1])
+
+            with col1:
+                target = "broadcast" if msg['to'] == "*" else msg['to']
+                st.markdown(f"**{msg['from']}** → {target}")
+
+            with col2:
+                st.code(msg['type'], language=None)
+
+            with col3:
+                st.caption(msg['preview'])
+
+            with col4:
+                st.caption(msg['time'])
+
+    def _render_shared_insights(self):
+        """Render shared insights from the mesh."""
+        st.subheader("Shared Insights")
+
+        insights = [
+            {
+                "source": "grok",
+                "type": "pattern",
+                "content": "User queries about caching often follow discussions about performance",
+                "relevance": 0.85,
+                "acks": 4,
+            },
+            {
+                "source": "claude",
+                "type": "solution",
+                "content": "For similar code review tasks, the hybrid approach works best",
+                "relevance": 0.78,
+                "acks": 3,
+            },
+            {
+                "source": "gemini",
+                "type": "connection",
+                "content": "Memory consolidation improves when triggered after deliberations",
+                "relevance": 0.72,
+                "acks": 2,
+            },
+        ]
+
+        for insight in insights:
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+
+                with col1:
+                    st.markdown(f"**{insight['source']}** ({insight['type']})")
+                    st.write(insight['content'])
+
+                with col2:
+                    st.metric("Relevance", f"{insight['relevance']:.0%}")
+                    st.caption(f"{insight['acks']} acknowledgments")
+
                 st.divider()
 
     def _render_settings_page(self):

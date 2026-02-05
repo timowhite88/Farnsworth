@@ -18,8 +18,9 @@ Usage:
     python main.py --mcp              # MCP server only (for Claude Code)
     python main.py --ui               # Streamlit dashboard only
     python main.py --cli              # Interactive CLI mode
-    python main.py --user             # User-friendly CLI mode (NEW!)
-    python main.py --health           # Start health dashboard (NEW!)
+    python main.py --user             # User-friendly CLI mode
+    python main.py --rich-cli         # Rich TUI with swarm chat (AGI v1.8.4)
+    python main.py --health           # Start health dashboard
     python main.py --setup            # First-time setup wizard
     python main.py --node             # Spin up as P2P network node
     python main.py --node --port 9999 # Custom port for P2P node
@@ -660,6 +661,20 @@ async def run_user_cli_mode():
         print_status("User CLI", "error", str(e))
 
 
+async def run_rich_cli_mode():
+    """Run Rich CLI mode with TUI interface."""
+    print("\n🎨 Farnsworth Rich CLI Mode")
+
+    try:
+        from farnsworth.cli.rich_cli import run_rich_cli
+        await run_rich_cli(data_dir=str(PROJECT_ROOT / "data"))
+    except ImportError as e:
+        print_status("Rich CLI", "error", f"Import error: {e}")
+        print("\nMake sure Rich is installed: pip install rich")
+    except Exception as e:
+        print_status("Rich CLI", "error", str(e))
+
+
 async def run_health_dashboard():
     """Run the health tracking dashboard."""
     print_status("Health Dashboard", "loading", "Starting on port 8081...")
@@ -723,6 +738,7 @@ For more info: https://github.com/timowhite88/Farnsworth
     parser.add_argument("--ui", action="store_true", help="Run Streamlit UI only")
     parser.add_argument("--cli", action="store_true", help="Run interactive CLI")
     parser.add_argument("--user", action="store_true", help="Run user-friendly CLI (recommended for beginners)")
+    parser.add_argument("--rich-cli", action="store_true", help="Run Rich TUI CLI with swarm chat (AGI v1.8.4)")
     parser.add_argument("--health", action="store_true", help="Run health dashboard on port 8081")
     parser.add_argument("--setup", action="store_true", help="Run setup wizard")
     parser.add_argument("--node", action="store_true", help="Spin up as P2P network node")
@@ -741,6 +757,8 @@ For more info: https://github.com/timowhite88/Farnsworth
         asyncio.run(run_setup_wizard())
     elif args.user:
         asyncio.run(run_user_cli_mode())
+    elif getattr(args, 'rich_cli', False):
+        asyncio.run(run_rich_cli_mode())
     elif args.health:
         asyncio.run(run_health_dashboard())
     elif args.node:

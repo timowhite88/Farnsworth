@@ -67,6 +67,45 @@ class A2AMessageType(Enum):
     PONG = "pong"
     ERROR = "error"
 
+    # =========================================================================
+    # AGI v1.8.4: Mesh Connectivity
+    # =========================================================================
+
+    # Peer discovery and health
+    PEER_ANNOUNCE = "peer.announce"                  # Agent announcing itself to mesh
+    PEER_DISCOVER = "peer.discover"                  # Request for peer discovery
+    PEER_HEARTBEAT = "peer.heartbeat"                # Liveness check between peers
+
+    # =========================================================================
+    # AGI v1.8.4: Model-to-Model Communication
+    # =========================================================================
+
+    # Direct model-to-model messaging
+    M2M_INSIGHT = "m2m.insight"                      # Sharing an insight with peers
+    M2M_QUERY = "m2m.query"                          # Query to another model
+    M2M_RESPONSE = "m2m.response"                    # Response to M2M query
+    M2M_COLLABORATE = "m2m.collaborate"              # Request for collaboration
+
+    # =========================================================================
+    # AGI v1.8.4: Collective Bridge
+    # =========================================================================
+
+    # Collective ↔ Swarm bridging
+    COLLECTIVE_DISPATCH = "collective.dispatch"      # Dispatch consensus to agents
+    COLLECTIVE_ESCALATE = "collective.escalate"      # Agent escalating issue to collective
+    COLLECTIVE_VOTE_REQUEST = "collective.vote_request"  # Request collective vote
+    COLLECTIVE_SYNC = "collective.sync"              # Sync between collectives
+
+    # =========================================================================
+    # AGI v1.8.4: Sub-Swarm Management
+    # =========================================================================
+
+    # Dynamic team formation
+    SUBSWARM_FORM = "subswarm.form"                  # Form new sub-swarm
+    SUBSWARM_JOIN = "subswarm.join"                  # Join existing sub-swarm
+    SUBSWARM_LEAVE = "subswarm.leave"                # Leave sub-swarm
+    SUBSWARM_MERGE = "subswarm.merge"                # Merge two sub-swarms
+
 
 class SessionState(Enum):
     """State of an A2A session."""

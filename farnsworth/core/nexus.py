@@ -193,6 +193,50 @@ class SignalType(Enum):
     CHANNEL_TYPING_STARTED = "channel.typing_started"        # User started typing
     CHANNEL_ERROR = "channel.error"                          # Channel error occurred
 
+    # =========================================================================
+    # CLI/GUI Signals (AGI v1.8.4)
+    # =========================================================================
+
+    # CLI Session Signals
+    CLI_SESSION_START = "cli.session.start"                  # Rich CLI session started
+    CLI_SESSION_END = "cli.session.end"                      # Rich CLI session ended
+    CLI_COMMAND = "cli.command"                              # CLI command executed
+
+    # GUI Session Signals
+    GUI_SESSION_START = "gui.session.start"                  # Streamlit GUI session started
+    GUI_CANVAS_RENDER = "gui.canvas.render"                  # Matplotlib canvas rendered
+
+    # User-to-Swarm Signals
+    USER_A2A_REQUEST = "user.a2a.request"                    # User requesting A2A session
+    USER_A2A_JOINED = "user.a2a.joined"                      # User joined A2A session
+    USER_DELIBERATION_REQUEST = "user.deliberation.request"  # User requesting deliberation
+
+    # =========================================================================
+    # A2A Mesh Signals (AGI v1.8.4)
+    # =========================================================================
+
+    # Mesh Connectivity
+    MESH_PEER_ANNOUNCE = "mesh.peer.announce"                # Peer announcing itself to mesh
+    MESH_PEER_DISCOVER = "mesh.peer.discover"                # Peer discovery request
+    MESH_PEER_HEARTBEAT = "mesh.peer.heartbeat"              # Peer heartbeat for liveness
+
+    # Model-to-Model Communication
+    M2M_INSIGHT = "m2m.insight"                              # Model sharing an insight
+    M2M_QUERY = "m2m.query"                                  # Model querying another model
+    M2M_RESPONSE = "m2m.response"                            # Model responding to query
+    M2M_COLLABORATE = "m2m.collaborate"                      # Model requesting collaboration
+
+    # Collective Bridge
+    COLLECTIVE_DISPATCH = "collective.dispatch"              # Dispatching consensus to agents
+    COLLECTIVE_ESCALATE = "collective.escalate"              # Agent escalating to collective
+    COLLECTIVE_VOTE_REQUEST = "collective.vote_request"      # Agent requesting collective vote
+    COLLECTIVE_SYNC = "collective.sync"                      # Syncing between collectives
+
+    # Sub-Swarm Management (Extended)
+    SUBSWARM_FORM = "subswarm.form"                          # Forming a new sub-swarm
+    SUBSWARM_JOIN = "subswarm.join"                          # Agent joining sub-swarm
+    SUBSWARM_LEAVE = "subswarm.leave"                        # Agent leaving sub-swarm
+
 
 # =============================================================================
 # NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)
