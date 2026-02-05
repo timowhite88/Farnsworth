@@ -84,6 +84,15 @@ from .task_routing import (
     get_routing_summary,
 )
 
+from .model_invoker import (
+    ModelInvoker,
+    ModelResponse,
+    get_model_invoker,
+    invoke_model,
+    invoke_for_tool,
+    invoke_for_channel,
+)
+
 __all__ = [
     # Main adapter
     "OpenClawAdapter",
@@ -133,4 +142,11 @@ __all__ = [
     "route_openclaw_task",
     "get_model_for_channel",
     "get_routing_summary",
+    # Model invoker
+    "ModelInvoker",
+    "ModelResponse",
+    "get_model_invoker",
+    "invoke_model",
+    "invoke_for_tool",
+    "invoke_for_channel",
 ]

@@ -174,6 +174,7 @@ class OpenClawAdapter:
         self._canvas = None
         self._device_node = None
         self._voice = None
+        self._model_invoker = None  # For AI-powered tool execution
 
         # Ensure directories exist
         self.workspace_path.mkdir(parents=True, exist_ok=True)
@@ -212,6 +213,15 @@ class OpenClawAdapter:
             self._nexus = get_nexus()
         except ImportError:
             logger.debug("Nexus not available")
+
+        # Load model invoker for AI-powered tasks
+        try:
+            from .model_invoker import get_model_invoker
+            self._model_invoker = get_model_invoker()
+            await self._model_invoker.initialize()
+            logger.info(f"Model invoker loaded: {self._model_invoker.get_available_models()}")
+        except Exception as e:
+            logger.warning(f"Model invoker not available: {e}")
 
     async def _scan_skills(self):
         """Scan workspace for SKILL.md files."""
@@ -354,6 +364,145 @@ class OpenClawAdapter:
                 error=str(e),
                 execution_time=(datetime.now() - start_time).total_seconds()
             )
+
+    async def invoke_with_ai(
+        self,
+        tool: str,
+        action: str,
+        prompt: str,
+        params: Dict = None,
+        **kwargs
+    ) -> OpenClawToolResult:
+        """
+        Invoke a tool with AI model assistance.
+
+        Routes to the best model based on task type and gets AI response.
+
+        Args:
+            tool: Tool name
+            action: Tool action
+            prompt: Task description/prompt for the AI
+            params: Tool parameters
+            **kwargs: Additional model params
+
+        Returns:
+            OpenClawToolResult with AI-generated response
+        """
+        if not self._model_invoker:
+            return OpenClawToolResult(
+                success=False,
+                tool=tool,
+                action=action,
+                error="Model invoker not available"
+            )
+
+        start_time = datetime.now()
+
+        try:
+            # Call model invoker
+            response = await self._model_invoker.invoke_for_tool(
+                tool=tool,
+                action=action,
+                prompt=prompt,
+                context=params,
+                **kwargs
+            )
+
+            execution_time = (datetime.now() - start_time).total_seconds()
+
+            if response.success:
+                return OpenClawToolResult(
+                    success=True,
+                    tool=tool,
+                    action=action,
+                    data={
+                        "response": response.content,
+                        "model": response.model_id,
+                        "tokens": response.tokens_used,
+                    },
+                    metadata={
+                        "fallback_used": response.fallback_used,
+                        "fallback_chain": response.fallback_chain,
+                        "latency_ms": response.latency_ms,
+                    },
+                    execution_time=execution_time
+                )
+            else:
+                return OpenClawToolResult(
+                    success=False,
+                    tool=tool,
+                    action=action,
+                    error=response.error,
+                    metadata={"model": response.model_id},
+                    execution_time=execution_time
+                )
+
+        except Exception as e:
+            return OpenClawToolResult(
+                success=False,
+                tool=tool,
+                action=action,
+                error=str(e),
+                execution_time=(datetime.now() - start_time).total_seconds()
+            )
+
+    async def execute_skill_with_ai(
+        self,
+        skill_name: str,
+        user_input: str,
+        **kwargs
+    ) -> OpenClawToolResult:
+        """
+        Execute a ClawHub skill using AI.
+
+        Loads the skill's instructions and uses AI to complete the task.
+
+        Args:
+            skill_name: Name of the skill
+            user_input: User's task description
+            **kwargs: Additional params
+
+        Returns:
+            OpenClawToolResult
+        """
+        skill = self.skills.get(skill_name)
+        if not skill:
+            return OpenClawToolResult(
+                success=False,
+                tool="skill",
+                action=skill_name,
+                error=f"Skill not found: {skill_name}"
+            )
+
+        # Build prompt from skill content + user input
+        prompt = f"""You are executing the OpenClaw skill: {skill_name}
+
+Skill Description:
+{skill.description}
+
+Skill Instructions:
+{skill.content[:2000]}
+
+Required Tools: {', '.join(skill.tools_required)}
+
+User Request:
+{user_input}
+
+Execute this skill and provide the result."""
+
+        return await self.invoke_with_ai(
+            tool="skill",
+            action=skill_name,
+            prompt=prompt,
+            params={"skill": skill_name, "input": user_input},
+            **kwargs
+        )
+
+    def get_model_status(self) -> Dict:
+        """Get status of available models."""
+        if self._model_invoker:
+            return self._model_invoker.get_status()
+        return {"initialized": False, "error": "Model invoker not loaded"}
 
     # =========================================================================
     # FILESYSTEM HANDLERS (group:fs)
