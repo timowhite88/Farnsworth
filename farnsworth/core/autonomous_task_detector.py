@@ -190,6 +190,18 @@ class AutonomousTaskDetector:
         if len(content) < 20:
             return None
 
+        # CRITICAL: Skip our own notification messages to prevent infinite loops!
+        # These are Farnsworth's announcements about detected tasks
+        notification_markers = [
+            "innovation detected", "task detected", "development swarm",
+            "just proposed something", "routing to", "for immediate implementation",
+            "spawned", "assigning", "i noticed", "suggested something actionable",
+            "development complete", "swarm de"  # TTS truncation
+        ]
+        if any(marker in content for marker in notification_markers):
+            logger.debug(f"Skipping own notification message: {content[:50]}...")
+            return None
+
         # Calculate base confidence from task indicators
         confidence = 0.0
         matched_patterns = []
