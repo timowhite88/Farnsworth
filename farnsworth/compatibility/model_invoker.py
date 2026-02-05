@@ -82,9 +82,9 @@ class ModelInvoker:
         try:
             from farnsworth.integration.external.grok import get_grok_provider
             provider = get_grok_provider()
-            if provider and provider.api_key:
+            if provider and getattr(provider, 'api_key', None):
                 self._providers["Grok"] = provider
-                logger.debug("Loaded Grok provider")
+                logger.info("✓ Loaded Grok provider")
         except Exception as e:
             logger.debug(f"Grok not available: {e}")
 
@@ -92,20 +92,20 @@ class ModelInvoker:
         try:
             from farnsworth.integration.external.gemini import get_gemini_provider
             provider = get_gemini_provider()
-            if provider:
+            if provider and getattr(provider, 'api_key', None):
                 self._providers["Gemini"] = provider
-                logger.debug("Loaded Gemini provider")
+                logger.info("✓ Loaded Gemini provider")
         except Exception as e:
             logger.debug(f"Gemini not available: {e}")
 
-        # Claude (Anthropic)
+        # Claude (via tmux session)
         try:
             from farnsworth.integration.external.claude import get_claude_provider
             provider = get_claude_provider()
             if provider:
                 self._providers["Claude"] = provider
-                self._providers["ClaudeOpus"] = provider  # Same provider, different model
-                logger.debug("Loaded Claude provider")
+                self._providers["ClaudeOpus"] = provider  # Same provider, different handling
+                logger.info("✓ Loaded Claude provider (tmux)")
         except Exception as e:
             logger.debug(f"Claude not available: {e}")
 
@@ -113,38 +113,36 @@ class ModelInvoker:
         try:
             from farnsworth.integration.external.kimi import get_kimi_provider
             provider = get_kimi_provider()
-            if provider:
+            if provider and getattr(provider, 'api_key', None):
                 self._providers["Kimi"] = provider
-                logger.debug("Loaded Kimi provider")
+                logger.info("✓ Loaded Kimi provider")
         except Exception as e:
             logger.debug(f"Kimi not available: {e}")
 
-        # DeepSeek
-        try:
-            from farnsworth.integration.external.base import get_provider
-            provider = get_provider("deepseek")
-            if provider:
-                self._providers["DeepSeek"] = provider
-                logger.debug("Loaded DeepSeek provider")
-        except Exception as e:
-            logger.debug(f"DeepSeek not available: {e}")
+        # DeepSeek - no dedicated provider, uses shadow agent
+        # Will be handled via _call_shadow_agent when needed
+        logger.debug("DeepSeek available via shadow agent only")
 
-        # HuggingFace (Local)
+        # Phi - no dedicated provider, uses shadow agent
+        # Will be handled via _call_shadow_agent when needed
+        logger.debug("Phi available via shadow agent only")
+
+        # HuggingFace (Local inference)
         try:
             from farnsworth.integration.external.huggingface import get_huggingface_provider
             provider = get_huggingface_provider()
             if provider:
                 self._providers["HuggingFace"] = provider
-                logger.debug("Loaded HuggingFace provider")
+                logger.info("✓ Loaded HuggingFace provider (local)")
         except Exception as e:
             logger.debug(f"HuggingFace not available: {e}")
 
-        # Shadow agents (tmux persistent)
+        # Shadow agents (tmux persistent) - fallback for all models
         try:
             from farnsworth.core.collective.persistent_agent import call_shadow_agent, AGENT_CONFIGS
             if AGENT_CONFIGS:
                 self._shadow_agents_available = True
-                logger.debug("Shadow agents available")
+                logger.info(f"✓ Shadow agents available: {list(AGENT_CONFIGS.keys())}")
         except Exception as e:
             logger.debug(f"Shadow agents not available: {e}")
 
@@ -246,10 +244,23 @@ class ModelInvoker:
     ) -> ModelResponse:
         """Call a specific model."""
         try:
+            # Models that only work via shadow agent
+            shadow_only_models = {"DeepSeek", "Phi"}
+
+            if model_id in shadow_only_models:
+                if self._shadow_agents_available:
+                    return await self._call_shadow_agent(model_id, prompt, max_tokens)
+                return ModelResponse(
+                    success=False,
+                    model_id=model_id,
+                    error=f"{model_id} requires shadow agent (not available)"
+                )
+
             provider = self._providers.get(model_id)
             if not provider:
-                # Try shadow agent
+                # Try shadow agent as fallback
                 if self._shadow_agents_available:
+                    logger.info(f"No direct provider for {model_id}, trying shadow agent")
                     return await self._call_shadow_agent(model_id, prompt, max_tokens)
                 return ModelResponse(
                     success=False,
@@ -266,12 +277,10 @@ class ModelInvoker:
                 result = await self._call_claude(provider, prompt, max_tokens, temperature, model_id, **kwargs)
             elif model_id == "Kimi":
                 result = await self._call_kimi(provider, prompt, max_tokens, temperature, **kwargs)
-            elif model_id == "DeepSeek":
-                result = await self._call_deepseek(provider, prompt, max_tokens, temperature, **kwargs)
             elif model_id == "HuggingFace":
                 result = await self._call_huggingface(provider, prompt, max_tokens, temperature, **kwargs)
             else:
-                # Generic call
+                # Try generic call or shadow agent
                 result = await self._call_generic(provider, prompt, max_tokens, temperature, **kwargs)
 
             return result
@@ -285,136 +294,217 @@ class ModelInvoker:
             )
 
     async def _call_grok(self, provider, prompt: str, max_tokens: int, temperature: float, **kwargs) -> ModelResponse:
-        """Call Grok API."""
+        """
+        Call Grok API.
+
+        Grok.chat() signature:
+            prompt, system, context, model, temperature, max_tokens
+        Returns: {"content": str, "model": str, "tokens": int}
+        """
         try:
+            system = kwargs.pop("system", None)
+            context = kwargs.pop("context", None)
+            model = kwargs.pop("model", "grok-3")
+
             result = await provider.chat(
-                prompt,
-                max_tokens=max_tokens,
+                prompt=prompt,
+                system=system,
+                context=context,
+                model=model,
                 temperature=temperature,
-                **kwargs
+                max_tokens=max_tokens
             )
+
             if result and result.get("content"):
                 return ModelResponse(
                     success=True,
                     model_id="Grok",
                     content=result["content"],
-                    tokens_used=result.get("usage", {}).get("total_tokens", 0),
-                    metadata={"model": result.get("model", "grok-4")}
+                    tokens_used=result.get("tokens", 0),
+                    metadata={"model": result.get("model", model)}
                 )
-            return ModelResponse(success=False, model_id="Grok", error="Empty response")
+            error_msg = result.get("error", "Empty response") if result else "Empty response"
+            return ModelResponse(success=False, model_id="Grok", error=error_msg)
         except Exception as e:
             return ModelResponse(success=False, model_id="Grok", error=str(e))
 
     async def _call_gemini(self, provider, prompt: str, max_tokens: int, temperature: float, **kwargs) -> ModelResponse:
-        """Call Gemini API."""
+        """
+        Call Gemini API.
+
+        Gemini.chat() signature:
+            prompt, system, context, model, temperature, max_tokens
+        Returns: {"content": str, "model": str, "tokens": int}
+        """
         try:
-            result = await provider.generate(
-                prompt,
-                max_tokens=max_tokens,
+            system = kwargs.pop("system", None)
+            context = kwargs.pop("context", None)
+            model = kwargs.pop("model", "gemini-2.0-flash")
+
+            result = await provider.chat(
+                prompt=prompt,
+                system=system,
+                context=context,
+                model=model,
                 temperature=temperature,
-                **kwargs
+                max_tokens=max_tokens
             )
-            if result and result.get("text"):
+
+            if result and result.get("content"):
                 return ModelResponse(
                     success=True,
                     model_id="Gemini",
-                    content=result["text"],
-                    tokens_used=result.get("usage", {}).get("total_tokens", 0),
-                    metadata={"model": result.get("model", "gemini-3-flash")}
+                    content=result["content"],
+                    tokens_used=result.get("tokens", 0),
+                    metadata={"model": result.get("model", model)}
                 )
-            return ModelResponse(success=False, model_id="Gemini", error="Empty response")
+            error_msg = result.get("error", "Empty response") if result else "Empty response"
+            return ModelResponse(success=False, model_id="Gemini", error=error_msg)
         except Exception as e:
             return ModelResponse(success=False, model_id="Gemini", error=str(e))
 
     async def _call_claude(self, provider, prompt: str, max_tokens: int, temperature: float, model_variant: str, **kwargs) -> ModelResponse:
-        """Call Claude API."""
+        """
+        Call Claude API (via tmux Claude Code session).
+
+        Claude.chat() signature:
+            prompt, **kwargs (max_tokens)
+        Returns: Optional[str] (NOT a dict - just the string response)
+        """
         try:
-            model = "claude-sonnet-4-5-20250514" if model_variant == "Claude" else "claude-opus-4-5-20250514"
-            result = await provider.complete(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                model=model,
-                **kwargs
+            # Claude provider returns Optional[str], not dict
+            result = await provider.chat(
+                prompt=prompt,
+                max_tokens=max_tokens
             )
-            if result and result.get("content"):
+
+            if result:
                 return ModelResponse(
                     success=True,
                     model_id=model_variant,
-                    content=result["content"],
-                    tokens_used=result.get("usage", {}).get("total_tokens", 0),
-                    metadata={"model": model}
+                    content=result,  # Direct string, not dict
+                    metadata={"model": model_variant, "via": "tmux"}
                 )
-            return ModelResponse(success=False, model_id=model_variant, error="Empty response")
+            return ModelResponse(success=False, model_id=model_variant, error="Empty response from Claude")
         except Exception as e:
             return ModelResponse(success=False, model_id=model_variant, error=str(e))
 
     async def _call_kimi(self, provider, prompt: str, max_tokens: int, temperature: float, **kwargs) -> ModelResponse:
-        """Call Kimi API."""
+        """
+        Call Kimi API.
+
+        Kimi.chat() signature:
+            prompt, system, context, model_tier, temperature, max_tokens,
+            image_url, thinking_mode
+        Returns: {"content": str, "model": str, "tokens": int}
+        """
         try:
+            system = kwargs.pop("system", None)
+            context = kwargs.pop("context", None)
+            model_tier = kwargs.pop("model_tier", "k2.5")
+            thinking_mode = kwargs.pop("thinking_mode", False)
+            image_url = kwargs.pop("image_url", None)
+
             result = await provider.chat(
-                prompt,
-                max_tokens=max_tokens,
+                prompt=prompt,
+                system=system,
+                context=context,
+                model_tier=model_tier,
                 temperature=temperature,
-                **kwargs
+                max_tokens=max_tokens,
+                image_url=image_url,
+                thinking_mode=thinking_mode
             )
+
             if result and result.get("content"):
                 return ModelResponse(
                     success=True,
                     model_id="Kimi",
                     content=result["content"],
-                    tokens_used=result.get("usage", {}).get("total_tokens", 0),
-                    metadata={"model": "kimi-k2.5"}
+                    tokens_used=result.get("tokens", 0),
+                    metadata={
+                        "model": result.get("model", "kimi-k2.5"),
+                        "thinking_mode": thinking_mode
+                    }
                 )
-            return ModelResponse(success=False, model_id="Kimi", error="Empty response")
+            error_msg = result.get("error", "Empty response") if result else "Empty response"
+            return ModelResponse(success=False, model_id="Kimi", error=error_msg)
         except Exception as e:
             return ModelResponse(success=False, model_id="Kimi", error=str(e))
 
     async def _call_deepseek(self, provider, prompt: str, max_tokens: int, temperature: float, **kwargs) -> ModelResponse:
-        """Call DeepSeek API."""
+        """
+        Call DeepSeek API.
+
+        Uses same chat() interface pattern.
+        """
         try:
-            # Use thinking mode for complex tasks
-            use_thinking = kwargs.pop("thinking_mode", False)
-            endpoint = "deepseek-reasoner" if use_thinking else "deepseek-chat"
+            system = kwargs.pop("system", None)
+            context = kwargs.pop("context", None)
+            thinking_mode = kwargs.pop("thinking_mode", False)
+
+            # DeepSeek uses "deepseek-reasoner" for thinking mode
+            model = "deepseek-reasoner" if thinking_mode else "deepseek-chat"
 
             result = await provider.chat(
-                prompt,
-                max_tokens=max_tokens,
+                prompt=prompt,
+                system=system,
+                context=context,
+                model=model,
                 temperature=temperature,
-                model=endpoint,
-                **kwargs
+                max_tokens=max_tokens
             )
+
             if result and result.get("content"):
                 return ModelResponse(
                     success=True,
                     model_id="DeepSeek",
                     content=result["content"],
-                    tokens_used=result.get("usage", {}).get("total_tokens", 0),
-                    metadata={"model": endpoint, "thinking": use_thinking}
+                    tokens_used=result.get("tokens", 0),
+                    metadata={"model": model, "thinking": thinking_mode}
                 )
-            return ModelResponse(success=False, model_id="DeepSeek", error="Empty response")
+            error_msg = result.get("error", "Empty response") if result else "Empty response"
+            return ModelResponse(success=False, model_id="DeepSeek", error=error_msg)
         except Exception as e:
             return ModelResponse(success=False, model_id="DeepSeek", error=str(e))
 
     async def _call_huggingface(self, provider, prompt: str, max_tokens: int, temperature: float, **kwargs) -> ModelResponse:
-        """Call HuggingFace local models."""
+        """
+        Call HuggingFace local/API models.
+
+        HuggingFace.chat() signature:
+            prompt, system, model, temperature, max_tokens, context, prefer_local
+        Returns: {"content": str, "model": str, "tokens": int}
+        """
         try:
-            model_name = kwargs.pop("model", "mistral-7b")
-            result = await provider.generate(
-                prompt,
-                max_tokens=max_tokens,
+            system = kwargs.pop("system", None)
+            context = kwargs.pop("context", None)
+            model = kwargs.pop("model", None)  # Uses default if None
+            prefer_local = kwargs.pop("prefer_local", True)
+
+            result = await provider.chat(
+                prompt=prompt,
+                system=system,
+                model=model,
                 temperature=temperature,
-                model=model_name,
-                **kwargs
+                max_tokens=max_tokens,
+                context=context,
+                prefer_local=prefer_local
             )
-            if result and result.get("text"):
+
+            if result and result.get("content"):
                 return ModelResponse(
                     success=True,
                     model_id="HuggingFace",
-                    content=result["text"],
-                    metadata={"model": model_name, "local": True}
+                    content=result["content"],
+                    tokens_used=result.get("tokens", 0),
+                    metadata={
+                        "model": result.get("model", "local"),
+                        "local": prefer_local
+                    }
                 )
-            return ModelResponse(success=False, model_id="HuggingFace", error="Empty response")
+            error_msg = result.get("error", "Empty response") if result else "Empty response"
+            return ModelResponse(success=False, model_id="HuggingFace", error=error_msg)
         except Exception as e:
             return ModelResponse(success=False, model_id="HuggingFace", error=str(e))
 
