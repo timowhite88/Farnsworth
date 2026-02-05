@@ -31,8 +31,7 @@ from scripts.quantum_proof import QuantumProofGenerator
 
 # Farnsworth X integration
 try:
-    from farnsworth.integration.x_automation.x_bot import XBot
-    from farnsworth.integration.x_automation.enhanced_meme_generator import EnhancedMemeGenerator
+    from farnsworth.integration.x_automation.x_api_poster import XOAuth2Poster
     X_AVAILABLE = True
 except ImportError:
     X_AVAILABLE = False
@@ -129,16 +128,26 @@ Built on @qaboratories Qiskit + IBM Quantum
         }
 
     try:
-        x_bot = XBot()
+        x_poster = XOAuth2Poster()
 
-        # Upload image and post
-        result = await x_bot.post_with_media(
+        # Check if we can post
+        if not x_poster.can_post():
+            print("⚠️  X OAuth tokens not configured or expired")
+            print("Run the OAuth flow first or check token status")
+            raise Exception("X OAuth not ready")
+
+        # Read image as bytes
+        with open(summary_image, 'rb') as f:
+            image_bytes = f.read()
+
+        # Post with media
+        result = await x_poster.post_tweet_with_media(
             text=post_text,
-            media_path=summary_image
+            image_bytes=image_bytes
         )
 
-        if result and result.get('success'):
-            tweet_id = result.get('tweet_id')
+        if result and result.get('data'):
+            tweet_id = result['data'].get('id')
             print(f"✓ Posted to X successfully!")
             print(f"  Tweet ID: {tweet_id}")
 
