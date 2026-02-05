@@ -181,6 +181,18 @@ class SignalType(Enum):
     QUANTUM_PROOF_GENERATED = "quantum.proof_generated"      # Proof image generated
     QUANTUM_PROOF_POSTED = "quantum.proof_posted"            # Proof posted to X
 
+    # Multi-Channel Messaging Signals (AGI v1.8.3)
+    CHANNEL_CONNECTED = "channel.connected"                  # Channel adapter connected
+    CHANNEL_DISCONNECTED = "channel.disconnected"            # Channel adapter disconnected
+    CHANNEL_MESSAGE_RECEIVED = "channel.message_received"    # Inbound message from any channel
+    CHANNEL_MESSAGE_SENT = "channel.message_sent"            # Outbound message sent
+    CHANNEL_USER_PAIRED = "channel.user_paired"              # User paired via pairing code
+    CHANNEL_ACCESS_DENIED = "channel.access_denied"          # Access denied to user
+    CHANNEL_MEDIA_RECEIVED = "channel.media_received"        # Media attachment received
+    CHANNEL_REACTION_RECEIVED = "channel.reaction"           # Reaction/emoji received
+    CHANNEL_TYPING_STARTED = "channel.typing_started"        # User started typing
+    CHANNEL_ERROR = "channel.error"                          # Channel error occurred
+
 
 # =============================================================================
 # NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)
