@@ -69,6 +69,21 @@ from .voice_interface import (
     stop_voice_wake,
 )
 
+from .task_routing import (
+    OpenClawTaskType,
+    ModelCapability,
+    MODEL_REGISTRY,
+    TASK_ROUTING,
+    CHANNEL_MODEL_ROUTING,
+    get_best_model_for_task,
+    get_models_for_task,
+    get_fallback_chain,
+    classify_openclaw_tool,
+    route_openclaw_task,
+    get_model_for_channel,
+    get_routing_summary,
+)
+
 __all__ = [
     # Main adapter
     "OpenClawAdapter",
@@ -105,4 +120,17 @@ __all__ = [
     "text_to_speech",
     "start_voice_wake",
     "stop_voice_wake",
+    # Task routing
+    "OpenClawTaskType",
+    "ModelCapability",
+    "MODEL_REGISTRY",
+    "TASK_ROUTING",
+    "CHANNEL_MODEL_ROUTING",
+    "get_best_model_for_task",
+    "get_models_for_task",
+    "get_fallback_chain",
+    "classify_openclaw_tool",
+    "route_openclaw_task",
+    "get_model_for_channel",
+    "get_routing_summary",
 ]
