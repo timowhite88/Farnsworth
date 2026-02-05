@@ -58,7 +58,7 @@ class QuickActions:
         """
         memory = await self._ensure_memory()
         if memory:
-            mem_id = await memory.remember(content, metadata={"tags": tags or []})
+            mem_id = await memory.remember(content, tags=tags or [])
             return f"Saved: {mem_id[:8]}"
         return "Memory system unavailable"
 
