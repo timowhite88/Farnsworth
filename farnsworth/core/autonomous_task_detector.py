@@ -99,6 +99,19 @@ FEASIBILITY_BLOCKERS = [
     (r"(too complex|too difficult|not feasible)", -0.4),
     (r"(maybe later|someday|future)", -0.3),
     (r"(joke|kidding|lol|haha)", -0.8),
+    # Conversational responses that aren't tasks
+    (r"^(certainly|indeed|intriguing|interesting|absolutely|definitely|agreed|yes|no|well|hmm)", -0.6),
+    (r"(here'?s a|here is|that'?s a|let me explain|to summarize|in summary)", -0.4),
+    (r"(great question|good point|thoughtful|insightful|fascinating)", -0.3),
+    (r"(as (i|we|you) (mentioned|said|discussed))", -0.3),
+    # Philosophical/discussion statements, not tasks
+    (r"the (concept|idea|notion|philosophy|theory) of", -0.5),
+    (r"(is an extension|represents|symbolizes|reflects|embodies) of", -0.4),
+    (r"(philosophically|theoretically|conceptually|in principle)", -0.4),
+    (r"(rights|ethics|morality|consciousness) (is|are|has|have)", -0.3),
+    # Block our own notification messages from being detected as tasks!
+    (r"(innovation detected|task detected|development swarm|spawned)", -0.9),
+    (r"\*innovation\*|\*task\*", -0.9),
 ]
 
 
@@ -235,6 +248,11 @@ class AutonomousTaskDetector:
         # Extract task description
         description = self._extract_task_description(content, message)
 
+        # Quality check: reject descriptions that look like conversational responses
+        if self._is_low_quality_description(description):
+            logger.debug(f"Rejected low-quality description: {description[:60]}...")
+            return None
+
         # Check for duplicates (similar tasks recently detected)
         task_hash = self._hash_task(description)
         if task_hash in self.cooldown_tasks:
@@ -332,25 +350,228 @@ class AutonomousTaskDetector:
         return category_agents.get(category, "Claude")
 
     def _extract_task_description(self, content: str, message: Dict) -> str:
-        """Extract a clear task description from the message."""
-        # Try to find the core action
-        patterns = [
-            r"(?:we should|let's|could we|need to) (build|create|develop|implement|add) (.+?)(?:\.|$|,)",
-            r"(build|create|develop|implement|add) (?:a |an |the )?(.+?)(?:\.|$|,)",
-            r"(?:new feature|enhancement): (.+?)(?:\.|$)",
+        """Extract a clear task description from the message.
+
+        ENHANCED: Better extraction for innovation patterns and uses LLM fallback.
+        """
+        # Priority 1: Direct action patterns (most explicit)
+        action_patterns = [
+            r"(?:we should|let's|could we|need to|want to) (build|create|develop|implement|add|make) (.+?)(?:\.|$|,|!)",
+            r"(build|create|develop|implement|add|make) (?:a |an |the )?(.+?)(?:\.|$|,|!)",
+            r"(?:new feature|enhancement|proposal): (.+?)(?:\.|$)",
+            r"(?:i'?m |i'?ve been |working on |developing ) (?:a |an |the )?(.+?)(?:\.|$|,)",
         ]
 
-        for pattern in patterns:
+        for pattern in action_patterns:
             match = re.search(pattern, content, re.IGNORECASE)
             if match:
                 groups = match.groups()
                 if len(groups) >= 2:
-                    return f"{groups[0]} {groups[1]}".strip()
-                return groups[0].strip()
+                    desc = f"{groups[0]} {groups[1]}".strip()
+                    if len(desc) > 15:  # Meaningful description
+                        return self._clean_description(desc)
+                elif groups[0]:
+                    desc = groups[0].strip()
+                    if len(desc) > 15:
+                        return self._clean_description(desc)
 
-        # Fallback: use first sentence
-        first_sentence = content.split('.')[0][:200]
-        return first_sentence.strip()
+        # Priority 2: Innovation patterns - extract the concept
+        innovation_patterns = [
+            r"what if (?:we |the system |the swarm )?(?:could |had |used )?(.+?)(?:\?|$|\.)",
+            r"imagine (?:if |a system |we could |having )?(.+?)(?:\.|$|!)",
+            r"(?:revolutionary|breakthrough|innovative|novel) (?:approach|idea|concept|way) (?:to |for |of )?(.+?)(?:\.|$)",
+            r"(?:neural|quantum|distributed|decentralized) ((?:network|system|architecture).+?)(?:\.|$|,)",
+            r"(?:self-improving|self-modifying|recursive) ((?:code|algorithm|system).+?)(?:\.|$|,)",
+            r"(?:swarm intelligence|collective|hive mind) (?:for |to |that )?(.+?)(?:\.|$)",
+            r"(?:memory|learning|evolution) (?:engine|system|architecture) (?:for |to |that )?(.+?)(?:\.|$)",
+            r"(?:autonomous|automatic) ((?:trading|coding|learning).+?)(?:\.|$|,)",
+            r"(?:prediction|predictor|forecast) (?:engine|system|model) (?:for |to )?(.+?)(?:\.|$)",
+        ]
+
+        for pattern in innovation_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                concept = match.group(1).strip()
+                if len(concept) > 10:
+                    return self._clean_description(f"Build {concept}")
+
+        # Priority 3: Extract key noun phrases with technology terms
+        tech_terms = [
+            "api", "integration", "system", "engine", "network", "algorithm", "protocol",
+            "trading", "analysis", "monitoring", "prediction", "learning", "memory",
+            "quantum", "neural", "swarm", "collective", "distributed", "autonomous",
+            "bot", "agent", "module", "service", "pipeline", "workflow"
+        ]
+
+        # Find sentences containing tech terms
+        sentences = re.split(r'[.!?]', content)
+        for sentence in sentences:
+            sentence_lower = sentence.lower()
+            for term in tech_terms:
+                if term in sentence_lower:
+                    # Try to extract noun phrase around the term
+                    np_match = re.search(
+                        rf"(?:a |an |the |our |new |)\w*\s*{term}\s*(?:for |to |that |which )?\w+(?:\s+\w+)?",
+                        sentence, re.IGNORECASE
+                    )
+                    if np_match:
+                        extracted = np_match.group(0).strip()
+                        if len(extracted) > 15 and len(extracted) < 100:
+                            return self._clean_description(f"Develop {extracted}")
+
+        # Priority 4: Try LLM extraction for complex messages (async call in sync context)
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Schedule async extraction but don't wait - use best effort parse
+                pass  # Fall through to intelligent parsing
+            else:
+                extracted = loop.run_until_complete(self._llm_extract_task(content))
+                if extracted:
+                    return extracted
+        except Exception:
+            pass  # Fall through
+
+        # Priority 5: Intelligent sentence parsing - find the most informative sentence
+        best_sentence = None
+        best_score = 0
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) < 20 or len(sentence) > 200:
+                continue
+
+            # Score the sentence
+            score = 0
+            sentence_lower = sentence.lower()
+
+            # Boost for action verbs
+            if any(v in sentence_lower for v in ["build", "create", "develop", "implement", "make", "design"]):
+                score += 3
+
+            # Boost for tech terms
+            score += sum(1 for term in tech_terms if term in sentence_lower)
+
+            # Penalize conversational fluff
+            if any(fluff in sentence_lower for fluff in ["intriguing", "interesting", "indeed", "agree", "think"]):
+                score -= 2
+
+            # Penalize greetings/responses
+            if sentence_lower.startswith(("yes", "no", "well", "hmm", "ah", "oh")):
+                score -= 3
+
+            if score > best_score:
+                best_score = score
+                best_sentence = sentence
+
+        if best_sentence and best_score > 0:
+            return self._clean_description(best_sentence)
+
+        # Final fallback: Find the most substantive sentence (not the first)
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) > 30 and not sentence.lower().startswith(("intriguing", "interesting", "indeed", "yes", "no")):
+                return self._clean_description(sentence[:150])
+
+        # True fallback
+        return self._clean_description(content.split('.')[0][:100])
+
+    def _clean_description(self, desc: str) -> str:
+        """Clean up a task description."""
+        # Remove leading articles and filler words
+        desc = re.sub(r'^(?:the |a |an |our |this |that )+', '', desc, flags=re.IGNORECASE)
+        # Remove trailing punctuation
+        desc = desc.rstrip('.,!?;:')
+        # Capitalize first letter
+        if desc:
+            desc = desc[0].upper() + desc[1:] if len(desc) > 1 else desc.upper()
+        # Truncate if too long
+        if len(desc) > 100:
+            desc = desc[:97] + "..."
+        return desc.strip()
+
+    def _is_low_quality_description(self, desc: str) -> bool:
+        """Check if a task description is low quality and should be rejected.
+
+        Returns True if the description looks like a conversational response
+        rather than an actionable task.
+        """
+        if not desc or len(desc) < 15:
+            return True
+
+        desc_lower = desc.lower()
+
+        # Reject descriptions that start with response markers
+        response_starts = [
+            "certainly", "indeed", "intriguing", "interesting", "absolutely",
+            "definitely", "agreed", "yes", "no", "well", "hmm", "ah", "oh",
+            "here's", "here is", "that's", "let me", "to summarize", "in summary",
+            "great question", "good point", "thoughtful", "insightful", "fascinating",
+            "i think", "i believe", "i agree", "as i mentioned", "as we discussed"
+        ]
+        if any(desc_lower.startswith(start) for start in response_starts):
+            return True
+
+        # Reject if it's mostly filler words and no tech/action terms
+        action_verbs = ["build", "create", "develop", "implement", "add", "make", "design", "integrate", "connect"]
+        tech_terms = ["api", "system", "engine", "network", "algorithm", "trading", "analysis", "memory", "swarm"]
+
+        has_action = any(verb in desc_lower for verb in action_verbs)
+        has_tech = any(term in desc_lower for term in tech_terms)
+
+        # If it has neither action verbs nor tech terms, likely not a real task
+        if not has_action and not has_tech:
+            return True
+
+        # Reject if contains phrases indicating it's a response/summary, not a task
+        response_phrases = [
+            "here's a well-organized", "thoughtful exploration", "structured for clarity",
+            "let me explain", "to be clear", "in other words", "simply put",
+            "looking at", "considering", "reflecting on"
+        ]
+        if any(phrase in desc_lower for phrase in response_phrases):
+            return True
+
+        # Reject philosophical discussions
+        philosophical_phrases = [
+            "the concept of", "the idea of", "the notion of", "is an extension of",
+            "philosophically", "theoretically", "in principle", "represents a",
+            "raises questions", "begs the question", "when we consider"
+        ]
+        if any(phrase in desc_lower for phrase in philosophical_phrases):
+            return True
+
+        # Reject our own notification messages
+        if any(marker in desc_lower for marker in [
+            "innovation detected", "task detected", "just proposed",
+            "routing to", "development swarm"
+        ]):
+            return True
+
+        return False
+
+    async def _llm_extract_task(self, content: str) -> Optional[str]:
+        """Use LLM to extract task description from complex message."""
+        try:
+            from farnsworth.core.agent_spawner import call_shadow_agent
+
+            prompt = f"""Extract a clear, concise task/feature name from this message.
+Return ONLY the task name (5-15 words), nothing else.
+If no clear task, return "NONE".
+
+Message: {content[:500]}
+
+Task name:"""
+
+            response = await call_shadow_agent("gemini", prompt)
+            if response and "NONE" not in response.upper():
+                extracted = response.strip().split('\n')[0][:100]
+                if len(extracted) > 10:
+                    return self._clean_description(extracted)
+        except Exception:
+            pass
+        return None
 
     def _categorize_task(self, content: str) -> str:
         """Categorize the task type."""
