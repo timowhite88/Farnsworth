@@ -9,26 +9,48 @@ External tool and capability integration with:
 - Voice interaction (Whisper/TTS)
 """
 
-from farnsworth.integration.tool_router import ToolRouter
-from farnsworth.integration.multimodal import MultimodalProcessor
+# Lazy imports to avoid circular/missing dependency crashes
+try:
+    from farnsworth.integration.tool_router import ToolRouter
+except ImportError:
+    ToolRouter = None
 
-# Vision capabilities
-from farnsworth.integration.vision import (
-    VisionModule,
-    VisionTask,
-    VisionResult,
-    ImageInput,
-    SceneGraph,
-)
+try:
+    from farnsworth.integration.multimodal import MultimodalProcessor
+except ImportError:
+    MultimodalProcessor = None
 
-# Voice capabilities
-from farnsworth.integration.voice import (
-    VoiceModule,
-    TranscriptionResult,
-    TranscriptionSegment,
-    VoiceCommand,
-    AudioInput,
-)
+# Vision capabilities (lazy)
+try:
+    from farnsworth.integration.vision import (
+        VisionModule,
+        VisionTask,
+        VisionResult,
+        ImageInput,
+        SceneGraph,
+    )
+except ImportError:
+    VisionModule = None
+    VisionTask = None
+    VisionResult = None
+    ImageInput = None
+    SceneGraph = None
+
+# Voice capabilities (lazy)
+try:
+    from farnsworth.integration.voice import (
+        VoiceModule,
+        TranscriptionResult,
+        TranscriptionSegment,
+        VoiceCommand,
+        AudioInput,
+    )
+except ImportError:
+    VoiceModule = None
+    TranscriptionResult = None
+    TranscriptionSegment = None
+    VoiceCommand = None
+    AudioInput = None
 
 __all__ = [
     "ToolRouter",
