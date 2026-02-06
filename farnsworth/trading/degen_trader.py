@@ -57,6 +57,18 @@ PUMPFUN_WS_URL = "wss://pumpportal.fun/api/data"
 PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local"
 RAYDIUM_AMM_PROGRAM = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 
+# Multi-launchpad program IDs
+BONK_LAUNCHLAB_PROGRAM = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj"
+BONK_PLATFORM_CONFIG = "FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1"
+BAGS_DBC_PROGRAM = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
+BAGS_CREATOR_PROGRAM = "BAGSB9TpGrZxQbEsrEznv5jXXdwyP6AXerN8aVRiAmcv"
+BAGS_API_URL = "https://public-api-v2.bags.fm/api/v1"
+
+# Platform identifiers for multi-launchpad support
+PLATFORM_PUMP = "pump"        # pump.fun
+PLATFORM_BONK = "bonk"        # letsbonk.fun (via Raydium LaunchLab)
+PLATFORM_BAGS = "bags"        # bags.fm (via Meteora DBC)
+
 # Pump.fun Program Addresses (bonding curve direct trading)
 PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 PUMP_GLOBAL_ACCOUNT = "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"
@@ -120,7 +132,8 @@ class TokenInfo:
     creator_wallet: str = ""
     top_holders_connected: bool = False
     # v3.5: Bonding curve fields
-    on_bonding_curve: bool = False       # still on pump.fun bonding curve
+    platform: str = ""                   # pump/bonk/bags - which launchpad
+    on_bonding_curve: bool = False       # still on bonding curve (any platform)
     curve_progress: float = 0.0          # 0-100% towards graduation
     curve_sol_raised: float = 0.0        # SOL raised so far
     buy_velocity_per_min: float = 0.0    # buys per minute (momentum)
@@ -349,10 +362,14 @@ def load_wallet(name: str = "degen_trader"):
 # PUMP.FUN MONITOR (v3.5 - Enhanced for bonding curve sniping)
 # ============================================================
 class PumpFunMonitor:
-    """Real-time pump.fun new token and trade monitoring via WebSocket.
+    """Real-time multi-launchpad monitoring via PumpPortal WebSocket.
 
-    v3.5: Enhanced with buy velocity tracking, unique buyer counting,
+    Monitors Pump.fun, Bonk (LetsBonk.fun), and BAGS (bags.fm) for
+    new token launches with buy velocity tracking, unique buyer counting,
     creator activity monitoring, and sniper signal generation.
+
+    PumpPortal WS delivers events from both pump.fun and bonk natively.
+    BAGS is monitored via periodic API polling.
     """
 
     def __init__(self):
@@ -362,18 +379,25 @@ class PumpFunMonitor:
         self.sniper_signals: asyncio.Queue = asyncio.Queue(maxsize=100)  # high-priority buys
         self.running = False
         self._task = None
+        self._bags_task = None
         self._tracked_creators: Dict[str, List[str]] = {}  # creator -> [mints they made]
+        # Platform stats
+        self.platform_counts = {PLATFORM_PUMP: 0, PLATFORM_BONK: 0, PLATFORM_BAGS: 0}
+        self.sniper_history: List[dict] = []  # last N sniper signals for dashboard
 
     async def start(self):
-        """Connect to pump.fun WebSocket and monitor."""
+        """Connect to PumpPortal WebSocket and start multi-platform monitoring."""
         self.running = True
         self._task = asyncio.create_task(self._listen())
-        logger.info("PumpFun monitor v3.5 started (bonding curve sniper mode)")
+        self._bags_task = asyncio.create_task(self._poll_bags())
+        logger.info("Multi-launchpad monitor started (Pump.fun + Bonk + BAGS)")
 
     async def stop(self):
         self.running = False
         if self._task:
             self._task.cancel()
+        if self._bags_task:
+            self._bags_task.cancel()
         if self.ws:
             await self.ws.close()
 
@@ -407,13 +431,30 @@ class PumpFunMonitor:
                 logger.warning(f"PumpFun WS error: {e}, reconnecting in 5s...")
                 await asyncio.sleep(5)
 
+    def _detect_platform(self, data: dict) -> str:
+        """Detect which launchpad a PumpPortal event came from."""
+        # PumpPortal includes pool field in newer events
+        pool = data.get("pool", "")
+        if pool == "bonk" or pool == "launchlab":
+            return PLATFORM_BONK
+        if pool == "pump":
+            return PLATFORM_PUMP
+        # Check program ID for fallback detection
+        program = data.get("programId", "")
+        if program == BONK_LAUNCHLAB_PROGRAM:
+            return PLATFORM_BONK
+        # Default to pump.fun
+        return PLATFORM_PUMP
+
     async def _handle_message(self, data: dict):
-        """Process pump.fun WebSocket messages."""
+        """Process PumpPortal WebSocket messages (Pump.fun + Bonk)."""
         if data.get("txType") == "create":
-            # New token created on pump.fun
+            # New token created on launchpad
+            platform = self._detect_platform(data)
             creator = data.get("traderPublicKey", "")
             mint = data.get("mint", "")
             initial_sol = data.get("solAmount", 0) / LAMPORTS_PER_SOL if data.get("solAmount") else 0
+            platform_label = "PUMP" if platform == PLATFORM_PUMP else "BONK" if platform == PLATFORM_BONK else "BAGS"
             token_data = {
                 "mint": mint,
                 "name": data.get("name", ""),
@@ -423,8 +464,10 @@ class PumpFunMonitor:
                 "timestamp": time.time(),
                 "source": "bonding_curve",
                 "on_bonding_curve": True,
+                "platform": platform,
             }
             if mint:
+                self.platform_counts[platform] = self.platform_counts.get(platform, 0) + 1
                 # Track this token's trade stats from birth
                 self.hot_tokens[mint] = {
                     "buys": 1 if initial_sol > 0 else 0,
@@ -439,6 +482,7 @@ class PumpFunMonitor:
                     "symbol": data.get("symbol", ""),
                     "name": data.get("name", ""),
                     "largest_buy_sol": initial_sol,
+                    "platform": platform,
                 }
                 # Track creator history
                 if creator:
@@ -451,19 +495,20 @@ class PumpFunMonitor:
                 except asyncio.QueueFull:
                     self.new_tokens.get_nowait()
                     self.new_tokens.put_nowait(token_data)
-                logger.info(f"PUMPFUN NEW: ${token_data['symbol']} by {creator[:8]}... (dev buy: {initial_sol:.3f} SOL)")
+                logger.info(f"[{platform_label}] NEW: ${token_data['symbol']} by {creator[:8]}... (dev buy: {initial_sol:.3f} SOL)")
 
         elif data.get("txType") in ("buy", "sell"):
             mint = data.get("mint", "")
             trader = data.get("traderPublicKey", "")
             if mint:
                 if mint not in self.hot_tokens:
+                    platform = self._detect_platform(data)
                     self.hot_tokens[mint] = {
                         "buys": 0, "sells": 0, "volume_sol": 0,
                         "first_seen": time.time(), "unique_buyers": set(),
                         "creator": "", "creator_bought": False, "creator_sol": 0,
                         "buy_timestamps": [], "symbol": "", "name": "",
-                        "largest_buy_sol": 0,
+                        "largest_buy_sol": 0, "platform": platform,
                     }
                 stats = self.hot_tokens[mint]
                 sol_amount = data.get("solAmount", 0) / LAMPORTS_PER_SOL if data.get("solAmount") else 0
@@ -510,8 +555,10 @@ class PumpFunMonitor:
         creator_sold = stats.get("creator_sold", False)
 
         # Sniper criteria: multiple unique buyers, good velocity, no creator dump
+        platform = stats.get("platform", PLATFORM_PUMP)
         if (buys >= 3 and unique >= 3 and velocity >= 2.0
                 and sells <= buys * 0.3 and not creator_sold):
+            platform_label = "PUMP" if platform == PLATFORM_PUMP else "BONK" if platform == PLATFORM_BONK else "BAGS"
             signal = {
                 "mint": mint,
                 "symbol": stats.get("symbol", ""),
@@ -527,14 +574,19 @@ class PumpFunMonitor:
                 "creator_sol": stats.get("creator_sol", 0),
                 "largest_buy_sol": stats.get("largest_buy_sol", 0),
                 "timestamp": time.time(),
+                "platform": platform,
             }
             try:
                 self.sniper_signals.put_nowait(signal)
             except asyncio.QueueFull:
                 self.sniper_signals.get_nowait()
                 self.sniper_signals.put_nowait(signal)
+            # Keep last 50 signals for dashboard
+            self.sniper_history.append(signal)
+            if len(self.sniper_history) > 50:
+                self.sniper_history = self.sniper_history[-50:]
             logger.info(
-                f"SNIPER SIGNAL: ${signal['symbol']} | {buys} buys ({unique} unique) | "
+                f"[{platform_label}] SNIPER: ${signal['symbol']} | {buys} buys ({unique} unique) | "
                 f"{velocity:.1f}/min | {stats['volume_sol']:.2f} SOL vol | age {age_seconds:.0f}s"
             )
 
@@ -570,6 +622,63 @@ class PumpFunMonitor:
         """Check if creator has deployed multiple tokens recently (rug signal)."""
         mints = self._tracked_creators.get(creator, [])
         return len(mints) > 2  # 3+ tokens in 30min = serial deployer
+
+    async def _poll_bags(self):
+        """Poll BAGS (bags.fm) API for new token launches."""
+        import aiohttp as _aio
+        session = None
+        while self.running:
+            try:
+                if not session:
+                    bags_key = os.environ.get("BAGS_API_KEY", "")
+                    headers = {"x-api-key": bags_key} if bags_key else {}
+                    session = _aio.ClientSession(headers=headers)
+
+                # Poll bags.fm for recently created tokens
+                url = f"{BAGS_API_URL}/tokens?sort=created&order=desc&limit=10"
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        tokens = data if isinstance(data, list) else data.get("data", data.get("tokens", []))
+                        for item in tokens[:5]:
+                            mint = item.get("mint", item.get("tokenMint", ""))
+                            if not mint or mint in self.hot_tokens:
+                                continue
+                            symbol = item.get("symbol", "")
+                            name = item.get("name", "")
+                            creator = item.get("creator", item.get("creatorAddress", ""))
+                            self.platform_counts[PLATFORM_BAGS] = self.platform_counts.get(PLATFORM_BAGS, 0) + 1
+                            token_data = {
+                                "mint": mint, "name": name, "symbol": symbol,
+                                "creator": creator, "initial_buy_sol": 0,
+                                "timestamp": time.time(), "source": "bonding_curve",
+                                "on_bonding_curve": True, "platform": PLATFORM_BAGS,
+                            }
+                            self.hot_tokens[mint] = {
+                                "buys": 0, "sells": 0, "volume_sol": 0,
+                                "first_seen": time.time(), "unique_buyers": set(),
+                                "creator": creator, "creator_bought": False, "creator_sol": 0,
+                                "buy_timestamps": [], "symbol": symbol, "name": name,
+                                "largest_buy_sol": 0, "platform": PLATFORM_BAGS,
+                            }
+                            try:
+                                self.new_tokens.put_nowait(token_data)
+                            except asyncio.QueueFull:
+                                self.new_tokens.get_nowait()
+                                self.new_tokens.put_nowait(token_data)
+                            logger.info(f"[BAGS] NEW: ${symbol} by {creator[:8] if creator else '?'}...")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"BAGS poll error: {e}")
+            await asyncio.sleep(30)  # poll every 30s
+
+        if session:
+            await session.close()
+
+    def get_sniper_feed(self) -> List[dict]:
+        """Get recent sniper activity for dashboard display."""
+        return list(reversed(self.sniper_history[-20:]))
 
 
 # ============================================================
@@ -653,11 +762,12 @@ class BondingCurveEngine:
     async def buy_on_curve_pumpportal(
         self, mint: str, sol_amount: float, pubkey: str, keypair,
         session: aiohttp.ClientSession, slippage: int = 15, priority_fee: float = 0.005,
+        pool: str = "pump",
     ) -> Optional[str]:
         """Buy a token on the bonding curve via PumpPortal local API.
 
-        This is the fastest path - PumpPortal builds the transaction,
-        we sign locally and submit.
+        Supports multiple launchpads: pool="pump" (pump.fun), pool="bonk" (letsbonk.fun),
+        pool="auto" (auto-detect). PumpPortal handles the transaction building.
         """
         try:
             from solders.transaction import VersionedTransaction
@@ -671,7 +781,7 @@ class BondingCurveEngine:
                 "denominatedInSol": "true",
                 "slippage": slippage,
                 "priorityFee": priority_fee,
-                "pool": "pump",
+                "pool": pool,
             }
             async with session.post(PUMPPORTAL_LOCAL_API, json=payload) as resp:
                 if resp.status != 200:
@@ -716,9 +826,11 @@ class BondingCurveEngine:
     async def sell_on_curve_pumpportal(
         self, mint: str, token_amount_pct: float, pubkey: str, keypair,
         session: aiohttp.ClientSession, slippage: int = 15, priority_fee: float = 0.005,
+        pool: str = "pump",
     ) -> Optional[str]:
         """Sell tokens on the bonding curve via PumpPortal.
 
+        Supports pool="pump", pool="bonk", pool="auto".
         token_amount_pct: fraction to sell (1.0 = all, 0.5 = half)
         """
         try:
@@ -741,7 +853,7 @@ class BondingCurveEngine:
                 "denominatedInSol": "false",
                 "slippage": slippage,
                 "priorityFee": priority_fee,
-                "pool": "pump",
+                "pool": pool,
             }
             async with session.post(PUMPPORTAL_LOCAL_API, json=payload) as resp:
                 if resp.status != 200:
@@ -2419,9 +2531,14 @@ class DegenTrader:
             logger.info(f"SNIPER SKIP {symbol}: curve {curve_state.progress_pct:.1f}% (max {self.config.bonding_curve_max_progress}%)")
             return None
 
+        # Determine PumpPortal pool based on platform
+        platform = signal.get("platform", PLATFORM_PUMP)
+        pool = platform if platform in (PLATFORM_PUMP, PLATFORM_BONK) else "auto"
+        platform_label = "PUMP" if platform == PLATFORM_PUMP else "BONK" if platform == PLATFORM_BONK else "BAGS"
+
         # Execute via PumpPortal (fastest path)
         logger.info(
-            f"SNIPER BUY ${symbol} | {amount_sol:.4f} SOL | "
+            f"[{platform_label}] SNIPER BUY ${symbol} | {amount_sol:.4f} SOL | "
             f"curve {curve_state.progress_pct:.1f}% | {signal.get('buys', 0)} buys | "
             f"{signal.get('velocity', 0):.1f}/min | {signal.get('unique_buyers', 0)} unique"
         )
@@ -2430,6 +2547,7 @@ class DegenTrader:
         if self.config.use_pumpportal:
             tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
                 mint, amount_sol, self.pubkey, self.keypair, self.session,
+                pool=pool,
             )
 
         if not tx_sig:
@@ -3017,7 +3135,9 @@ class DegenTrader:
                 "fast_rpc": bool(self.config.fast_rpc_url and self.config.fast_rpc_url != self.config.rpc_url),
                 "sniper_buys": len(self._sniper_bought),
                 "hot_tokens_tracked": len(self.pump_monitor.hot_tokens) if self.pump_monitor else 0,
+                "platform_counts": self.pump_monitor.platform_counts if self.pump_monitor else {},
             },
+            "sniper_feed": self.pump_monitor.get_sniper_feed() if self.pump_monitor else [],
         }
 
 

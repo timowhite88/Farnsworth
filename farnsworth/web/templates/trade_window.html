@@ -88,10 +88,14 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 .swarm-hud-right{position:absolute;top:10px;right:14px;font-family:'Space Mono',monospace;font-size:0.55rem;color:var(--dim);line-height:1.6;opacity:0.5;text-align:right}
 
 /* ===== FEED GRID ===== */
-.feed-grid{display:grid;grid-template-columns:repeat(3,1fr);flex:1;min-height:0;border-bottom:1px solid var(--border)}
+.feed-grid{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr 1fr;flex:1;min-height:0;border-bottom:1px solid var(--border)}
 .feed-panel{display:flex;flex-direction:column;border-right:1px solid var(--border);min-height:0;overflow:hidden;position:relative}
-.feed-panel:nth-child(3n){border-right:none}
-.feed-panel:nth-child(n+4){border-top:1px solid var(--border)}
+.feed-panel:nth-child(4n){border-right:none}
+.feed-panel:nth-child(n+5){border-top:1px solid var(--border)}
+/* Sniper panel spans first column, both rows */
+.feed-panel.sniper-panel{grid-row:1/3;border-right:2px solid rgba(234,179,8,0.2);background:rgba(234,179,8,0.015)}
+/* Last row has 3 panels + sniper occupying col 1 */
+.feed-grid{grid-template-columns:1.2fr 1fr 1fr 1fr}
 .fp-head{display:flex;align-items:center;gap:6px;padding:8px 12px;font-family:'Space Mono',monospace;font-size:0.58rem;letter-spacing:0.08em;text-transform:uppercase;flex-shrink:0;
   background:rgba(3,0,20,0.8);border-bottom:1px solid rgba(255,255,255,0.04)}
 .fp-icon{font-size:0.8rem}
@@ -113,6 +117,16 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 .t-swarm{background:rgba(168,85,247,0.12);color:#a855f7}.t-rug{background:rgba(239,68,68,0.12);color:var(--red)}
 .t-safe{background:rgba(16,185,129,0.12);color:var(--green)}.t-cabal{background:rgba(236,72,153,0.12);color:var(--pink)}
 .t-learn{background:rgba(234,179,8,0.12);color:var(--yellow)}.t-kol{background:rgba(99,102,241,0.12);color:var(--indigo)}
+.t-sniper{background:rgba(234,179,8,0.15);color:var(--yellow);font-weight:700}.t-pump{background:rgba(139,92,246,0.12);color:var(--purple)}
+.t-bonk{background:rgba(249,115,22,0.15);color:var(--orange)}.t-bags{background:rgba(6,182,212,0.12);color:var(--cyan)}
+.t-grad{background:rgba(16,185,129,0.15);color:var(--green);font-weight:700}
+.sniper-header{display:flex;align-items:center;gap:6px;font-weight:700;letter-spacing:0.12em}
+.sniper-platforms{display:flex;gap:6px;margin-left:auto;font-size:0.5rem}
+.sniper-platforms .sp{padding:2px 6px;border-radius:3px;border:1px solid var(--border);opacity:0.5}
+.sniper-platforms .sp.active{opacity:1;border-color:rgba(234,179,8,0.3)}
+.sp-pump{color:var(--purple)}.sp-bonk{color:var(--orange)}.sp-bags{color:var(--cyan)}
+.curve-bar{height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:3px;overflow:hidden}
+.curve-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--green),var(--yellow),var(--orange));transition:width 0.3s}
 @keyframes fiIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
 
 /* ===== BOTTOM PANELS ===== */
@@ -143,9 +157,10 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 @keyframes gradShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
 
 /* ===== RESPONSIVE ===== */
-@media(max-width:1000px){.feed-grid{grid-template-columns:1fr 1fr}.feed-panel:nth-child(3n){border-right:1px solid var(--border)}.feed-panel:nth-child(2n){border-right:none}}
-@media(max-width:768px){.stats-row{grid-template-columns:repeat(3,1fr)}.bottom{grid-template-columns:1fr}.bp:first-child{border-right:none;border-bottom:1px solid var(--border)}.topbar-center{display:none}}
-@media(max-width:600px){.feed-grid{grid-template-columns:1fr}.feed-panel{border-right:none!important}.swarm-wrap{height:140px}}
+@media(max-width:1200px){.feed-grid{grid-template-columns:1.2fr 1fr 1fr!important}.feed-panel.sniper-panel{grid-row:1/2}}
+@media(max-width:1000px){.feed-grid{grid-template-columns:1fr 1fr!important}.feed-panel.sniper-panel{grid-row:auto;grid-column:1/3}}
+@media(max-width:768px){.stats-row{grid-template-columns:repeat(3,1fr)}.bottom{grid-template-columns:1fr}.bp:first-child{border-right:none;border-bottom:1px solid var(--border)}.topbar-center{display:none}.intel-bar{gap:8px}}
+@media(max-width:600px){.feed-grid{grid-template-columns:1fr!important}.feed-panel{border-right:none!important}.feed-panel.sniper-panel{grid-column:auto}.swarm-wrap{height:140px}}
 </style>
 </head>
 <body>
@@ -161,7 +176,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 <div class="topbar">
   <div class="topbar-left">
     <div class="topbar-title">Farnsworth Command Center</div>
-    <div class="topbar-version">v3.0</div>
+    <div class="topbar-version">v3.5</div>
   </div>
   <div class="topbar-center">
     <div class="status-pill" id="statusPill">
@@ -188,7 +203,9 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 <!-- ===== INTEL BAR ===== -->
 <div class="intel-bar">
   <div class="intel-chip" id="icPump"><span class="dot"></span>Pump.fun</div>
-  <div class="intel-chip" id="icWallet"><span class="dot"></span>Wallet Analyzer</div>
+  <div class="intel-chip" id="icBonk"><span class="dot"></span>Bonk</div>
+  <div class="intel-chip" id="icBags"><span class="dot"></span>BAGS</div>
+  <div class="intel-chip" id="icSniper"><span class="dot"></span>Sniper</div>
   <div class="intel-chip" id="icCopy"><span class="dot"></span>Copy Trade</div>
   <div class="intel-chip" id="icX"><span class="dot"></span>X Sentinel</div>
   <div class="intel-chip" id="icQuantum"><span class="dot"></span>Quantum Oracle</div>
@@ -203,11 +220,24 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
     <canvas id="swarmCanvas"></canvas>
     <div class="swarm-phase" id="swarmPhase">SCANNING</div>
     <div class="swarm-hud-left" id="hudLeft">AGENTS: 11<br>LATENCY: --ms<br>CYCLE: 0</div>
-    <div class="swarm-hud-right" id="hudRight">RPC: ALCHEMY<br>PUMP.FUN: WSS<br>UPTIME: 0m</div>
+    <div class="swarm-hud-right" id="hudRight">RPC: ALCHEMY<br>PUMP|BONK|BAGS: WSS<br>UPTIME: 0m</div>
   </div>
 
-  <!-- 6 feed panels -->
+  <!-- 7 feed panels: Sniper (tall left) + 6 right -->
   <div class="feed-grid">
+    <div class="feed-panel sniper-panel">
+      <div class="fp-head" style="color:var(--yellow)">
+        <span class="fp-icon">&#127919;</span>
+        <span class="sniper-header">Sniper Feed</span>
+        <div class="sniper-platforms">
+          <span class="sp sp-pump" id="spPump">PUMP</span>
+          <span class="sp sp-bonk" id="spBonk">BONK</span>
+          <span class="sp sp-bags" id="spBags">BAGS</span>
+        </div>
+        <span class="fp-count" id="fcSniper">0</span>
+      </div>
+      <div class="fp-scroll" id="fSniper"></div>
+    </div>
     <div class="feed-panel"><div class="fp-head" style="color:var(--purple)"><span class="fp-icon">&#128203;</span>Copy Trade<span class="fp-count" id="fcCopy">0</span></div><div class="fp-scroll" id="fCopy"></div></div>
     <div class="feed-panel"><div class="fp-head" style="color:var(--blue)"><span class="fp-icon">&#128225;</span>X Sentinel<span class="fp-count" id="fcX">0</span></div><div class="fp-scroll" id="fX"></div></div>
     <div class="feed-panel"><div class="fp-head" style="color:var(--cyan)"><span class="fp-icon">&#9883;</span>Quantum Oracle<span class="fp-count" id="fcQ">0</span></div><div class="fp-scroll" id="fQ"></div></div>
@@ -229,6 +259,8 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
   <span class="ms">Patterns: <span class="mv" id="mPat">0</span></span>
   <span class="ms">Tracked: <span class="mv" id="mWal">0</span></span>
   <span class="ms">X Signals: <span class="mv" id="mXSig">0</span></span>
+  <span class="ms">Sniped: <span class="mv" id="mSnipe">0</span></span>
+  <span class="ms">Hot Tokens: <span class="mv" id="mHot">0</span></span>
   <span class="ms">RPC: <span class="mv" id="mRpc">--</span></span>
   <a href="/demo" class="back-link">&larr; Back to Demo</a>
 </div>
@@ -345,10 +377,13 @@ function spawnP(){
 // SIMULATION DATA
 // ============================================================
 const TOKENS=['$BONK','$WIF','$POPCAT','$MYRO','$MEW','$PEPE','$DOGE','$FART','$GIGA','$BOME','$SLERF','$HARAMBE','$NEIRO','$PNUT','$GOAT','$MOODENG','$AI16Z','$GRIFFAIN','$ZEREBRO','$VIRTUAL'];
+const SNIPER_TOKENS=['$RUGPULL','$MOONCOIN','$DEGEN420','$CATGOLD','$SOLBULL','$PEPEMOON','$WOJAK2','$GIGACHAD','$ELONCAT','$TRUMPSOL','$FROGKING','$DOGEMARS'];
 const WALLETS=['7xKZ...3mF','4pQr...9Tz','Bv3k...7wN','Dk8j...2cR','9mFz...4qP','3nHx...8bL','Fw2v...5gS','6tYp...1kJ'];
 const SIGNALS=['CABAL_SHILL','KOL_CALL','TRENDING','INSIDER_ALERT','DEV_MOVEMENT'];
 const AGENTS_SHORT=['Grok','DeepSeek','Gemini','Kimi','Farnsworth','Claude'];
 const VERDICTS=['BUY','STRONG_BUY','SKIP'];
+const PLATFORMS=['PUMP','BONK','BAGS'];
+const PLAT_CLS={'PUMP':'t-pump','BONK':'t-bonk','BAGS':'t-bags'};
 
 function rnd(a){return a[~~(Math.random()*a.length)]}
 function rndF(a,b){return(Math.random()*(b-a)+a).toFixed(2)}
@@ -357,16 +392,17 @@ function ts(){return new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2
 function mkAddr(){const c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz123456789';let s='';for(let i=0;i<4;i++)s+=c[~~(Math.random()*c.length)];return s+'...'+c[~~(Math.random()*c.length)]+c[~~(Math.random()*c.length)]+c[~~(Math.random()*c.length)]}
 
 // Feed counters
-const counts={copy:0,x:0,q:0,w:0,s:0,e:0};
+const counts={sniper:0,copy:0,x:0,q:0,w:0,s:0,e:0};
 
 function addFeed(panelId,html,countKey){
   const el=document.getElementById(panelId);
   const d=document.createElement('div');d.className='fi';d.innerHTML=html;
   el.insertBefore(d,el.firstChild);
-  if(el.children.length>40)el.removeChild(el.lastChild);
+  if(el.children.length>50)el.removeChild(el.lastChild);
   counts[countKey]++;
-  document.getElementById('fc'+countKey.charAt(0).toUpperCase()+countKey.slice(1)).textContent=counts[countKey];
-  // auto-scroll to top already since we prepend
+  const cid='fc'+countKey.charAt(0).toUpperCase()+countKey.slice(1);
+  const cel=document.getElementById(cid);
+  if(cel)cel.textContent=counts[countKey];
 }
 
 // ============================================================
@@ -376,6 +412,36 @@ let simCycle=0,simRunning=false,simIntervals=[];
 
 function startSim(){
   if(simRunning)return;simRunning=true;
+  // Platform indicators active
+  ['spPump','spBonk','spBags'].forEach(id=>document.getElementById(id).classList.add('active'));
+
+  // SNIPER FEED (most important - shows launches from all platforms)
+  simIntervals.push(setInterval(()=>{
+    const t=rnd(SNIPER_TOKENS),plat=rnd(PLATFORMS),platCls=PLAT_CLS[plat];
+    const buys=rndI(3,25),unique=rndI(3,Math.min(buys,15)),vel=rndF(2,12);
+    const curve=rndI(2,45),sol=rndF(0.3,8),dev=Math.random()>0.5;
+    const action=Math.random();
+    let html='';
+    if(action<0.35){
+      // New launch detected
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">NEW</span> ${t} launched &mdash; dev buy: <strong>${rndF(0.01,2)} SOL</strong><div class="curve-bar"><div class="curve-fill" style="width:${rndI(0,5)}%"></div></div></span>`;
+    } else if(action<0.65){
+      // Sniper signal
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">SNIPE</span> ${t} <strong>${buys}</strong> buys (${unique} unique) <strong>${vel}/min</strong> | ${sol} SOL vol<div class="curve-bar"><div class="curve-fill" style="width:${curve}%"></div></div></span>`;
+    } else if(action<0.82){
+      // Sniper buy executed
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-buy">BOUGHT</span> ${t} for <strong>${rndF(0.02,0.08)} SOL</strong> | curve: ${curve}% | vel: ${vel}/min | tx:${mkAddr()}</span>`;
+    } else if(action<0.92){
+      // Graduation sell
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-grad">GRADUATED</span> ${t} hit 85 SOL! Selling 50% &mdash; <strong>+${rndF(2,15)}x</strong></span>`;
+    } else {
+      // Skip signal
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-rug">SKIP</span> ${t} &mdash; ${rnd(['serial deployer','creator dumped','low velocity','>50% curve'])}</span>`;
+    }
+    addFeed('fSniper',html,'sniper');
+    activateBots(['farnsworth','deepseek','grok'],1200);
+  },2500+Math.random()*2000));
+
   // Copy trade
   simIntervals.push(setInterval(()=>{
     const w=rnd(WALLETS),t=rnd(TOKENS),sol=rndF(0.3,12);
@@ -427,7 +493,7 @@ function startSim(){
     const phases=['SCANNING','ANALYZING','SCORING','DEEP ANALYZE','EXECUTING'];
     document.getElementById('swarmPhase').textContent=rnd(phases);
     document.getElementById('hudLeft').innerHTML=`AGENTS: 11<br>LATENCY: ${rndI(12,89)}ms<br>CYCLE: ${simCycle}`;
-    document.getElementById('hudRight').innerHTML=`RPC: ALCHEMY<br>PUMP.FUN: WSS<br>UPTIME: ${simCycle}m`;
+    document.getElementById('hudRight').innerHTML=`RPC: ALCHEMY<br>PUMP|BONK|BAGS: WSS<br>UPTIME: ${simCycle}m`;
   },8000));
 }
 
@@ -478,17 +544,37 @@ async function poll(){
 
       // Intel lights
       const intel=d.intelligence||{};
-      ['Pump','Wallet','Copy','X','Quantum','Swarm','Memory'].forEach((n,i)=>{
-        const keys=['pumpfun','wallet_analysis','copy_trading','x_sentinel','quantum_oracle','swarm','trading_memory'];
+      ['Pump','Bonk','Bags','Sniper','Copy','X','Quantum','Swarm','Memory'].forEach((n,i)=>{
+        const keys=['pumpfun','pumpfun','pumpfun','sniper_mode','copy_trading','x_sentinel','quantum_oracle','swarm','trading_memory'];
         const el=document.getElementById('ic'+n);
-        if(intel[keys[i]])el.classList.add('on');else el.classList.remove('on');
+        if(el){if(intel[keys[i]])el.classList.add('on');else el.classList.remove('on');}
       });
+      // Platform indicators
+      const pc=intel.platform_counts||{};
+      if(pc.pump>0)document.getElementById('spPump').classList.add('active');
+      if(pc.bonk>0)document.getElementById('spBonk').classList.add('active');
+      if(pc.bags>0)document.getElementById('spBags').classList.add('active');
+
+      // Live sniper feed
+      const sniperFeed=d.sniper_feed||[];
+      if(sniperFeed.length>0){
+        const panel=document.getElementById('fSniper');
+        sniperFeed.forEach(sig=>{
+          const plat=(sig.platform||'pump').toUpperCase();
+          const platCls={'PUMP':'t-pump','BONK':'t-bonk','BAGS':'t-bags'}[plat]||'t-pump';
+          const t=new Date(sig.timestamp*1000).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit'});
+          const html=`<span class="fi-t">${t}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">SNIPE</span> $${sig.symbol} <strong>${sig.buys}</strong> buys (${sig.unique_buyers} unique) <strong>${sig.velocity?.toFixed(1)||0}/min</strong> | ${sig.volume_sol?.toFixed(2)||0} SOL</span>`;
+          addFeed('fSniper',html,'sniper');
+        });
+      }
 
       // Memory bar
       document.getElementById('mPat').textContent=intel.learned_patterns||0;
       document.getElementById('mWal').textContent=intel.tracked_wallets||0;
       document.getElementById('mXSig').textContent=intel.x_signals_active||0;
       document.getElementById('mRpc').textContent=intel.fast_rpc?'ALCHEMY':'DEFAULT';
+      document.getElementById('mSnipe').textContent=intel.sniper_buys||0;
+      document.getElementById('mHot').textContent=intel.hot_tokens_tracked||0;
 
       // Positions
       const pe2=document.getElementById('bpPos');const positions=d.positions||{};
@@ -510,10 +596,12 @@ async function poll(){
       document.getElementById('statusDot').className='status-dot off';
       document.getElementById('statusLabel').textContent='SIMULATION';
       // Intel all on for sim
-      ['Pump','Wallet','Copy','X','Quantum','Swarm','Memory'].forEach(n=>document.getElementById('ic'+n).classList.add('on'));
+      ['Pump','Bonk','Bags','Sniper','Copy','X','Quantum','Swarm','Memory'].forEach(n=>{const el=document.getElementById('ic'+n);if(el)el.classList.add('on')});
       document.getElementById('mRpc').textContent='ALCHEMY';
       document.getElementById('mWal').textContent='47';
       document.getElementById('mPat').textContent='128';
+      document.getElementById('mSnipe').textContent='12';
+      document.getElementById('mHot').textContent='89';
       if(!simRunning)startSim();
     }
   }
