@@ -290,7 +290,7 @@ class EvolutionEngine:
         if feedback_file.exists():
             try:
                 feedback_data = json.loads(feedback_file.read_text())
-            except:
+            except Exception:
                 pass
 
         feedback_data.append({
@@ -371,7 +371,7 @@ class EvolutionEngine:
                 unprocessed = [f for f in feedback_data if not f.get("processed")]
                 if len(unprocessed) > 5:
                     suggestions.append(f"Review {len(unprocessed)} unprocessed feedback items")
-            except:
+            except Exception:
                 pass
 
         return suggestions or ["System performing optimally - continue current approach"]

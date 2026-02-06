@@ -71,7 +71,7 @@ class SelfAwarenessBootstrap:
                     try:
                         version = line.split("version-")[1].split("-")[0]
                         facts["version"] = version
-                    except:
+                    except (IndexError, ValueError):
                         pass
 
         # Extract key components

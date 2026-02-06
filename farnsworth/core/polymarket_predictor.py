@@ -69,7 +69,7 @@ class MarketSnapshot:
             if isinstance(prices, str):
                 try:
                     prices = json.loads(prices)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     prices = []
             outcomes = ['Yes', 'No'] if len(prices) == 2 else [f"Option {i+1}" for i in range(len(prices))]
             for i, price in enumerate(prices):
@@ -550,7 +550,7 @@ class PolymarketPredictor:
                 else:
                     confidence = 0.6
                     reasoning = f"Medium-term ({days_left}d)"
-            except:
+            except Exception:
                 pass
 
         return PredictiveSignal(

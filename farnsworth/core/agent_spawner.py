@@ -480,7 +480,7 @@ class AgentSpawner:
         for f in audit_files:
             try:
                 audits.append(json.loads(f.read_text()))
-            except:
+            except Exception:
                 pass
         return audits
 

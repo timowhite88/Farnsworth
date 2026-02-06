@@ -973,7 +973,7 @@ class MemorySystem:
                         age_hours = (datetime.now() - created_at).total_seconds() / 3600
                         recency_factor = 1.0 / (1.0 + age_hours / 24)  # Half-life of 24 hours
                         score *= (0.7 + 0.3 * recency_factor)
-                    except:
+                    except Exception:
                         pass
 
             all_memories.append({

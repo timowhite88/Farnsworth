@@ -18,7 +18,7 @@ def get_worker_status():
     try:
         r = requests.get("http://localhost:8080/api/workers/status", timeout=5)
         return r.json().get("spawner", {})
-    except:
+    except Exception:
         return {"completed_tasks": 0, "in_progress_tasks": 0, "pending_tasks": 0, "discoveries": 0}
 
 def format_post(status):

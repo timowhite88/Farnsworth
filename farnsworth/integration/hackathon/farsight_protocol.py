@@ -251,7 +251,7 @@ Be realistic and specific."""
                             if prob > 1:
                                 prob = prob / 100
                             outcomes[outcome[:50]] = min(prob, 1.0)
-                        except:
+                        except (ValueError, IndexError):
                             pass
 
             # If no outcomes parsed, use defaults
@@ -360,7 +360,7 @@ REASONING: [explanation]"""
                         try:
                             conf = line.replace('CONFIDENCE:', '').strip()
                             prediction.farsight_confidence = float(conf.split()[0])
-                        except:
+                        except (ValueError, IndexError):
                             pass
                     elif line.startswith('REASONING:'):
                         prediction.farsight_reasoning = line.replace('REASONING:', '').strip()

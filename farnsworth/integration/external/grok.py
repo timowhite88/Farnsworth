@@ -964,7 +964,7 @@ Search comprehensively, verify facts across sources, and provide a detailed resp
                         if resp.status == 200:
                             try:
                                 result = json.loads(result_text)
-                            except:
+                            except (json.JSONDecodeError, ValueError):
                                 result = {"raw": result_text}
 
                             # Check for completion - xAI returns {"video": {"url": "..."}} when done

@@ -269,8 +269,27 @@ class Workflow:
                 if output_id not in node_ids:
                     errors.append(f"Node {node.name} references non-existent output {output_id}")
 
-        # Check for cycles (basic check)
-        # TODO: Implement full cycle detection
+        # DFS-based cycle detection
+        adjacency = {n.id: list(n.outputs) for n in self.nodes}
+        visited = set()
+        rec_stack = set()
+
+        def _has_cycle(node_id):
+            visited.add(node_id)
+            rec_stack.add(node_id)
+            for neighbor in adjacency.get(node_id, []):
+                if neighbor not in visited:
+                    if _has_cycle(neighbor):
+                        return True
+                elif neighbor in rec_stack:
+                    return True
+            rec_stack.discard(node_id)
+            return False
+
+        for nid in node_ids:
+            if nid not in visited:
+                if _has_cycle(nid):
+                    errors.append("Workflow contains a cycle")
 
         # Check trigger configuration
         if not self.triggers and not any(n.type == NodeType.TRIGGER for n in self.nodes):
@@ -789,7 +808,7 @@ class WorkflowBuilder:
             ) as response:
                 try:
                     response_body = await response.json()
-                except:
+                except Exception:
                     response_body = await response.text()
 
                 return {

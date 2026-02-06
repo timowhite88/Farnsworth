@@ -407,7 +407,7 @@ class StateRestore:
             try:
                 with open(file_path, 'r') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 pass
 
         # Add new entries, avoiding duplicates by content hash
@@ -432,7 +432,7 @@ class StateRestore:
             try:
                 with open(file_path, 'r') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 pass
 
         existing['conversations'].extend(conversations)
@@ -451,7 +451,7 @@ class StateRestore:
             try:
                 with open(file_path, 'r') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 pass
 
         existing['episodes'].extend(episodes)
@@ -479,7 +479,7 @@ class StateRestore:
             try:
                 with open(file_path, 'r') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 pass
 
         existing['history'].extend(history)
@@ -516,7 +516,7 @@ class StateRestore:
             try:
                 with open(file_path, 'r') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 pass
 
         existing['notes'].extend(notes)
@@ -535,7 +535,7 @@ class StateRestore:
             try:
                 with open(file_path, 'r') as f:
                     existing = json.load(f)
-            except:
+            except Exception:
                 pass
 
         existing['snippets'].extend(snippets)

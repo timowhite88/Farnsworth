@@ -195,7 +195,7 @@ class PolymarketAPI:
                     prices = json.loads(prices)
                     price_yes = float(prices[0]) if prices[0] else 0.5
                     price_no = float(prices[1]) if prices[1] else 0.5
-                except:
+                except (json.JSONDecodeError, ValueError, IndexError):
                     pass
 
         # Parse status
@@ -210,7 +210,7 @@ class PolymarketAPI:
         if data.get("endDate"):
             try:
                 end_date = datetime.fromisoformat(data["endDate"].replace("Z", "+00:00"))
-            except:
+            except (ValueError, TypeError):
                 pass
 
         return PolymarketMarket(

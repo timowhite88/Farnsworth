@@ -165,7 +165,7 @@ def get_worker_status():
             "memory_entries": data.get("memory_count", 1000),
             "participants": data.get("participants", 6)
         }
-    except:
+    except Exception:
         try:
             # Fallback to memory stats
             r = requests.get("http://localhost:8000/api/memory/stats", timeout=5)
@@ -176,7 +176,7 @@ def get_worker_status():
                 "memory_entries": data.get("total_memories", 1000),
                 "participants": 6
             }
-        except:
+        except Exception:
             return {"uptime": "24/7", "models": 5, "memory_entries": 1000, "participants": 6}
 
 
@@ -247,7 +247,7 @@ def post_to_moltbook(title, content):
         else:
             try:
                 error = r.json()
-            except:
+            except (json.JSONDecodeError, ValueError):
                 error = r.text
             print(f"[{now}] FAILED: {error}")
             return False

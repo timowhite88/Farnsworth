@@ -175,7 +175,7 @@ class ClaudeProvider(ExternalProvider):
                             else:
                                 stable_count = 0
                             last_size = current_size
-                except:
+                except Exception:
                     pass
 
             # Read the response
@@ -186,7 +186,7 @@ class ClaudeProvider(ExternalProvider):
                 # Clean up
                 try:
                     os.remove(output_file)
-                except:
+                except OSError:
                     pass
 
                 if response:

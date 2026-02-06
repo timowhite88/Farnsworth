@@ -158,7 +158,7 @@ class DexScreenerAPI:
         if pair.get("pairCreatedAt"):
             try:
                 created_at = datetime.fromtimestamp(pair["pairCreatedAt"] / 1000)
-            except:
+            except (ValueError, TypeError, OSError):
                 pass
 
         return TokenData(

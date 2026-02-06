@@ -77,7 +77,7 @@ def prompt_memory_load(
             from eth_account import Account
             wallet_address = Account.from_key(wallet_key).address
             print(f"  Wallet: {wallet_address[:10]}...{wallet_address[-8:]}")
-        except:
+        except Exception:
             pass
 
     print("\n" + "-" * 60)

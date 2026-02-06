@@ -844,7 +844,7 @@ class GitHubProvider(ExternalProvider):
                         lambda: self.repo_obj.get_contents(path, ref=branch)
                     )
                     existing_sha = existing.sha
-                except:
+                except Exception:
                     pass
 
             if existing_sha:

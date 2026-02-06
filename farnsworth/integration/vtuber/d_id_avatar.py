@@ -18,7 +18,7 @@ from loguru import logger
 try:
     from dotenv import load_dotenv
     load_dotenv("/workspace/Farnsworth/.env")
-except:
+except ImportError:
     pass
 
 

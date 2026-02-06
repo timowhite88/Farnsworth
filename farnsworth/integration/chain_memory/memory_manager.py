@@ -325,7 +325,7 @@ class ChainMemory:
         try:
             os.remove(mp4_path)
             os.remove(index_path)
-        except:
+        except Exception:
             pass
 
         logger.info(f"Memory pushed! ID: {result.memory_id}")

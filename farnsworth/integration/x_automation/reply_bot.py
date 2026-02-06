@@ -291,7 +291,7 @@ OUTPUT: Just the reply text, nothing else."""
                         "timestamp": datetime.now().isoformat()
                     })
                     challenger._save_state()
-                except:
+                except Exception:
                     pass
 
                 logger.info(f"=== GROK CONVERSATION REPLY POSTED ===")

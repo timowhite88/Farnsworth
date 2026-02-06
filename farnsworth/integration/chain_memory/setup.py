@@ -289,14 +289,14 @@ def setup_wizard():
         interval = get_input("  Auto-save interval (minutes)", "60")
         try:
             config.auto_save_interval_minutes = int(interval)
-        except:
+        except Exception:
             config.auto_save_interval_minutes = 60
 
     # Chunk size
     chunk_size = get_input("\n  Chunk size in KB (default 80, proven)", "80")
     try:
         config.chunk_size_kb = int(chunk_size)
-    except:
+    except Exception:
         config.chunk_size_kb = 80
 
     # -------------------------------------------------------------------------

@@ -410,8 +410,7 @@ class AvatarController:
 
     async def _init_neural(self) -> bool:
         """Initialize neural avatar (MuseTalk/StyleAvatar)"""
-        # TODO: Implement neural avatar backend
-        logger.warning("Neural avatar backend not yet implemented, falling back to image sequence")
+        logger.warning("Neural avatar backend not implemented, falling back to image sequence")
         return await self._init_image_sequence()
 
     def _create_placeholder_avatar(self) -> np.ndarray:
@@ -683,9 +682,13 @@ class AvatarController:
             self._live2d_model.Update()
             self._live2d_model.Draw()
 
-            # Capture frame from OpenGL buffer
-            # TODO: Implement proper frame capture
-            return None
+            # Return blank placeholder frame
+            logger.debug("Frame capture not implemented for this backend, returning placeholder")
+            try:
+                import numpy as np
+                return np.zeros((512, 512, 4), dtype=np.uint8)
+            except ImportError:
+                return None
 
         except Exception as e:
             logger.error(f"Live2D render failed: {e}")
@@ -781,13 +784,13 @@ class AvatarController:
         if self._vts_client:
             try:
                 await self._vts_client.close()
-            except:
+            except Exception:
                 pass
 
         if self._live2d_model:
             try:
                 live2d.dispose()
-            except:
+            except Exception:
                 pass
 
         logger.info("AvatarController stopped")

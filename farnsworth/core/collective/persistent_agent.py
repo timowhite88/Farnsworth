@@ -245,7 +245,7 @@ class DialogueBus:
     def _load(self) -> Dict:
         try:
             return json.loads(self.bus_file.read_text())
-        except:
+        except Exception:
             self._ensure_file()
             return json.loads(self.bus_file.read_text())
 
@@ -351,7 +351,7 @@ class TaskQueue:
     def _load(self) -> Dict:
         try:
             return json.loads(self.queue_file.read_text())
-        except:
+        except Exception:
             self._ensure_file()
             return json.loads(self.queue_file.read_text())
 

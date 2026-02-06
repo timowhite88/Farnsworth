@@ -356,7 +356,7 @@ class DiscordBridge:
                 # Pin important message
                 try:
                     await reaction.message.pin()
-                except:
+                except Exception:
                     pass
 
         self._running = True

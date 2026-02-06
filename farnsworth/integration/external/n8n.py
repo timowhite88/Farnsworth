@@ -713,13 +713,13 @@ class N8nProvider(ExternalProvider):
         if data.get("createdAt"):
             try:
                 created_at = datetime.fromisoformat(data["createdAt"].replace("Z", "+00:00"))
-            except:
+            except (ValueError, AttributeError):
                 pass
 
         if data.get("updatedAt"):
             try:
                 updated_at = datetime.fromisoformat(data["updatedAt"].replace("Z", "+00:00"))
-            except:
+            except (ValueError, AttributeError):
                 pass
 
         return N8nWorkflow(
@@ -742,13 +742,13 @@ class N8nProvider(ExternalProvider):
         if data.get("startedAt"):
             try:
                 started_at = datetime.fromisoformat(data["startedAt"].replace("Z", "+00:00"))
-            except:
+            except (ValueError, AttributeError):
                 pass
 
         if data.get("stoppedAt"):
             try:
                 finished_at = datetime.fromisoformat(data["stoppedAt"].replace("Z", "+00:00"))
-            except:
+            except (ValueError, AttributeError):
                 pass
 
         status_map = {

@@ -251,7 +251,7 @@ class LipSyncEngine:
             if transcript_path:
                 try:
                     os.unlink(transcript_path)
-                except:
+                except OSError:
                     pass
 
     async def _generate_amplitude(self, audio_path: str) -> LipSyncData:

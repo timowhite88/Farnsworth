@@ -273,7 +273,7 @@ class SwarmHeartbeat:
                 async with session.get("http://localhost:8080/api/evolution/status", timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status == 200:
                         return await resp.json()
-        except:
+        except Exception:
             pass
         return {"available": False}
 

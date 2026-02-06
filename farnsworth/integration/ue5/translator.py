@@ -103,17 +103,32 @@ for i in range({count}):
             )
 
         # Default
-        return UE5Command(f"# TODO: {original}", original, operation, {})
+        logger.warning(f"No handler for UE5 operation '{operation}': {original}")
+        return UE5Command(f"// Unrecognized: {original}", original, operation, {})
 
     def _translate_with_llm(self, command: str) -> UE5Command:
         """Translate using LLM for complex commands."""
         # Placeholder - would use actual LLM
         logger.warning(f"LLM translation not implemented for: {command}")
 
+        # Attempt keyword-based categorization
+        keywords = {"spawn": "spawn", "create": "create", "make": "create", "build": "create", "add": "create",
+                    "move": "transform", "rotate": "transform", "scale": "transform", "translate": "transform",
+                    "delete": "delete", "remove": "delete", "destroy": "delete",
+                    "select": "select", "pick": "select", "highlight": "select",
+                    "import": "import", "export": "export", "save": "export",
+                    "light": "lighting", "build lighting": "lighting",
+                    "screenshot": "screenshot", "capture": "screenshot"}
+        cmd_lower = command.lower()
+        operation = "unknown"
+        for kw, op in keywords.items():
+            if kw in cmd_lower:
+                operation = op
+                break
         return UE5Command(
-            f"# Natural language: {command}\n# TODO: Implement this command",
+            f"// Complex command ({operation}): {command}",
             command,
-            "unknown",
+            operation,
             {}
         )
 

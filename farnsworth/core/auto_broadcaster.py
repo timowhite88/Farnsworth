@@ -101,7 +101,7 @@ async def get_status():
     try:
         r = requests.get("http://localhost:8080/api/workers/status", timeout=5)
         return r.json()
-    except:
+    except Exception:
         return None
 
 async def send_update(agent, task_type, desc, done, building, queued, discoveries):

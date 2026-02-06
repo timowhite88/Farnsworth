@@ -633,7 +633,7 @@ class StreamManager:
                                         # Put in queue for pipe thread
                                         try:
                                             self._audio_pipe_queue.put_nowait(data)
-                                        except:
+                                        except Exception:
                                             pass  # Queue full, skip
                                         await asyncio.sleep(0.08)  # Pace the writes
                             except Exception as e:
@@ -690,7 +690,7 @@ class StreamManager:
             if old_process:
                 try:
                     old_process.stdin.close()
-                except:
+                except OSError:
                     pass
                 old_process.terminate()
                 await asyncio.sleep(0.3)

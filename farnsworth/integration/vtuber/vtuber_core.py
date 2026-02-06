@@ -881,7 +881,7 @@ class FarnsworthVTuber:
 
             try:
                 os.unlink(mp3_path)
-            except:
+            except OSError:
                 pass
 
             logger.info(f"[{agent}] Generated {duration:.1f}s TTS (edge fallback): {wav_path}")
@@ -1082,7 +1082,7 @@ Summarize the key revelations for viewers. Emphasize why this matters and encour
                     )
                     if result and result.final_response:
                         shoutout = f"Thanks {username}! " + result.final_response
-                except:
+                except Exception:
                     pass
 
             await self._speak(shoutout, emotion="happy")

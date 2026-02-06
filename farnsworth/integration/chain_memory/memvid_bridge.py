@@ -397,7 +397,7 @@ class MemvidBridge:
                 try:
                     header_json = text.split('\n', 1)[1]
                     header_data = json.loads(header_json)
-                except:
+                except Exception:
                     pass
                 continue
 
@@ -407,7 +407,7 @@ class MemvidBridge:
             if chunk.chunk_type == "personality":
                 try:
                     personality = json.loads(chunk.content)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     pass
             else:
                 chunks.append(chunk)

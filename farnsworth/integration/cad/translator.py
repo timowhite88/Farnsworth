@@ -106,17 +106,30 @@ class CADTranslator:
             code = f"cq.exporters.export(result, '{filename}', exportType='STEP')"
             return CADCommand(code, original, operation)
 
-        return CADCommand(f"# TODO: {original}", original, "unknown")
+        logger.warning(f"No pattern matched for CAD command: {original}")
+        return CADCommand(f"// Unrecognized command: {original}", original, "comment")
 
     def _translate_complex(self, command: str) -> CADCommand:
         """Translate complex designs using LLM."""
         # Placeholder for LLM-based translation
         logger.warning(f"Complex design translation not implemented: {command}")
 
+        # Attempt keyword-based categorization
+        keywords = {"create": "create", "make": "create", "build": "create", "add": "create",
+                    "move": "transform", "rotate": "transform", "scale": "transform", "translate": "transform",
+                    "delete": "delete", "remove": "delete", "erase": "delete",
+                    "select": "select", "pick": "select", "highlight": "select",
+                    "export": "export", "save": "export", "output": "export"}
+        cmd_lower = command.lower()
+        operation = "unknown"
+        for kw, op in keywords.items():
+            if kw in cmd_lower:
+                operation = op
+                break
         return CADCommand(
-            f"# Natural language: {command}\n# TODO: Implement",
+            f"// Complex command ({operation}): {command}",
             command,
-            "complex"
+            operation
         )
 
     async def translate_async(self, command: str) -> CADCommand:

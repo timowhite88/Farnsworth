@@ -247,7 +247,7 @@ def get_worker_status():
             "pending": data.get("pending_tasks", 0),
             "instances": instances
         }
-    except:
+    except Exception:
         return {"workers": 6, "tasks": 10, "pending": 3, "instances": {}}
 
 def generate_unique_post():
@@ -308,7 +308,7 @@ def post_to_moltbook(title, content):
         else:
             try:
                 error = r.json()
-            except:
+            except Exception:
                 error = r.text
             print(f"[{now}] FAILED: {error}")
             return False
