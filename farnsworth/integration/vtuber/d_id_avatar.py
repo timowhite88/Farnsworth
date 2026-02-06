@@ -77,7 +77,8 @@ class DIDAvatar:
     async def _ensure_session(self):
         """Ensure aiohttp session exists"""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            timeout = aiohttp.ClientTimeout(total=60, connect=10)
+            self._session = aiohttp.ClientSession(timeout=timeout)
 
     async def close(self):
         """Close session"""
@@ -87,7 +88,7 @@ class DIDAvatar:
     async def get_credits(self) -> dict:
         """Check remaining D-ID credits"""
         await self._ensure_session()
-        async with self._session.get(f"{self.BASE_URL}/credits") as resp:
+        async with self._session.get(f"{self.BASE_URL}/credits", headers=self._get_headers()) as resp:
             return await resp.json()
 
     async def list_presenters(self) -> list:
@@ -403,15 +404,16 @@ class DIDAvatar:
     async def _download_video(self, url: str, output_path: Path) -> bool:
         """Download video from URL to local file"""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        with open(output_path, "wb") as f:
-                            f.write(await resp.read())
-                        return True
-                    else:
-                        logger.error(f"Video download failed: {resp.status}")
-                        return False
+            await self._ensure_session()
+            async with self._session.get(url) as resp:
+                if resp.status == 200:
+                    with open(output_path, "wb") as f:
+                        async for chunk in resp.content.iter_chunked(8192):
+                            f.write(chunk)
+                    return True
+                else:
+                    logger.error(f"Video download failed: {resp.status}")
+                    return False
         except Exception as e:
             logger.error(f"Video download error: {e}")
             return False
@@ -470,7 +472,7 @@ class ElevenLabsDIDPipeline:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     if resp.status == 200:
                         audio_data = await resp.read()

@@ -8,10 +8,34 @@ import aiohttp
 import json
 import re
 import time
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable, Any, AsyncGenerator
 from datetime import datetime
 from loguru import logger
+
+
+class BoundedSet:
+    """Set with maximum size that evicts oldest entries"""
+    def __init__(self, maxsize: int = 10000):
+        self._data = OrderedDict()
+        self._maxsize = maxsize
+
+    def add(self, item):
+        if item in self._data:
+            return
+        if len(self._data) >= self._maxsize:
+            self._data.popitem(last=False)  # Remove oldest
+        self._data[item] = True
+
+    def __contains__(self, item):
+        return item in self._data
+
+    def clear(self):
+        self._data.clear()
+
+    def __len__(self):
+        return len(self._data)
 
 
 @dataclass
@@ -111,12 +135,15 @@ class TwitterChatReader:
         self._tweepy_client = None
 
         # Message tracking
-        self._seen_ids: set = set()
+        self._seen_ids = BoundedSet(maxsize=10000)
         self._message_queue: asyncio.Queue = asyncio.Queue()
-        self._response_times: List[float] = []
+        self._response_times: deque = deque(maxlen=200)
 
         # User cache for display names
         self._user_cache: Dict[str, Dict] = {}
+
+        # Background task references for cleanup
+        self._tasks: List[asyncio.Task] = []
 
         # Callbacks
         self._on_message: Optional[Callable[[ChatMessage], None]] = None
@@ -156,14 +183,19 @@ class TwitterChatReader:
         self._running = True
 
         # Start background tasks
-        asyncio.create_task(self._poll_loop())
-        asyncio.create_task(self._process_queue())
+        self._tasks.append(asyncio.create_task(self._poll_loop()))
+        self._tasks.append(asyncio.create_task(self._process_queue()))
 
         logger.info(f"Twitter chat reader started (broadcast: {self.config.broadcast_tweet_id})")
 
     async def stop(self):
         """Stop reading chat"""
         self._running = False
+
+        # Cancel background tasks
+        for task in self._tasks:
+            task.cancel()
+        self._tasks.clear()
 
         if self._session:
             await self._session.close()
@@ -313,6 +345,16 @@ class TwitterChatReader:
         tweets = data.get("data", [])
         users = {u["id"]: u for u in data.get("includes", {}).get("users", [])}
 
+        # Cache user info for future lookups
+        for uid, udata in users.items():
+            self._user_cache[uid] = udata
+
+        # Trim user cache if too large
+        if len(self._user_cache) > 500:
+            keys = list(self._user_cache.keys())
+            for k in keys[:250]:
+                del self._user_cache[k]
+
         for tweet in tweets:
             tweet_id = tweet.get("id")
 
@@ -322,9 +364,9 @@ class TwitterChatReader:
 
             self._seen_ids.add(tweet_id)
 
-            # Get user info
+            # Get user info (check cache too)
             author_id = tweet.get("author_id")
-            user = users.get(author_id, {})
+            user = users.get(author_id) or self._user_cache.get(author_id, {})
 
             # Create message
             message = ChatMessage(
@@ -444,10 +486,6 @@ class TwitterChatReader:
         self._last_response_time = now
         self._response_times.append(now)
         self._responses_sent += 1
-
-        # Clean old entries
-        minute_ago = now - 60
-        self._response_times = [t for t in self._response_times if t > minute_ago]
 
     def on_message(self, callback: Callable[[ChatMessage], None]):
         """Set callback for regular messages"""

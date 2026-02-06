@@ -17,6 +17,7 @@ import numpy as np
 import aiohttp
 import json
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable, Any, Tuple
 from enum import Enum
@@ -59,6 +60,7 @@ class WebResearcher:
         self._session: Optional[aiohttp.ClientSession] = None
         self._cache: Dict[str, Tuple[str, float]] = {}  # query -> (result, timestamp)
         self._cache_ttl = 300  # 5 minutes
+        self._max_cache_size = 100
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if not self._session or self._session.closed:
@@ -234,6 +236,11 @@ class WebResearcher:
             research_text = " | ".join(findings[:8])
             # Cache result
             self._cache[cache_key] = (research_text, time.time())
+            # Trim cache to max size by removing oldest entries
+            if len(self._cache) > self._max_cache_size:
+                sorted_keys = sorted(self._cache, key=lambda k: self._cache[k][1])
+                for old_key in sorted_keys[:len(self._cache) - self._max_cache_size]:
+                    del self._cache[old_key]
             logger.info(f"Research compiled: {len(findings)} sources, {len(research_text)} chars")
             return research_text
 
@@ -336,12 +343,16 @@ class FarnsworthVTuber:
         self._current_speech_text: str = ""
         self._current_agent: str = "Farnsworth"
         self._last_idle_time = time.time()
-        self._conversation_context: List[Dict] = []
+        self._conversation_context: deque = deque(maxlen=20)
         self._research_cache: Dict[str, str] = {}  # Topic -> research results
+        self._max_research_cache_size = 50
 
         # Performance tracking
-        self._frame_times: List[float] = []
-        self._response_times: List[float] = []
+        self._frame_times: deque = deque(maxlen=100)
+        self._response_times: deque = deque(maxlen=100)
+
+        # Background task tracking for cleanup
+        self._background_tasks: List[asyncio.Task] = []
 
         logger.info(f"FarnsworthVTuber initialized: {config.name}")
 
@@ -397,7 +408,8 @@ class FarnsworthVTuber:
                 if DeliberationRoom:
                     self.deliberation_room = DeliberationRoom()
                     # Register agents for deliberation
-                    asyncio.create_task(self._register_agents())
+                    task = asyncio.create_task(self._register_agents())
+                    task.add_done_callback(lambda t: logger.error(f"Agent registration failed: {t.exception()}") if t.exception() else None)
                 logger.info("Farnsworth components initialized")
             except Exception as e:
                 logger.warning(f"Failed to init Farnsworth components: {e}")
@@ -649,10 +661,10 @@ class FarnsworthVTuber:
                 self.chat_reader.on_priority_message(self._on_priority_chat_message)
                 await self.chat_reader.start()
 
-            # Start main loops
-            asyncio.create_task(self._main_loop())
-            asyncio.create_task(self._response_processor())
-            asyncio.create_task(self._idle_behavior_loop())
+            # Start main loops (tracked for cleanup)
+            self._background_tasks.append(asyncio.create_task(self._main_loop()))
+            self._background_tasks.append(asyncio.create_task(self._response_processor()))
+            self._background_tasks.append(asyncio.create_task(self._idle_behavior_loop()))
 
             self.state = VTuberState.LIVE
             logger.info("VTuber stream is LIVE!")
@@ -676,6 +688,12 @@ class FarnsworthVTuber:
             await self._speak("That's all for today! Thanks for watching. See you next time!")
             await asyncio.sleep(5)
 
+        # Cancel background tasks before going offline
+        for task in self._background_tasks:
+            task.cancel()
+        await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        self._background_tasks.clear()
+
         self.state = VTuberState.OFFLINE
 
         # Stop components
@@ -684,6 +702,9 @@ class FarnsworthVTuber:
 
         await self.chat_reader.stop()
         await self.avatar.stop()
+
+        # Close web researcher session
+        await self.researcher.close()
 
         logger.info("VTuber stream stopped")
 
@@ -708,8 +729,6 @@ class FarnsworthVTuber:
 
                 # Track performance
                 self._frame_times.append(time.time() - start)
-                if len(self._frame_times) > 100:
-                    self._frame_times.pop(0)
 
                 # Maintain frame rate
                 elapsed = time.time() - start
@@ -1217,15 +1236,11 @@ Based on this research, provide a detailed, informative response. Be specific wi
 
     async def _get_swarm_response(self, prompt: str) -> Tuple[str, str]:
         """Get response from swarm collective"""
-        # Add to conversation context
+        # Add to conversation context (deque auto-trims to maxlen=20)
         self._conversation_context.append({
             "role": "user",
             "content": prompt
         })
-
-        # Keep context manageable
-        if len(self._conversation_context) > 10:
-            self._conversation_context = self._conversation_context[-10:]
 
         # Use deliberation room if available
         if self.config.use_swarm_collective and self.deliberation_room:

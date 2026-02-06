@@ -10,7 +10,7 @@ import json
 import os
 from loguru import logger
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -44,6 +44,21 @@ class ChatSimulateRequest(BaseModel):
     message: str
 
 
+# API key authentication for VTuber control endpoints
+VTUBER_API_KEY = os.environ.get("VTUBER_API_KEY", "")
+
+
+async def verify_api_key(authorization: Optional[str] = Header(None)):
+    """Verify API key for VTuber control endpoints"""
+    if not VTUBER_API_KEY:
+        return  # No key configured = open access (dev mode)
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    token = authorization.replace("Bearer ", "").strip()
+    if token != VTUBER_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+
 # Router for VTuber endpoints
 router = APIRouter(prefix="/api/vtuber", tags=["vtuber"])
 
@@ -56,7 +71,7 @@ def get_vtuber() -> Optional[FarnsworthVTuber]:
     return _vtuber_instance
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[Depends(verify_api_key)])
 async def start_stream(request: StartStreamRequest):
     """Start the VTuber stream"""
     global _vtuber_instance
@@ -96,7 +111,7 @@ async def start_stream(request: StartStreamRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[Depends(verify_api_key)])
 async def stop_stream():
     """Stop the VTuber stream"""
     global _vtuber_instance
@@ -104,8 +119,12 @@ async def stop_stream():
     if not _vtuber_instance:
         raise HTTPException(status_code=400, detail="No stream running")
 
-    await _vtuber_instance.stop()
-    _vtuber_instance = None
+    try:
+        await _vtuber_instance.stop()
+    except Exception as e:
+        logger.error(f"Error during stream stop: {e}")
+    finally:
+        _vtuber_instance = None
 
     return {"status": "offline", "message": "VTuber stream stopped"}
 
@@ -126,7 +145,7 @@ async def get_status():
     }
 
 
-@router.post("/speak")
+@router.post("/speak", dependencies=[Depends(verify_api_key)])
 async def make_speak(request: SpeakRequest):
     """Make the VTuber speak"""
     if not _vtuber_instance or not _vtuber_instance.is_live:
@@ -145,7 +164,7 @@ async def make_speak(request: SpeakRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/expression")
+@router.post("/expression", dependencies=[Depends(verify_api_key)])
 async def set_expression(request: ExpressionRequest):
     """Set avatar expression"""
     if not _vtuber_instance or not _vtuber_instance.is_live:
@@ -163,7 +182,7 @@ async def set_expression(request: ExpressionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/chat/simulate")
+@router.post("/chat/simulate", dependencies=[Depends(verify_api_key)])
 async def simulate_chat(request: ChatSimulateRequest):
     """Simulate a chat message (for testing)"""
     if not _vtuber_instance or not _vtuber_instance.is_live:
@@ -205,6 +224,27 @@ async def get_config():
     }
 
 
+@router.get("/health")
+async def vtuber_health():
+    """Get VTuber system health including process supervisor"""
+    health = {
+        "vtuber_active": _vtuber_instance is not None,
+        "is_live": _vtuber_instance.is_live if _vtuber_instance else False,
+    }
+
+    # Add supervisor health if available
+    if _vtuber_instance and hasattr(_vtuber_instance, 'stream') and _vtuber_instance.stream:
+        stream = _vtuber_instance.stream
+        health["stream"] = {
+            "status": stream.stats.status,
+            "frames_sent": stream.stats.frames_sent,
+            "dropped_frames": stream.stats.dropped_frames,
+            "uptime": stream.stats.uptime_seconds,
+        }
+
+    return health
+
+
 # WebSocket for real-time updates
 @router.websocket("/ws")
 async def vtuber_websocket(websocket: WebSocket):
@@ -229,11 +269,16 @@ async def vtuber_websocket(websocket: WebSocket):
                     "is_speaking": False,
                 }
 
-            await websocket.send_json(status)
+            try:
+                await websocket.send_json(status)
+            except Exception:
+                break
             await asyncio.sleep(1)
 
     except WebSocketDisconnect:
         logger.debug("VTuber WebSocket disconnected")
+    except Exception as e:
+        logger.debug(f"VTuber WebSocket error: {e}")
 
 
 # Control panel HTML endpoint

@@ -13,6 +13,7 @@ from pathlib import Path
 import time
 import os
 import signal
+import tempfile
 from loguru import logger
 
 try:
@@ -214,6 +215,7 @@ class StreamManager:
         self.stats = StreamStats()
 
         self._ffmpeg_process: Optional[subprocess.Popen] = None
+        self._process_lock = asyncio.Lock()
         self._video_pipe = None
         self._audio_pipe = None
 
@@ -337,6 +339,10 @@ class StreamManager:
             cmd.extend([
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
+                # Network resilience: auto-reconnect on connection drops
+                '-reconnect', '1',
+                '-reconnect_streamed', '1',
+                '-reconnect_delay_max', '30',
                 self.config.full_rtmp_url
             ])
 
@@ -360,23 +366,44 @@ class StreamManager:
                 self._audio_fifo_path = str(self._temp_audio_dir / 'audio_pipe.pcm')
                 self._audio_pipe_queue = queue.Queue(maxsize=100)
 
-                # Remove old pipe if exists
+                # Remove old pipe/file if exists
                 if os.path.exists(self._audio_fifo_path):
-                    os.remove(self._audio_fifo_path)
-                os.mkfifo(self._audio_fifo_path)
-                logger.info(f"Created audio FIFO: {self._audio_fifo_path}")
+                    try:
+                        os.remove(self._audio_fifo_path)
+                    except OSError:
+                        pass
+
+                if os.name == 'nt':
+                    # Windows: no mkfifo support. Use a regular temp file
+                    # that the audio writer thread and FFmpeg both access.
+                    # Create an empty file as a placeholder; audio thread
+                    # will write PCM data and FFmpeg reads it.
+                    with open(self._audio_fifo_path, 'wb') as f:
+                        pass  # Create empty file
+                    logger.info(f"Created audio temp file (Windows): {self._audio_fifo_path}")
+                else:
+                    # Unix: use a named FIFO for efficient inter-process comms
+                    try:
+                        os.mkfifo(self._audio_fifo_path)
+                        logger.info(f"Created audio FIFO: {self._audio_fifo_path}")
+                    except OSError as e:
+                        logger.warning(f"Failed to create FIFO: {e}, falling back to temp file")
+                        with open(self._audio_fifo_path, 'wb') as f:
+                            pass
+                        logger.info(f"Created audio temp file (fallback): {self._audio_fifo_path}")
 
             # Build and start FFmpeg process FIRST
             # (FFmpeg will block waiting for audio pipe data)
             cmd = self._build_ffmpeg_command(self._current_audio_file)
             logger.info(f"Starting FFmpeg: {' '.join(cmd[:10])}...")
 
-            self._ffmpeg_process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0,
-            )
+            async with self._process_lock:
+                self._ffmpeg_process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
 
             self._running = True
             self._start_time = time.time()
@@ -432,22 +459,47 @@ class StreamManager:
         """Stop the streaming process"""
         self._running = False
 
-        if self._ffmpeg_process:
+        async with self._process_lock:
+            if self._ffmpeg_process:
+                try:
+                    # Send empty frames to flush buffer
+                    await asyncio.sleep(0.5)
+
+                    # Graceful FFmpeg shutdown: send 'q' to stdin so FFmpeg
+                    # flushes its buffers properly before exiting
+                    try:
+                        self._ffmpeg_process.stdin.write(b'q')
+                        self._ffmpeg_process.stdin.flush()
+                    except (BrokenPipeError, OSError):
+                        pass
+
+                    # Terminate gracefully with timeout
+                    self._ffmpeg_process.terminate()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(self._ffmpeg_process.wait),
+                            timeout=5
+                        )
+                    except asyncio.TimeoutError:
+                        # Process did not exit in time, force kill
+                        logger.warning("FFmpeg did not terminate in 5s, killing")
+                        if self._ffmpeg_process.poll() is None:
+                            self._ffmpeg_process.kill()
+                            await asyncio.to_thread(self._ffmpeg_process.wait)
+
+                except Exception as e:
+                    logger.error(f"Error stopping FFmpeg: {e}")
+
+                self._ffmpeg_process = None
+
+        # Clean up audio FIFO/temp file
+        if self._audio_fifo_path and os.path.exists(self._audio_fifo_path):
             try:
-                # Send empty frames to flush buffer
-                await asyncio.sleep(0.5)
-
-                # Terminate gracefully
-                self._ffmpeg_process.terminate()
-                await asyncio.sleep(1)
-
-                if self._ffmpeg_process.poll() is None:
-                    self._ffmpeg_process.kill()
-
-            except Exception as e:
-                logger.error(f"Error stopping FFmpeg: {e}")
-
-            self._ffmpeg_process = None
+                os.remove(self._audio_fifo_path)
+                logger.info(f"Removed audio pipe: {self._audio_fifo_path}")
+            except OSError as e:
+                logger.warning(f"Failed to remove audio pipe: {e}")
+            self._audio_fifo_path = None
 
         self.stats.status = "offline"
         logger.info("Stream stopped")
@@ -541,7 +593,9 @@ class StreamManager:
         while self._running:
             try:
                 # Wait for FFmpeg process to be ready
-                if not self._ffmpeg_process or self._audio_restarting:
+                async with self._process_lock:
+                    proc = self._ffmpeg_process
+                if not proc or self._audio_restarting:
                     await asyncio.sleep(0.1)
                     continue
 
@@ -558,20 +612,23 @@ class StreamManager:
                         dtype=np.uint8
                     )
 
-                # Double-check process is still valid
-                if not self._ffmpeg_process or not self._ffmpeg_process.stdin:
+                # Double-check process is still valid under lock
+                async with self._process_lock:
+                    proc = self._ffmpeg_process
+                if not proc or not proc.stdin:
                     await asyncio.sleep(0.1)
                     continue
 
                 # Write to FFmpeg stdin
                 start = time.time()
                 try:
-                    self._ffmpeg_process.stdin.write(frame.tobytes())
-                    self._ffmpeg_process.stdin.flush()
+                    proc.stdin.write(frame.tobytes())
+                    proc.stdin.flush()
                 except (BrokenPipeError, OSError) as e:
                     # Pipe closed - FFmpeg died, need to reconnect
                     logger.error(f"FFmpeg pipe broken: {e} - triggering reconnect")
-                    self._ffmpeg_process = None  # This will trigger _monitor_ffmpeg to reconnect
+                    async with self._process_lock:
+                        self._ffmpeg_process = None  # This will trigger _monitor_ffmpeg to reconnect
                     await asyncio.sleep(1)
                     continue
 
@@ -679,8 +736,10 @@ class StreamManager:
             return
 
         self._audio_restarting = True
-        old_process = self._ffmpeg_process
-        self._ffmpeg_process = None  # Clear reference so frame writer pauses
+
+        async with self._process_lock:
+            old_process = self._ffmpeg_process
+            self._ffmpeg_process = None  # Clear reference so frame writer pauses
 
         try:
             # Give frame writer time to see the cleared process
@@ -688,15 +747,26 @@ class StreamManager:
 
             # Terminate old process gracefully
             if old_process:
+                # Send 'q' to FFmpeg for clean shutdown
+                try:
+                    old_process.stdin.write(b'q')
+                    old_process.stdin.flush()
+                except (BrokenPipeError, OSError):
+                    pass
                 try:
                     old_process.stdin.close()
                 except OSError:
                     pass
                 old_process.terminate()
-                await asyncio.sleep(0.3)
-                if old_process.poll() is None:
-                    old_process.kill()
-                await asyncio.sleep(0.2)
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(old_process.wait),
+                        timeout=5
+                    )
+                except asyncio.TimeoutError:
+                    if old_process.poll() is None:
+                        old_process.kill()
+                        await asyncio.to_thread(old_process.wait)
 
             # Start new FFmpeg with updated audio
             cmd = self._build_ffmpeg_command(audio_file)
@@ -707,8 +777,9 @@ class StreamManager:
                 bufsize=0,
             )
 
-            # Set the new process
-            self._ffmpeg_process = new_process
+            # Set the new process under lock
+            async with self._process_lock:
+                self._ffmpeg_process = new_process
             logger.info(f"FFmpeg restarted with audio: {audio_file or 'silence'}")
 
         except Exception as e:
@@ -717,9 +788,11 @@ class StreamManager:
             self._audio_restarting = False
 
     async def _monitor_ffmpeg(self):
-        """Monitor FFmpeg process for errors with auto-reconnect"""
+        """Monitor FFmpeg process for errors with auto-reconnect and exponential backoff"""
         reconnect_attempts = 0
         max_reconnects = 5
+        backoff_seconds = 2  # Start at 2s, double each time, cap at 30s
+        max_backoff = 30
 
         while self._running:
             # Skip monitoring during audio restarts
@@ -727,49 +800,71 @@ class StreamManager:
                 await asyncio.sleep(1)
                 continue
 
-            if not self._ffmpeg_process or self._ffmpeg_process.poll() is not None:
+            async with self._process_lock:
+                proc = self._ffmpeg_process
+                proc_poll = proc.poll() if proc else None
+
+            if not proc or proc_poll is not None:
                 # Only skip if audio handler is actively restarting (not just playing audio)
                 if self._audio_restarting:
                     await asyncio.sleep(1)
                     continue
 
-                # Process ended or not running - need to reconnect
-                if self._ffmpeg_process and self._ffmpeg_process.poll() is not None:
-                    stderr = self._ffmpeg_process.stderr.read() if self._ffmpeg_process.stderr else b""
-                    error_msg = stderr.decode() if stderr else "Unknown error"
+                # Process ended or not running - read stderr safely
+                if proc and proc_poll is not None:
+                    error_msg = "Unknown error"
+                    if proc.stderr:
+                        try:
+                            # Use readline() to avoid blocking on a full pipe buffer.
+                            # Read up to a few lines rather than entire stderr.
+                            stderr_lines = []
+                            for _ in range(20):
+                                line = await asyncio.to_thread(proc.stderr.readline)
+                                if not line:
+                                    break
+                                stderr_lines.append(line.decode(errors='replace').strip())
+                            error_msg = '\n'.join(stderr_lines) if stderr_lines else "Unknown error"
+                        except Exception:
+                            error_msg = "Failed to read stderr"
                     logger.error(f"FFmpeg process ended: {error_msg[:200]}")
                     self.stats.last_error = error_msg[:200]
 
-                # Try to reconnect
+                # Try to reconnect with exponential backoff
                 if reconnect_attempts < max_reconnects:
                     reconnect_attempts += 1
-                    logger.info(f"Attempting reconnect {reconnect_attempts}/{max_reconnects}...")
+                    logger.info(f"Attempting reconnect {reconnect_attempts}/{max_reconnects} "
+                                f"(backoff {backoff_seconds}s)...")
                     self.stats.status = "reconnecting"
 
-                    await asyncio.sleep(3)  # Wait before reconnect
+                    await asyncio.sleep(backoff_seconds)
 
                     try:
                         # Restart FFmpeg (with current audio file if any)
                         cmd = self._build_ffmpeg_command(self._current_audio_file)
-                        self._ffmpeg_process = subprocess.Popen(
-                            cmd,
-                            stdin=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            bufsize=0,
-                        )
+                        async with self._process_lock:
+                            self._ffmpeg_process = subprocess.Popen(
+                                cmd,
+                                stdin=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                bufsize=0,
+                            )
                         self.stats.status = "live"
                         logger.info("Reconnected successfully")
                         reconnect_attempts = 0  # Reset on success
+                        backoff_seconds = 2  # Reset backoff on success
                     except Exception as e:
                         logger.error(f"Reconnect failed: {e}")
+                        # Exponential backoff: double the wait, cap at max
+                        backoff_seconds = min(backoff_seconds * 2, max_backoff)
                 else:
                     logger.error("Max reconnect attempts reached")
                     self.stats.status = "error"
                     self._running = False
                     break
             else:
-                # Process running, reset counter
+                # Process running, reset counter and backoff
                 reconnect_attempts = 0
+                backoff_seconds = 2
 
             await asyncio.sleep(2)
 

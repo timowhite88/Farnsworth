@@ -7,6 +7,7 @@ import asyncio
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
+from collections import deque
 from pathlib import Path
 import time
 import os
@@ -71,10 +72,19 @@ class MuseTalkAvatar:
         self._initialized = False
 
         # Caching for performance
-        self._latent_cache = {}
+        self._latent_cache: Dict[str, Any] = {}
+        self._max_cache_size = 50
         self._last_audio_hash = None
 
         logger.info(f"MuseTalkAvatar initialized (device: {config.device})")
+
+    def _cache_latent(self, key: str, value: Any):
+        """Store a latent in the bounded cache, evicting oldest if full"""
+        self._latent_cache[key] = value
+        if len(self._latent_cache) > self._max_cache_size:
+            # Remove oldest entry
+            oldest = next(iter(self._latent_cache))
+            del self._latent_cache[oldest]
 
     async def initialize(self, face_image_path: Optional[str] = None) -> bool:
         """Initialize MuseTalk model and prepare face image"""
@@ -267,6 +277,18 @@ class MuseTalkAvatar:
             logger.error(f"Failed to get latent: {e}")
             return None
 
+    async def cleanup(self):
+        """Release GPU memory"""
+        if self._model is not None:
+            del self._model
+            self._model = None
+        if HAS_TORCH:
+            torch.cuda.empty_cache()
+        self._face_image = None
+        self._face_mask = None
+        self._latent_cache.clear()
+        self._initialized = False
+
 
 class SadTalkerAvatar:
     """
@@ -329,8 +351,8 @@ class NeuralAvatarManager:
         self._backend_type: str = ""
 
         # Frame buffer for smooth playback
-        self._frame_buffer: List[np.ndarray] = []
-        self._buffer_size = 5
+        self._frame_buffer: deque = deque(maxlen=10)
+        self._buffer_size = 10
 
     async def initialize(self, face_image_path: str) -> bool:
         """Initialize the best available neural avatar backend"""
@@ -365,11 +387,9 @@ class NeuralAvatarManager:
 
         frame = await self._active_backend.generate_frame(audio_chunk, sample_rate)
 
-        # Add to buffer
+        # Add to buffer (deque handles maxlen automatically)
         if frame is not None:
             self._frame_buffer.append(frame)
-            if len(self._frame_buffer) > self._buffer_size:
-                self._frame_buffer.pop(0)
 
         return frame
 
@@ -386,3 +406,10 @@ class NeuralAvatarManager:
     @property
     def is_initialized(self) -> bool:
         return self._active_backend is not None
+
+    async def cleanup(self):
+        """Clean up the active backend"""
+        if self._active_backend and hasattr(self._active_backend, 'cleanup'):
+            await self._active_backend.cleanup()
+        self._active_backend = None
+        self._frame_buffer.clear()
