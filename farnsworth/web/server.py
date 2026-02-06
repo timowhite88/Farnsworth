@@ -4425,6 +4425,18 @@ async def chat_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/demo", response_class=HTMLResponse)
+async def hackathon_demo(request: Request):
+    """Serve the hackathon demo page - swarm intelligence visualizer."""
+    return templates.TemplateResponse("hackathon_demo.html", {"request": request})
+
+
+@app.get("/tradewindow", response_class=HTMLResponse)
+async def trade_window(request: Request):
+    """Serve the immersive trading command center."""
+    return templates.TemplateResponse("trade_window.html", {"request": request})
+
+
 @app.get("/vtuber", response_class=HTMLResponse)
 async def vtuber_panel(request: Request):
     """Serve the VTuber control panel."""
@@ -4433,6 +4445,69 @@ async def vtuber_panel(request: Request):
         return FileResponse(str(panel_path), media_type="text/html")
     return HTMLResponse("<h1>VTuber Panel Not Found</h1>", status_code=404)
 
+
+# ==========================================================================
+# TRADING API ENDPOINTS
+# ==========================================================================
+_trader_instance = None
+
+@app.get("/api/trading/status")
+async def trading_status():
+    """Get current trader status, positions, PnL."""
+    if _trader_instance is None:
+        return {"running": False, "message": "Trader not started"}
+    return _trader_instance.status()
+
+@app.post("/api/trading/start")
+async def trading_start(request: Request):
+    """Start the degen trader."""
+    global _trader_instance
+    if _trader_instance and _trader_instance.running:
+        return {"status": "already_running", "wallet": _trader_instance.pubkey}
+    try:
+        from farnsworth.trading.degen_trader import DegenTrader, TraderConfig
+        body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+        config = TraderConfig(
+            rpc_url=body.get("rpc_url", os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")),
+            max_position_sol=float(body.get("max_position_sol", 0.1)),
+            max_positions=int(body.get("max_positions", 10)),
+            scan_interval=int(body.get("scan_interval", 10)),
+            use_swarm=body.get("use_swarm", True),
+        )
+        _trader_instance = DegenTrader(config=config, wallet_name=body.get("wallet_name", "degen_trader"))
+        asyncio.create_task(_trader_instance.run())
+        await asyncio.sleep(2)  # let it initialize
+        return {"status": "started", "wallet": _trader_instance.pubkey}
+    except Exception as e:
+        logger.error(f"Trading start error: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/trading/stop")
+async def trading_stop():
+    """Stop the degen trader."""
+    global _trader_instance
+    if _trader_instance:
+        await _trader_instance.shutdown()
+        _trader_instance = None
+        return {"status": "stopped"}
+    return {"status": "not_running"}
+
+@app.get("/api/trading/wallet")
+async def trading_wallet():
+    """Get wallet public address."""
+    if _trader_instance:
+        balance = await _trader_instance.get_sol_balance()
+        return {"wallet": _trader_instance.pubkey, "balance_sol": balance}
+    try:
+        from farnsworth.trading.degen_trader import WALLET_DIR
+        import json as _json
+        wf = WALLET_DIR / "degen_trader.json"
+        if wf.exists():
+            data = _json.loads(wf.read_text())
+            return {"wallet": data["pubkey"], "balance_sol": None}
+    except Exception:
+        pass
+    return {"wallet": None, "message": "No wallet found. Start the trader to create one."}
 
 
 # ==========================================================================
