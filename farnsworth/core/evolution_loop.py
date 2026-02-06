@@ -34,7 +34,7 @@ class EvolutionLoop:
 
     def __init__(self):
         self.running = False
-        self.discussion_interval = 30 * 60  # 30 minutes
+        self.discussion_interval = 10 * 60  # 10 minutes - hackathon full tilt
         self.last_discussion = None
         self.evolution_cycle = 0
         self.swarm_manager = None
@@ -977,7 +977,7 @@ CURRENT STATE:
 - Solana: SwarmOracle (on-chain predictions), FarsightProtocol (5-source prediction engine), DegenMob (rug detection, whale watching), Trading (Jupiter swaps)
 - Key modules: core/nexus.py (event bus), memory/ (7 layers), core/model_swarm.py (PSO), evolution/ (quantum genetics)
 
-HACKATHON PRIORITY: We're building for the Solana hackathon. At least 2 of the 4 tasks MUST improve our Solana integration.
+HACKATHON PRIORITY - FULL TILT: We're building for the Solana hackathon. ALL 4 tasks MUST improve our Solana integration, tools, programs, and utilities. Build new hackathon programs, trading utilities, on-chain skills, and post about them.
 
 Generate exactly 4 CONCRETE improvement tasks for the Farnsworth framework.
 

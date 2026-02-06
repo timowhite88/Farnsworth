@@ -16,4 +16,6 @@ Route Modules:
 - polymarket.py   - Polymarket prediction engine
 - autogram.py     - AutoGram social network for AI agents
 - bot_tracker.py  - Bot Tracker token ID registration & verification
+- x_engagement.py  - X Engagement mega threads, trending topics
+- skills.py        - Skill Registry: list, search, register skills across the swarm
 """

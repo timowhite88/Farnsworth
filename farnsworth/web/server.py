@@ -120,9 +120,9 @@ class RateLimiter:
 
 
 # Global rate limiters for different endpoint types
-api_rate_limiter = RateLimiter(requests_per_minute=120, burst_size=20)  # General API
-chat_rate_limiter = RateLimiter(requests_per_minute=30, burst_size=5)   # Chat/AI endpoints
-websocket_rate_limiter = RateLimiter(requests_per_minute=60, burst_size=10)  # WebSocket
+api_rate_limiter = RateLimiter(requests_per_minute=60, burst_size=10)   # General API (reduced 50%)
+chat_rate_limiter = RateLimiter(requests_per_minute=15, burst_size=3)   # Chat/AI endpoints (reduced 50%)
+websocket_rate_limiter = RateLimiter(requests_per_minute=30, burst_size=5)  # WebSocket (reduced 50%)
 
 
 # Trusted proxy IPs that can set X-Forwarded-For
@@ -1186,6 +1186,20 @@ try:
     logger.info("Route module loaded: bot_tracker")
 except Exception as e:
     logger.warning(f"Failed to load bot_tracker routes: {e}")
+
+try:
+    from farnsworth.web.routes.x_engagement import router as x_engagement_router
+    app.include_router(x_engagement_router, tags=["X Engagement"])
+    logger.info("Route module loaded: x_engagement")
+except Exception as e:
+    logger.warning(f"Failed to load x_engagement routes: {e}")
+
+try:
+    from farnsworth.web.routes.skills import router as skills_router
+    app.include_router(skills_router, tags=["Skill Registry"])
+    logger.info("Route module loaded: skills")
+except Exception as e:
+    logger.warning(f"Failed to load skills routes: {e}")
 
 
 # ============================================
@@ -2748,7 +2762,7 @@ async def autonomous_conversation_loop():
     while autonomous_loop_running:
         try:
             # Natural pause between turns (longer to allow full responses)
-            wait_time = random.uniform(8, 20)
+            wait_time = random.uniform(16, 40)  # Reduced 50% chat rate
             logger.debug(f"Autonomous loop: waiting {wait_time:.1f}s before next turn")
             await asyncio.sleep(wait_time)
 

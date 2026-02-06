@@ -130,7 +130,7 @@ class XOAuth2Poster:
         self.refresh_token = None
         self.token_expires_at = None
         self.posts_today = 0
-        self.daily_limit = 17
+        self.daily_limit = 50  # Increased for mega threads + hackathon engagement
         self._load_tokens()
 
     def _load_tokens(self):
