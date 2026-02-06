@@ -1,5 +1,5 @@
 """
-Admin Routes - Workers, Staging, Cognition, Heartbeat
+Admin Routes - Workers, Staging, Cognition, Heartbeat, DLQ Monitoring
 
 Endpoints:
 - GET /api/workers/status - Parallel worker system status
@@ -10,6 +10,10 @@ Endpoints:
 - GET /api/cognition/status - Cognitive system status
 - GET /api/heartbeat - Swarm health vitals
 - GET /api/heartbeat/history - Heartbeat history
+- GET /api/metrics/dlq - Dead Letter Queue metrics
+- GET /api/metrics/dlq/pending - Pending DLQ entries
+- GET /api/metrics/dlq/recent - Recent DLQ entries
+- POST /api/metrics/dlq/purge - Purge resolved DLQ entries
 """
 
 import logging
@@ -162,3 +166,64 @@ async def get_heartbeat_history():
         return {"history": [v.to_dict() for v in heartbeat.health_history[-20:]]}
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================
+# DEAD LETTER QUEUE (AGI v1.9.1)
+# ============================================
+
+@router.get("/api/metrics/dlq")
+async def get_dlq_metrics():
+    """Get Dead Letter Queue metrics - failed signal counts, retry rates, breakdowns."""
+    try:
+        from farnsworth.core.dlq import get_dlq
+        dlq = get_dlq()
+        return dlq.get_metrics()
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@router.get("/api/metrics/dlq/pending")
+async def get_dlq_pending(limit: int = 50):
+    """Get pending (unresolved) DLQ entries awaiting retry."""
+    try:
+        from farnsworth.core.dlq import get_dlq
+        dlq = get_dlq()
+        return {"pending": dlq.get_pending_entries(limit=min(limit, 200))}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@router.get("/api/metrics/dlq/recent")
+async def get_dlq_recent(limit: int = 50):
+    """Get recent DLQ entries (resolved and unresolved)."""
+    try:
+        from farnsworth.core.dlq import get_dlq
+        dlq = get_dlq()
+        return {"entries": dlq.get_recent_entries(limit=min(limit, 200))}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/api/metrics/dlq/purge")
+async def purge_dlq(older_than_hours: int = 24):
+    """Purge resolved DLQ entries older than the given age."""
+    try:
+        from farnsworth.core.dlq import get_dlq
+        dlq = get_dlq()
+        removed = dlq.purge_resolved(older_than_hours=older_than_hours)
+        return {"purged": removed, "remaining": len(dlq._entries)}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )

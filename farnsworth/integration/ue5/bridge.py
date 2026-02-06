@@ -72,9 +72,10 @@ class UE5Bridge:
         """
         if self._mode == "direct" and self._unreal:
             try:
-                # Execute directly using unreal module
+                # Execute with restricted builtins (AGI v1.9.1)
+                from farnsworth.core.safe_eval import SAFE_BUILTINS
                 local_vars = {"unreal": self._unreal}
-                exec(code, {"unreal": self._unreal}, local_vars)
+                exec(code, {"__builtins__": SAFE_BUILTINS, "unreal": self._unreal}, local_vars)
                 return {"success": True, "result": local_vars}
             except Exception as e:
                 return {"success": False, "error": str(e)}

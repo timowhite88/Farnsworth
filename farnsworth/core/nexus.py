@@ -25,11 +25,14 @@ import random
 import math
 import uuid
 import json
+import traceback
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Callable, Any, Optional, Awaitable, Tuple, Set, Union
 from loguru import logger
+
+from farnsworth.core.dlq import get_dlq, FailureReason
 
 
 # =============================================================================
@@ -43,6 +46,8 @@ async def _safe_invoke_handler(handler: Callable, signal: Any) -> Any:
     AGI v1.8: Prevents 'asyncio.Future, a coroutine or an awaitable is required' errors
     by properly wrapping sync handlers and handling non-awaitable returns.
 
+    AGI v1.9.1: On failure, enqueues to Dead Letter Queue for retry.
+
     Args:
         handler: The handler function (sync or async)
         signal: The signal to pass to the handler
@@ -50,6 +55,7 @@ async def _safe_invoke_handler(handler: Callable, signal: Any) -> Any:
     Returns:
         The handler result, or None on error
     """
+    handler_name = getattr(handler, '__name__', 'unknown')
     try:
         result = handler(signal)
         # If result is a coroutine or awaitable, await it
@@ -61,7 +67,24 @@ async def _safe_invoke_handler(handler: Callable, signal: Any) -> Any:
         # Otherwise return the sync result
         return result
     except Exception as e:
-        logger.error(f"Nexus: Handler {getattr(handler, '__name__', 'unknown')} failed: {e}")
+        logger.error(f"Nexus: Handler {handler_name} failed: {e}")
+        # AGI v1.9.1: Send to DLQ
+        try:
+            dlq = get_dlq()
+            signal_type = getattr(signal, 'type', None)
+            await dlq.enqueue(
+                signal_id=getattr(signal, 'id', 'unknown'),
+                signal_type=signal_type.value if signal_type else 'unknown',
+                source_id=getattr(signal, 'source_id', 'unknown'),
+                payload=getattr(signal, 'payload', {}),
+                urgency=getattr(signal, 'urgency', 0.5),
+                failure_reason=FailureReason.HANDLER_EXCEPTION,
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+                handler_name=handler_name,
+            )
+        except Exception as dlq_err:
+            logger.error(f"Nexus: DLQ enqueue also failed: {dlq_err}")
         return None
 
 
@@ -590,7 +613,7 @@ class Nexus:
     # =========================================================================
 
     async def start(self):
-        """Start the priority queue worker and spontaneous thought generator."""
+        """Start the priority queue worker, spontaneous thought generator, and DLQ retry loop."""
         if self._is_running:
             return
 
@@ -600,10 +623,15 @@ class Nexus:
         if self._thought_config.enabled:
             self._thought_generator_task = asyncio.create_task(self._spontaneous_thought_loop())
 
-        logger.info("Nexus started (priority queue + thought generator)")
+        # AGI v1.9.1: Start DLQ retry loop and wire retry handler
+        dlq = get_dlq()
+        dlq.set_retry_handler(self._retry_dlq_signal)
+        await dlq.start_retry_loop()
+
+        logger.info("Nexus started (priority queue + thought generator + DLQ)")
 
     async def stop(self):
-        """Stop the Nexus processing."""
+        """Stop the Nexus processing and DLQ."""
         self._is_running = False
 
         if self._worker_task:
@@ -620,7 +648,80 @@ class Nexus:
             except asyncio.CancelledError:
                 pass
 
+        # AGI v1.9.1: Stop DLQ
+        try:
+            dlq = get_dlq()
+            await dlq.stop()
+        except Exception:
+            pass
+
         logger.info("Nexus stopped")
+
+    async def _retry_dlq_signal(self, entry) -> bool:
+        """
+        Retry a failed signal from the DLQ.
+
+        AGI v1.9.1: Reconstructs the signal and re-dispatches it through
+        the normal handler pipeline.
+
+        Returns True if the retry succeeded.
+        """
+        try:
+            # Reconstruct signal from DLQ entry
+            signal_type = None
+            for st in SignalType:
+                if st.value == entry.signal_type:
+                    signal_type = st
+                    break
+
+            if not signal_type:
+                logger.warning(f"DLQ retry: Unknown signal type {entry.signal_type}")
+                return False
+
+            signal = Signal(
+                type=signal_type,
+                payload=entry.payload,
+                source_id=entry.source_id,
+                id=entry.signal_id,
+                urgency=entry.urgency,
+            )
+
+            # Re-dispatch to handlers
+            handlers = self._subscribers.get(signal.type, [])
+            if not handlers:
+                logger.debug(f"DLQ retry: No handlers for {entry.signal_type}")
+                return True  # No handlers = nothing to retry
+
+            # If we know which handler failed, only retry that one
+            if entry.handler_name:
+                target_handlers = [
+                    h for h in handlers
+                    if getattr(h, '__name__', '') == entry.handler_name
+                ]
+                if target_handlers:
+                    handlers = target_handlers
+
+            results = await asyncio.gather(
+                *[self._invoke_without_dlq(h, signal) for h in handlers],
+                return_exceptions=True,
+            )
+
+            # Check if any raised
+            failures = [r for r in results if isinstance(r, Exception)]
+            return len(failures) == 0
+
+        except Exception as e:
+            logger.error(f"DLQ retry failed: {e}")
+            return False
+
+    async def _invoke_without_dlq(self, handler: Callable, signal: Any) -> Any:
+        """Invoke handler without DLQ feedback loop (used by retries)."""
+        result = handler(signal)
+        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+            return await result
+        if hasattr(result, '__await__'):
+            return await result
+        return result
 
     async def _process_queue(self):
         """Worker task that processes signals by priority."""
@@ -709,6 +810,20 @@ class Nexus:
             if signal.urgency < 0.7:  # Only drop low-urgency signals
                 self._backpressure.dropped_signals += 1
                 logger.warning(f"Nexus: Dropped low-priority signal due to backpressure")
+                # AGI v1.9.1: Send to DLQ instead of silent drop
+                try:
+                    dlq = get_dlq()
+                    await dlq.enqueue(
+                        signal_id=signal.id,
+                        signal_type=signal.type.value,
+                        source_id=signal.source_id,
+                        payload=signal.payload,
+                        urgency=signal.urgency,
+                        failure_reason=FailureReason.BACKPRESSURE_DROP,
+                        error_message=f"Queue depth {self._backpressure.queue_depth} >= max {self._backpressure.max_queue_depth}",
+                    )
+                except Exception as dlq_err:
+                    logger.error(f"Nexus: DLQ enqueue failed for backpressure drop: {dlq_err}")
                 return
         else:
             self._backpressure.is_throttling = False

@@ -1027,20 +1027,18 @@ class ToolRouter:
             raise RuntimeError(f"Failed to list directory: {e}")
 
     async def _handle_execute_python(self, code: str) -> dict:
-        """Execute Python code (sandboxed)."""
-        # In production, this would use a proper sandbox
+        """Execute Python code (sandboxed with pattern checks)."""
         import io
         import sys
+        from farnsworth.core.safe_eval import safe_exec
 
         old_stdout = sys.stdout
         sys.stdout = io.StringIO()
 
         try:
-            # Very basic sandboxing - in production use proper isolation
-            exec_globals = {"__builtins__": {"print": print, "len": len, "range": range, "str": str, "int": int, "float": float}}
-            exec(code, exec_globals)
+            local_vars = safe_exec(code)
             output = sys.stdout.getvalue()
-            return {"output": output, "success": True}
+            return {"output": output, "success": True, "result": local_vars.get("result")}
         except Exception as e:
             return {"output": str(e), "success": False, "error": str(e)}
         finally:

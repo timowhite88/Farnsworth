@@ -347,16 +347,15 @@ class LangGraphNexusHybrid:
         return node.transitions.get("default")
 
     def _evaluate_condition(self, condition: str, state: WorkflowState) -> bool:
-        """Evaluate a transition condition against state."""
-        # Simple condition evaluation
+        """Evaluate a transition condition against state (sandboxed)."""
+        from farnsworth.core.safe_eval import safe_eval
+
         context = state.get("context", {})
         outputs = state.get("outputs", {})
 
-        # Support basic conditions like "outputs.approved == true"
         try:
-            # Safe evaluation with limited namespace
             namespace = {"context": context, "outputs": outputs, "state": state}
-            return eval(condition, {"__builtins__": {}}, namespace)
+            return bool(safe_eval(condition, namespace))
         except Exception:
             return False
 

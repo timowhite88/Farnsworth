@@ -650,11 +650,18 @@ Execute this skill and provide the result."""
             # Merge environment
             full_env = {**os.environ, **env}
 
+            # AGI v1.9.1: Use shell=False with shlex.split for safety
+            import shlex
+            if isinstance(command, str):
+                cmd_args = shlex.split(command)
+            else:
+                cmd_args = list(command)
+
             if background:
                 # Start in background
                 proc = subprocess.Popen(
-                    command,
-                    shell=True,
+                    cmd_args,
+                    shell=False,
                     cwd=cwd,
                     env=full_env,
                     stdout=subprocess.PIPE,
@@ -668,8 +675,8 @@ Execute this skill and provide the result."""
             else:
                 # Run synchronously
                 proc = subprocess.run(
-                    command,
-                    shell=True,
+                    cmd_args,
+                    shell=False,
                     cwd=cwd,
                     env=full_env,
                     capture_output=True,

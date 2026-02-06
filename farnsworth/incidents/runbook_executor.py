@@ -717,15 +717,20 @@ steps:
         condition: str,
         execution: RunbookExecution,
     ) -> bool:
-        """Evaluate a step condition."""
-        # Simple variable substitution and evaluation
+        """Evaluate a step condition (sandboxed)."""
+        from farnsworth.core.safe_eval import safe_eval
+
         try:
+            # Variable substitution
             for key, value in execution.variables.items():
                 condition = condition.replace(f"${{{key}}}", str(value))
             for key, value in execution.outputs.items():
                 condition = condition.replace(f"${{outputs.{key}}}", str(value))
 
-            return eval(condition)  # In production, use a safe expression evaluator
+            return bool(safe_eval(condition, {
+                "variables": execution.variables,
+                "outputs": execution.outputs,
+            }))
         except Exception as e:
             logger.error(f"Failed to evaluate condition: {e}")
             return False

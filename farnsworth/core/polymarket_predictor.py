@@ -362,8 +362,15 @@ class PolymarketPredictor:
                 query = f"What is the current Twitter/X sentiment about: {market.question}? Is sentiment positive, negative, or neutral? Just give a brief assessment."
                 result = await self._agent_funcs['Grok'](query, 500)
                 if result:
-                    response = result[0] if isinstance(result, tuple) else result
-                    response_lower = response.lower() if response else ""
+                    # Handle all return types: tuple, dict, or string
+                    if isinstance(result, tuple):
+                        response = result[0]
+                    elif isinstance(result, dict):
+                        response = result.get('content', str(result))
+                    else:
+                        response = result
+                    response = str(response) if response else ""
+                    response_lower = response.lower()
 
                     if 'positive' in response_lower or 'bullish' in response_lower or 'optimistic' in response_lower:
                         direction = "bullish"
@@ -401,8 +408,15 @@ class PolymarketPredictor:
                 query = f"What are the latest news developments related to: {market.question}? How might recent news affect the outcome? Brief answer."
                 result = await self._agent_funcs[agent](query, 500)
                 if result:
-                    response = result[0] if isinstance(result, tuple) else result
-                    response_lower = response.lower() if response else ""
+                    # Handle all return types: tuple, dict, or string
+                    if isinstance(result, tuple):
+                        response = result[0]
+                    elif isinstance(result, dict):
+                        response = result.get('content', str(result))
+                    else:
+                        response = result
+                    response = str(response) if response else ""
+                    response_lower = response.lower()
 
                     # Parse sentiment from response
                     positive_words = ['positive', 'likely', 'expected', 'confirm', 'support', 'favor']

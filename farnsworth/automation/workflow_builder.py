@@ -831,17 +831,11 @@ class WorkflowBuilder:
         config: Dict[str, Any],
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Handle Python code execution."""
+        """Handle Python code execution (sandboxed)."""
+        from farnsworth.core.safe_eval import safe_exec
+
         code = config.get("code", "")
-
-        # Create safe execution environment
-        local_vars = {
-            "context": context,
-            "result": None,
-        }
-
-        exec(code, {"__builtins__": __builtins__}, local_vars)
-
+        local_vars = safe_exec(code, variables={"context": context})
         return {"result": local_vars.get("result")}
 
     async def _handle_wait(
@@ -859,38 +853,37 @@ class WorkflowBuilder:
         config: Dict[str, Any],
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Handle data transformation."""
+        """Handle data transformation (sandboxed expressions)."""
+        from farnsworth.core.safe_eval import safe_eval
+
         operation = config.get("operation", "passthrough")
         input_data = config.get("input", context.get("node_outputs", {}))
 
         if operation == "passthrough":
             return {"data": input_data}
         elif operation == "filter":
-            # Filter array based on condition
             condition = config.get("condition", "true")
             if isinstance(input_data, list):
                 filtered = [
                     item for item in input_data
-                    if eval(condition, {"item": item})
+                    if safe_eval(condition, {"item": item})
                 ]
                 return {"data": filtered}
         elif operation == "map":
-            # Map transformation
             expression = config.get("expression", "item")
             if isinstance(input_data, list):
                 mapped = [
-                    eval(expression, {"item": item})
+                    safe_eval(expression, {"item": item})
                     for item in input_data
                 ]
                 return {"data": mapped}
         elif operation == "reduce":
-            # Reduce to single value
             expression = config.get("expression", "acc + item")
             initial = config.get("initial", 0)
             if isinstance(input_data, list):
                 acc = initial
                 for item in input_data:
-                    acc = eval(expression, {"acc": acc, "item": item})
+                    acc = safe_eval(expression, {"acc": acc, "item": item})
                 return {"data": acc}
         elif operation == "json_parse":
             import json
@@ -906,9 +899,11 @@ class WorkflowBuilder:
         config: Dict[str, Any],
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Handle condition node."""
+        """Handle condition node (sandboxed)."""
+        from farnsworth.core.safe_eval import safe_eval
+
         condition = config.get("condition", "true")
-        result = eval(condition, {"context": context})
+        result = safe_eval(condition, {"context": context})
         return {"result": bool(result), "branch": "true" if result else "false"}
 
     async def _handle_loop(

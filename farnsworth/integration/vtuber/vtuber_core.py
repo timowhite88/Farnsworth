@@ -465,7 +465,9 @@ class FarnsworthVTuber:
             # Farnsworth uses phi4 model (smart, reasoning)
             async def query_farnsworth(prompt: str, max_tokens: int):
                 try:
-                    response = ollama.chat(
+                    import asyncio
+                    response = await asyncio.to_thread(
+                        ollama.chat,
                         model="phi4",
                         messages=[
                             {"role": "system", "content": "You are Farnsworth, an eccentric AI scientist leading a collective of AI agents. You speak with wisdom and a touch of eccentric genius. Provide thoughtful, complete responses."},
@@ -484,7 +486,9 @@ class FarnsworthVTuber:
 
             async def query_deepseek(prompt: str, max_tokens: int):
                 try:
-                    response = ollama.chat(
+                    import asyncio
+                    response = await asyncio.to_thread(
+                        ollama.chat,
                         model="deepseek-r1:8b",
                         messages=[{"role": "user", "content": prompt}],
                         options={"num_predict": max_tokens}
@@ -501,7 +505,9 @@ class FarnsworthVTuber:
             # Register Phi agent
             async def query_phi(prompt: str, max_tokens: int):
                 try:
-                    response = ollama.chat(
+                    import asyncio
+                    response = await asyncio.to_thread(
+                        ollama.chat,
                         model="phi4",
                         messages=[{"role": "user", "content": prompt}],
                         options={"num_predict": max_tokens}
