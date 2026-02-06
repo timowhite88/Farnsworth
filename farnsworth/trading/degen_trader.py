@@ -1,8 +1,11 @@
 """
-Farnsworth Degen Trader v3 - Collective Intelligence Memecoin Trading
+Farnsworth Degen Trader v3.5 - Pre-Bonding Curve Sniper Edition
 
 High-frequency Solana memecoin trader powered by the Farnsworth swarm.
-- Pump.fun WebSocket for instant new launch detection
+- DIRECT Pump.fun bonding curve buys (no Jupiter needed pre-graduation)
+- PumpPortal local transaction API for speed-critical buys
+- Pre-bonding curve sniping: buy seconds after launch, sell before/after graduation
+- Pump.fun WebSocket for instant new launch detection + trade velocity tracking
 - Wallet graph analysis to detect cabals and insider coordination
 - Quantum-enhanced analysis: IBM Quantum QAOA, quantum random timing, FarsightProtocol
 - Deep swarm integration: Grok (X sentiment), DeepSeek (TA), Gemini (multi-factor)
@@ -24,6 +27,7 @@ import os
 import base64
 import hashlib
 import random
+import struct
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, List, Tuple, Set
@@ -50,7 +54,32 @@ DEXSCREENER_BOOSTS = "https://api.dexscreener.com/token-boosts/latest/v1"
 DEXSCREENER_PROFILES = "https://api.dexscreener.com/token-profiles/latest/v1"
 
 PUMPFUN_WS_URL = "wss://pumpportal.fun/api/data"
+PUMPPORTAL_LOCAL_API = "https://pumpportal.fun/api/trade-local"
 RAYDIUM_AMM_PROGRAM = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+
+# Pump.fun Program Addresses (bonding curve direct trading)
+PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+PUMP_GLOBAL_ACCOUNT = "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"
+PUMP_FEE_RECIPIENTS = [
+    "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+    "7VtfL8fvgNfhz17qKRMjzQEXgbdpnHHHQRh54R9jP2RJ",
+    "7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX",
+    "9rPYyANsfQZw3DnDmKE3YCQF5E8oD89UXoHn9JFEhJUz",
+    "AVmoTthdrX6tKt4nDjco2D775W2YK3sDhxPcMmzUAmTY",
+    "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM",
+    "FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz",
+    "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
+]
+PUMP_BUY_DISCRIMINATOR = bytes([102, 6, 61, 18, 1, 218, 235, 234])
+PUMP_SELL_DISCRIMINATOR = bytes([51, 230, 133, 164, 1, 127, 131, 173])
+PUMP_GRADUATION_SOL = 85.0  # ~85 SOL triggers graduation to PumpSwap
+PUMP_INITIAL_VIRTUAL_TOKEN = 1_073_000_000_000_000  # 6 decimals
+PUMP_INITIAL_VIRTUAL_SOL = 30_000_000_000  # 30 SOL in lamports
+PUMP_INITIAL_REAL_TOKEN = 793_100_000_000_000
+TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+ASSOC_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+SYSTEM_PROGRAM = "11111111111111111111111111111111"
+RENT_SYSVAR = "SysvarRent111111111111111111111111111111111"
 
 DEFAULT_RPC = "https://api.mainnet-beta.solana.com"
 
@@ -87,9 +116,75 @@ class TokenInfo:
     cabal_score: float = 0.0       # 0=no cabal, 100=definite cabal
     rug_probability: float = 0.0   # 0-1 from quantum Monte Carlo
     swarm_sentiment: str = ""      # BUY/SKIP/STRONG_BUY
-    source: str = "dexscreener"    # dexscreener/pumpfun/raydium
+    source: str = "dexscreener"    # dexscreener/pumpfun/raydium/bonding_curve
     creator_wallet: str = ""
     top_holders_connected: bool = False
+    # v3.5: Bonding curve fields
+    on_bonding_curve: bool = False       # still on pump.fun bonding curve
+    curve_progress: float = 0.0          # 0-100% towards graduation
+    curve_sol_raised: float = 0.0        # SOL raised so far
+    buy_velocity_per_min: float = 0.0    # buys per minute (momentum)
+    dev_bought_more: bool = False        # dev buying their own token = bullish
+    initial_buy_sol: float = 0.0         # creator's initial buy size
+
+
+@dataclass
+class BondingCurveState:
+    """Parsed state of a pump.fun bonding curve account."""
+    virtual_token_reserves: int = 0
+    virtual_sol_reserves: int = 0
+    real_token_reserves: int = 0
+    real_sol_reserves: int = 0
+    token_total_supply: int = 0
+    complete: bool = False
+
+    @property
+    def price_sol(self) -> float:
+        """Current price per token in SOL."""
+        if self.virtual_token_reserves == 0:
+            return 0
+        return (self.virtual_sol_reserves / 1e9) / (self.virtual_token_reserves / 1e6)
+
+    @property
+    def sol_raised(self) -> float:
+        """Total SOL raised from bonding curve sales."""
+        return self.real_sol_reserves / 1e9
+
+    @property
+    def progress_pct(self) -> float:
+        """Percent progress towards graduation (0-100)."""
+        if PUMP_GRADUATION_SOL <= 0:
+            return 0
+        return min(100.0, (self.sol_raised / PUMP_GRADUATION_SOL) * 100)
+
+    @property
+    def tokens_remaining(self) -> float:
+        """Tokens still available on the curve."""
+        return self.real_token_reserves / 1e6
+
+    def calc_tokens_for_sol(self, sol_amount: float) -> int:
+        """Calculate how many raw tokens you get for X SOL."""
+        sol_lamports = int(sol_amount * 1e9)
+        fee = int(sol_lamports * 0.01)  # 1% pump.fun fee
+        sol_after_fee = sol_lamports - fee
+        k = self.virtual_token_reserves * self.virtual_sol_reserves
+        new_virtual_sol = self.virtual_sol_reserves + sol_after_fee
+        if new_virtual_sol == 0:
+            return 0
+        new_virtual_tokens = k // new_virtual_sol
+        tokens_out = self.virtual_token_reserves - new_virtual_tokens
+        return max(0, tokens_out)
+
+    def calc_sol_for_tokens(self, token_amount: int) -> int:
+        """Calculate how much SOL lamports you get for selling X raw tokens."""
+        k = self.virtual_token_reserves * self.virtual_sol_reserves
+        new_virtual_tokens = self.virtual_token_reserves + token_amount
+        if new_virtual_tokens == 0:
+            return 0
+        new_virtual_sol = k // new_virtual_tokens
+        sol_out = self.virtual_sol_reserves - new_virtual_sol
+        fee = int(sol_out * 0.01)
+        return max(0, sol_out - fee)
 
 
 @dataclass
@@ -194,6 +289,15 @@ class TraderConfig:
     use_x_sentinel: bool = True    # monitor X for cabal signals via Grok
     # v3: Trading memory
     use_trading_memory: bool = True  # learn from past trades
+    # v3.5: Bonding curve sniper
+    use_bonding_curve: bool = True     # direct pump.fun bonding curve buys
+    bonding_curve_max_sol: float = 0.08  # max SOL per bonding curve buy
+    bonding_curve_min_buys: int = 3    # min buy count before we ape in
+    bonding_curve_max_progress: float = 50.0  # max % curve progress (get in early)
+    bonding_curve_min_velocity: float = 2.0  # min buys/min momentum
+    use_pumpportal: bool = True        # use PumpPortal API for faster execution
+    graduation_sell_pct: float = 0.5   # sell 50% at graduation for guaranteed profit
+    sniper_mode: bool = True           # ultra-fast path: skip deep analysis for hot launches
 
 
 # ============================================================
@@ -242,23 +346,29 @@ def load_wallet(name: str = "degen_trader"):
 
 
 # ============================================================
-# PUMP.FUN MONITOR
+# PUMP.FUN MONITOR (v3.5 - Enhanced for bonding curve sniping)
 # ============================================================
 class PumpFunMonitor:
-    """Real-time pump.fun new token and trade monitoring via WebSocket."""
+    """Real-time pump.fun new token and trade monitoring via WebSocket.
+
+    v3.5: Enhanced with buy velocity tracking, unique buyer counting,
+    creator activity monitoring, and sniper signal generation.
+    """
 
     def __init__(self):
         self.ws = None
         self.new_tokens: asyncio.Queue = asyncio.Queue(maxsize=500)
-        self.hot_tokens: Dict[str, dict] = {}  # mint -> trade stats
+        self.hot_tokens: Dict[str, dict] = {}  # mint -> detailed trade stats
+        self.sniper_signals: asyncio.Queue = asyncio.Queue(maxsize=100)  # high-priority buys
         self.running = False
         self._task = None
+        self._tracked_creators: Dict[str, List[str]] = {}  # creator -> [mints they made]
 
     async def start(self):
         """Connect to pump.fun WebSocket and monitor."""
         self.running = True
         self._task = asyncio.create_task(self._listen())
-        logger.info("PumpFun monitor started")
+        logger.info("PumpFun monitor v3.5 started (bonding curve sniper mode)")
 
     async def stop(self):
         self.running = False
@@ -278,9 +388,9 @@ class PumpFunMonitor:
             try:
                 async with websockets.connect(PUMPFUN_WS_URL) as ws:
                     self.ws = ws
-                    # Subscribe to new token creates
+                    # Subscribe to new token creates + token trades
                     await ws.send(json.dumps({"method": "subscribeNewToken"}))
-                    logger.info("Subscribed to pump.fun new tokens")
+                    logger.info("Subscribed to pump.fun new tokens + trades")
 
                     async for msg in ws:
                         if not self.running:
@@ -301,39 +411,400 @@ class PumpFunMonitor:
         """Process pump.fun WebSocket messages."""
         if data.get("txType") == "create":
             # New token created on pump.fun
+            creator = data.get("traderPublicKey", "")
+            mint = data.get("mint", "")
+            initial_sol = data.get("solAmount", 0) / LAMPORTS_PER_SOL if data.get("solAmount") else 0
             token_data = {
-                "mint": data.get("mint", ""),
+                "mint": mint,
                 "name": data.get("name", ""),
                 "symbol": data.get("symbol", ""),
-                "creator": data.get("traderPublicKey", ""),
-                "initial_buy_sol": data.get("solAmount", 0) / LAMPORTS_PER_SOL if data.get("solAmount") else 0,
+                "creator": creator,
+                "initial_buy_sol": initial_sol,
                 "timestamp": time.time(),
-                "source": "pumpfun",
+                "source": "bonding_curve",
+                "on_bonding_curve": True,
             }
-            if token_data["mint"]:
+            if mint:
+                # Track this token's trade stats from birth
+                self.hot_tokens[mint] = {
+                    "buys": 1 if initial_sol > 0 else 0,
+                    "sells": 0,
+                    "volume_sol": initial_sol,
+                    "first_seen": time.time(),
+                    "unique_buyers": {creator} if initial_sol > 0 else set(),
+                    "creator": creator,
+                    "creator_bought": initial_sol > 0,
+                    "creator_sol": initial_sol,
+                    "buy_timestamps": [time.time()] if initial_sol > 0 else [],
+                    "symbol": data.get("symbol", ""),
+                    "name": data.get("name", ""),
+                    "largest_buy_sol": initial_sol,
+                }
+                # Track creator history
+                if creator:
+                    if creator not in self._tracked_creators:
+                        self._tracked_creators[creator] = []
+                    self._tracked_creators[creator].append(mint)
+
                 try:
                     self.new_tokens.put_nowait(token_data)
                 except asyncio.QueueFull:
-                    self.new_tokens.get_nowait()  # drop oldest
+                    self.new_tokens.get_nowait()
                     self.new_tokens.put_nowait(token_data)
-                logger.info(f"PUMPFUN NEW: ${token_data['symbol']} by {token_data['creator'][:8]}...")
+                logger.info(f"PUMPFUN NEW: ${token_data['symbol']} by {creator[:8]}... (dev buy: {initial_sol:.3f} SOL)")
 
-        elif data.get("txType") == "buy" or data.get("txType") == "sell":
+        elif data.get("txType") in ("buy", "sell"):
             mint = data.get("mint", "")
+            trader = data.get("traderPublicKey", "")
             if mint:
                 if mint not in self.hot_tokens:
-                    self.hot_tokens[mint] = {"buys": 0, "sells": 0, "volume_sol": 0, "first_seen": time.time()}
+                    self.hot_tokens[mint] = {
+                        "buys": 0, "sells": 0, "volume_sol": 0,
+                        "first_seen": time.time(), "unique_buyers": set(),
+                        "creator": "", "creator_bought": False, "creator_sol": 0,
+                        "buy_timestamps": [], "symbol": "", "name": "",
+                        "largest_buy_sol": 0,
+                    }
                 stats = self.hot_tokens[mint]
                 sol_amount = data.get("solAmount", 0) / LAMPORTS_PER_SOL if data.get("solAmount") else 0
+
                 if data["txType"] == "buy":
                     stats["buys"] += 1
+                    stats["unique_buyers"].add(trader)
+                    stats["buy_timestamps"].append(time.time())
+                    if sol_amount > stats.get("largest_buy_sol", 0):
+                        stats["largest_buy_sol"] = sol_amount
+                    # Check if creator is buying more (bullish signal)
+                    if trader == stats.get("creator") and stats["buys"] > 1:
+                        stats["creator_bought"] = True
+                        stats["creator_sol"] += sol_amount
                 else:
                     stats["sells"] += 1
+                    # Creator selling = bearish, could be rug
+                    if trader == stats.get("creator"):
+                        stats["creator_sold"] = True
                 stats["volume_sol"] += sol_amount
+
+                # Check sniper signal: fast buys from multiple unique wallets
+                self._check_sniper_signal(mint, stats)
 
         # Cleanup old hot tokens (older than 30 min)
         cutoff = time.time() - 1800
         self.hot_tokens = {k: v for k, v in self.hot_tokens.items() if v.get("first_seen", 0) > cutoff}
+        # Cleanup old creator tracking (keep last 100)
+        if len(self._tracked_creators) > 500:
+            oldest = sorted(self._tracked_creators.keys(), key=lambda c: len(self._tracked_creators[c]))[:250]
+            for c in oldest:
+                del self._tracked_creators[c]
+
+    def _check_sniper_signal(self, mint: str, stats: dict):
+        """Emit a sniper signal if token shows strong early momentum."""
+        age_seconds = time.time() - stats.get("first_seen", time.time())
+        if age_seconds < 5 or age_seconds > 300:  # 5s-5min window
+            return
+
+        buys = stats["buys"]
+        sells = stats["sells"]
+        unique = len(stats.get("unique_buyers", set()))
+        velocity = (buys / (age_seconds / 60)) if age_seconds > 0 else 0
+        creator_sold = stats.get("creator_sold", False)
+
+        # Sniper criteria: multiple unique buyers, good velocity, no creator dump
+        if (buys >= 3 and unique >= 3 and velocity >= 2.0
+                and sells <= buys * 0.3 and not creator_sold):
+            signal = {
+                "mint": mint,
+                "symbol": stats.get("symbol", ""),
+                "name": stats.get("name", ""),
+                "buys": buys,
+                "sells": sells,
+                "unique_buyers": unique,
+                "velocity": velocity,
+                "volume_sol": stats["volume_sol"],
+                "age_seconds": age_seconds,
+                "creator": stats.get("creator", ""),
+                "creator_bought": stats.get("creator_bought", False),
+                "creator_sol": stats.get("creator_sol", 0),
+                "largest_buy_sol": stats.get("largest_buy_sol", 0),
+                "timestamp": time.time(),
+            }
+            try:
+                self.sniper_signals.put_nowait(signal)
+            except asyncio.QueueFull:
+                self.sniper_signals.get_nowait()
+                self.sniper_signals.put_nowait(signal)
+            logger.info(
+                f"SNIPER SIGNAL: ${signal['symbol']} | {buys} buys ({unique} unique) | "
+                f"{velocity:.1f}/min | {stats['volume_sol']:.2f} SOL vol | age {age_seconds:.0f}s"
+            )
+
+    def get_buy_velocity(self, mint: str) -> float:
+        """Get current buy velocity (buys per minute) for a token."""
+        stats = self.hot_tokens.get(mint)
+        if not stats:
+            return 0
+        age_seconds = time.time() - stats.get("first_seen", time.time())
+        if age_seconds <= 0:
+            return 0
+        return stats["buys"] / (age_seconds / 60)
+
+    def get_token_stats(self, mint: str) -> Optional[dict]:
+        """Get detailed stats for a token."""
+        stats = self.hot_tokens.get(mint)
+        if not stats:
+            return None
+        age_seconds = time.time() - stats.get("first_seen", time.time())
+        return {
+            "buys": stats["buys"],
+            "sells": stats["sells"],
+            "unique_buyers": len(stats.get("unique_buyers", set())),
+            "volume_sol": stats["volume_sol"],
+            "velocity": stats["buys"] / (age_seconds / 60) if age_seconds > 0 else 0,
+            "age_seconds": age_seconds,
+            "creator_bought": stats.get("creator_bought", False),
+            "creator_sold": stats.get("creator_sold", False),
+            "largest_buy_sol": stats.get("largest_buy_sol", 0),
+        }
+
+    def is_serial_deployer(self, creator: str) -> bool:
+        """Check if creator has deployed multiple tokens recently (rug signal)."""
+        mints = self._tracked_creators.get(creator, [])
+        return len(mints) > 2  # 3+ tokens in 30min = serial deployer
+
+
+# ============================================================
+# BONDING CURVE ENGINE (v3.5 - Direct pump.fun trading)
+# ============================================================
+class BondingCurveEngine:
+    """Direct trading on pump.fun bonding curves.
+
+    Bypasses Jupiter/Raydium entirely for pre-graduation tokens.
+    Uses PumpPortal local transaction API for speed, with direct
+    on-chain instruction fallback.
+    """
+
+    def __init__(self, rpc_url: str, fast_rpc_url: str = ""):
+        self.rpc_url = rpc_url
+        self.fast_rpc_url = fast_rpc_url or rpc_url
+        self._curve_cache: Dict[str, Tuple[BondingCurveState, float]] = {}  # mint -> (state, timestamp)
+        self._fee_idx = 0
+
+    def _next_fee_recipient(self) -> str:
+        """Round-robin fee recipient selection."""
+        recipient = PUMP_FEE_RECIPIENTS[self._fee_idx % len(PUMP_FEE_RECIPIENTS)]
+        self._fee_idx += 1
+        return recipient
+
+    async def get_bonding_curve_state(self, mint: str, session: aiohttp.ClientSession) -> Optional[BondingCurveState]:
+        """Fetch and parse the bonding curve account for a token."""
+        # Check cache (5 second TTL)
+        cached = self._curve_cache.get(mint)
+        if cached and time.time() - cached[1] < 5:
+            return cached[0]
+
+        try:
+            # Derive bonding curve PDA
+            from solders.pubkey import Pubkey
+            mint_pk = Pubkey.from_string(mint)
+            program_pk = Pubkey.from_string(PUMP_PROGRAM_ID)
+            curve_pk, _ = Pubkey.find_program_address(
+                [b"bonding-curve", bytes(mint_pk)], program_pk
+            )
+
+            # Fetch account data via RPC
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [str(curve_pk), {"encoding": "base64"}]
+            }
+            async with session.post(self.fast_rpc_url, json=payload) as resp:
+                result = await resp.json()
+
+            account = result.get("result", {}).get("value")
+            if not account or not account.get("data"):
+                return None
+
+            data_b64 = account["data"][0]
+            data = base64.b64decode(data_b64)
+
+            if len(data) < 49:  # 8 discriminator + 5*8 fields + 1 bool
+                return None
+
+            # Parse bonding curve layout
+            state = BondingCurveState(
+                virtual_token_reserves=struct.unpack_from("<Q", data, 8)[0],
+                virtual_sol_reserves=struct.unpack_from("<Q", data, 16)[0],
+                real_token_reserves=struct.unpack_from("<Q", data, 24)[0],
+                real_sol_reserves=struct.unpack_from("<Q", data, 32)[0],
+                token_total_supply=struct.unpack_from("<Q", data, 40)[0],
+                complete=bool(data[48]),
+            )
+
+            self._curve_cache[mint] = (state, time.time())
+            return state
+
+        except ImportError:
+            logger.error("pip install solders for bonding curve trading")
+            return None
+        except Exception as e:
+            logger.debug(f"Bonding curve fetch error for {mint}: {e}")
+            return None
+
+    async def buy_on_curve_pumpportal(
+        self, mint: str, sol_amount: float, pubkey: str, keypair,
+        session: aiohttp.ClientSession, slippage: int = 15, priority_fee: float = 0.005,
+    ) -> Optional[str]:
+        """Buy a token on the bonding curve via PumpPortal local API.
+
+        This is the fastest path - PumpPortal builds the transaction,
+        we sign locally and submit.
+        """
+        try:
+            from solders.transaction import VersionedTransaction
+
+            # Get unsigned transaction from PumpPortal
+            payload = {
+                "publicKey": pubkey,
+                "action": "buy",
+                "mint": mint,
+                "amount": sol_amount,
+                "denominatedInSol": "true",
+                "slippage": slippage,
+                "priorityFee": priority_fee,
+                "pool": "pump",
+            }
+            async with session.post(PUMPPORTAL_LOCAL_API, json=payload) as resp:
+                if resp.status != 200:
+                    err = await resp.text()
+                    logger.error(f"PumpPortal buy error: {err}")
+                    return None
+                tx_bytes = await resp.read()
+
+            if not tx_bytes or len(tx_bytes) < 10:
+                logger.error("PumpPortal returned empty transaction")
+                return None
+
+            # Deserialize, sign, and send
+            tx = VersionedTransaction.from_bytes(tx_bytes)
+            signed_tx = VersionedTransaction(tx.message, [keypair])
+            signed_b64 = base64.b64encode(bytes(signed_tx)).decode("ascii")
+
+            send_payload = {
+                "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
+                "params": [signed_b64, {"encoding": "base64", "skipPreflight": True, "maxRetries": 2}]
+            }
+            rpc = self.fast_rpc_url
+            async with session.post(rpc, json=send_payload) as resp:
+                result = await resp.json()
+
+            if "error" in result:
+                logger.error(f"Bonding curve TX error: {result['error']}")
+                return None
+
+            tx_sig = result.get("result", "")
+            if tx_sig:
+                logger.info(f"BONDING CURVE BUY: {mint[:12]}... | {sol_amount:.4f} SOL | tx={tx_sig[:20]}...")
+            return tx_sig
+
+        except ImportError:
+            logger.error("pip install solders for bonding curve trading")
+            return None
+        except Exception as e:
+            logger.error(f"PumpPortal buy error: {e}")
+            return None
+
+    async def sell_on_curve_pumpportal(
+        self, mint: str, token_amount_pct: float, pubkey: str, keypair,
+        session: aiohttp.ClientSession, slippage: int = 15, priority_fee: float = 0.005,
+    ) -> Optional[str]:
+        """Sell tokens on the bonding curve via PumpPortal.
+
+        token_amount_pct: fraction to sell (1.0 = all, 0.5 = half)
+        """
+        try:
+            from solders.transaction import VersionedTransaction
+
+            # First get our token balance
+            balance = await self._get_token_balance(mint, pubkey, session)
+            if balance <= 0:
+                return None
+
+            sell_amount = int(balance * token_amount_pct)
+            if sell_amount <= 0:
+                return None
+
+            payload = {
+                "publicKey": pubkey,
+                "action": "sell",
+                "mint": mint,
+                "amount": sell_amount,
+                "denominatedInSol": "false",
+                "slippage": slippage,
+                "priorityFee": priority_fee,
+                "pool": "pump",
+            }
+            async with session.post(PUMPPORTAL_LOCAL_API, json=payload) as resp:
+                if resp.status != 200:
+                    err = await resp.text()
+                    logger.error(f"PumpPortal sell error: {err}")
+                    return None
+                tx_bytes = await resp.read()
+
+            if not tx_bytes or len(tx_bytes) < 10:
+                return None
+
+            tx = VersionedTransaction.from_bytes(tx_bytes)
+            signed_tx = VersionedTransaction(tx.message, [keypair])
+            signed_b64 = base64.b64encode(bytes(signed_tx)).decode("ascii")
+
+            send_payload = {
+                "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
+                "params": [signed_b64, {"encoding": "base64", "skipPreflight": True, "maxRetries": 2}]
+            }
+            async with session.post(self.fast_rpc_url, json=send_payload) as resp:
+                result = await resp.json()
+
+            if "error" in result:
+                logger.error(f"Bonding curve sell TX error: {result['error']}")
+                return None
+
+            tx_sig = result.get("result", "")
+            if tx_sig:
+                logger.info(f"BONDING CURVE SELL: {mint[:12]}... | {token_amount_pct:.0%} | tx={tx_sig[:20]}...")
+            return tx_sig
+
+        except Exception as e:
+            logger.error(f"PumpPortal sell error: {e}")
+            return None
+
+    async def _get_token_balance(self, mint: str, owner: str, session: aiohttp.ClientSession) -> int:
+        """Get raw token balance for owner."""
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [owner, {"mint": mint}, {"encoding": "jsonParsed"}]
+            }
+            async with session.post(self.fast_rpc_url, json=payload) as resp:
+                data = await resp.json()
+            accounts = data.get("result", {}).get("value", [])
+            if accounts:
+                info = accounts[0].get("account", {}).get("data", {}).get("parsed", {}).get("info", {})
+                return int(info.get("tokenAmount", {}).get("amount", 0))
+        except Exception as e:
+            logger.debug(f"Token balance error: {e}")
+        return 0
+
+    def is_pre_graduation(self, state: BondingCurveState) -> bool:
+        """Check if token is still on bonding curve (hasn't graduated)."""
+        return not state.complete and state.real_token_reserves > 0
+
+    def estimate_graduation_time(self, state: BondingCurveState, velocity_sol_per_min: float) -> float:
+        """Estimate minutes until graduation based on current buy velocity."""
+        remaining_sol = PUMP_GRADUATION_SOL - state.sol_raised
+        if remaining_sol <= 0 or velocity_sol_per_min <= 0:
+            return 0
+        return remaining_sol / velocity_sol_per_min
 
 
 # ============================================================
@@ -1442,6 +1913,9 @@ class DegenTrader:
         self.copy_engine: Optional[CopyTradeEngine] = None
         self.x_sentinel: Optional[XSentinelMonitor] = None
         self.trading_memory: Optional[TradingMemory] = None
+        # v3.5: Bonding curve direct trading
+        self.curve_engine: Optional[BondingCurveEngine] = None
+        self._sniper_bought: set = set()  # mints already sniped
 
     async def initialize(self):
         """Load wallet, start session, initialize intelligence layers."""
@@ -1465,7 +1939,7 @@ class DegenTrader:
 
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            headers={"User-Agent": "FarnsworthDegenTrader/2.0"}
+            headers={"User-Agent": "FarnsworthDegenTrader/3.5"}
         )
 
         balance = await self.get_sol_balance()
@@ -1501,6 +1975,11 @@ class DegenTrader:
         if self.config.use_trading_memory:
             self.trading_memory = TradingMemory()
             await self.trading_memory.initialize()
+
+        # v3.5: Bonding curve engine
+        if self.config.use_bonding_curve:
+            self.curve_engine = BondingCurveEngine(self.config.rpc_url, self.config.fast_rpc_url)
+            logger.info("Bonding curve engine enabled (direct pump.fun trading)")
 
         self._load_state()
         return self.pubkey
@@ -1577,31 +2056,65 @@ class DegenTrader:
         return unique
 
     async def _drain_pumpfun_queue(self) -> List[TokenInfo]:
-        """Get new tokens from pump.fun monitor."""
+        """Get new tokens from pump.fun monitor.
+
+        v3.5: Enhanced to pull bonding curve state for fresh tokens
+        instead of waiting for DexScreener indexing.
+        """
         tokens = []
         while not self.pump_monitor.new_tokens.empty():
             try:
                 pf = self.pump_monitor.new_tokens.get_nowait()
                 mint = pf.get("mint", "")
-                if not mint or mint in self.seen_tokens:
+                if not mint or mint in self.seen_tokens or mint in self._sniper_bought:
                     continue
 
-                # Wait a bit for DexScreener to index it
                 age_seconds = time.time() - pf.get("timestamp", time.time())
-                if age_seconds < 60:
-                    # Too fresh for DexScreener, check pump.fun hot stats
-                    hot = self.pump_monitor.hot_tokens.get(mint, {})
-                    if hot.get("buys", 0) >= 5:  # at least 5 buys
-                        token_data = await self._fetch_token_data(mint)
-                        if token_data:
-                            token_data.source = "pumpfun"
-                            token_data.creator_wallet = pf.get("creator", "")
+                hot = self.pump_monitor.hot_tokens.get(mint, {})
+                buys = hot.get("buys", 0)
+
+                # v3.5: For fresh tokens still on bonding curve, build TokenInfo
+                # from pump.fun data + curve state (don't wait for DexScreener)
+                if age_seconds < 120 and self.curve_engine:
+                    if buys >= self.config.bonding_curve_min_buys:
+                        curve_state = await self.curve_engine.get_bonding_curve_state(mint, self.session)
+                        if curve_state and not curve_state.complete:
+                            velocity = self.pump_monitor.get_buy_velocity(mint)
+                            unique = len(hot.get("unique_buyers", set()))
+                            token_data = TokenInfo(
+                                address=mint,
+                                symbol=pf.get("symbol", hot.get("symbol", "???")),
+                                name=pf.get("name", hot.get("name", "Unknown")),
+                                pair_address="",
+                                price_usd=curve_state.price_sol * 150,  # rough SOL->USD
+                                liquidity_usd=curve_state.sol_raised * 150,
+                                volume_24h=hot.get("volume_sol", 0) * 150,
+                                age_minutes=age_seconds / 60,
+                                holders=unique,
+                                fdv=curve_state.price_sol * 1e9 * 150,  # rough
+                                buy_count_5m=buys,
+                                sell_count_5m=hot.get("sells", 0),
+                                source="bonding_curve",
+                                creator_wallet=pf.get("creator", ""),
+                                on_bonding_curve=True,
+                                curve_progress=curve_state.progress_pct,
+                                curve_sol_raised=curve_state.sol_raised,
+                                buy_velocity_per_min=velocity,
+                                initial_buy_sol=pf.get("initial_buy_sol", 0),
+                            )
                             tokens.append(token_data)
-                else:
+                            continue
+
+                # Fallback: try DexScreener for older tokens
+                if age_seconds >= 60 or buys >= 5:
                     token_data = await self._fetch_token_data(mint)
                     if token_data:
                         token_data.source = "pumpfun"
                         token_data.creator_wallet = pf.get("creator", "")
+                        # Enrich with pump.fun stats
+                        pf_stats = self.pump_monitor.get_token_stats(mint)
+                        if pf_stats:
+                            token_data.buy_velocity_per_min = pf_stats.get("velocity", 0)
                         tokens.append(token_data)
             except asyncio.QueueEmpty:
                 break
@@ -1672,21 +2185,32 @@ class DegenTrader:
         """Score a token 0-100 based on multiple degen signals."""
         score = 0.0
 
-        # Liquidity sweet spot
-        if token.liquidity_usd < self.config.min_liquidity:
-            return 0
-        if token.liquidity_usd > self.config.max_liquidity:
-            return 0
+        # Liquidity sweet spot (skip for bonding curve tokens - they have no traditional liquidity)
+        if not token.on_bonding_curve:
+            if token.liquidity_usd < self.config.min_liquidity:
+                return 0
+            if token.liquidity_usd > self.config.max_liquidity:
+                return 0
 
-        if 10000 <= token.liquidity_usd <= 100000:
-            score += 20
-        elif 5000 <= token.liquidity_usd < 10000:
-            score += 10
+            if 10000 <= token.liquidity_usd <= 100000:
+                score += 20
+            elif 5000 <= token.liquidity_usd < 10000:
+                score += 10
+            else:
+                score += 5
         else:
-            score += 5
+            # Bonding curve: score based on SOL raised
+            if token.curve_sol_raised >= 10:
+                score += 20
+            elif token.curve_sol_raised >= 3:
+                score += 15
+            elif token.curve_sol_raised >= 0.5:
+                score += 10
+            else:
+                score += 5
 
-        # Age (newer = more upside)
-        if token.age_minutes < self.config.min_age_minutes:
+        # Age (newer = more upside; bonding curve tokens can be ultra-fresh)
+        if not token.on_bonding_curve and token.age_minutes < self.config.min_age_minutes:
             return 0
         if token.age_minutes <= 15:
             score += 25
@@ -1735,6 +2259,29 @@ class DegenTrader:
         # Pump.fun source bonus (earliest detection)
         if token.source == "pumpfun":
             score += 10
+
+        # v3.5: Bonding curve scoring (pre-graduation plays)
+        if token.on_bonding_curve:
+            score += 15  # base bonus for being early
+            # Buy velocity = momentum
+            if token.buy_velocity_per_min >= 5.0:
+                score += 20  # extremely hot
+            elif token.buy_velocity_per_min >= 3.0:
+                score += 15
+            elif token.buy_velocity_per_min >= 1.5:
+                score += 10
+            # Early in curve = more upside
+            if token.curve_progress < 10:
+                score += 15  # very early
+            elif token.curve_progress < 25:
+                score += 10
+            elif token.curve_progress < 50:
+                score += 5
+            # Dev bought their own token = skin in the game
+            if token.initial_buy_sol >= 0.5:
+                score += 10
+            elif token.initial_buy_sol >= 0.1:
+                score += 5
 
         # Cabal bonus/penalty
         if token.top_holders_connected and self.config.cabal_is_bullish:
@@ -1841,13 +2388,143 @@ class DegenTrader:
         return True
 
     # ----------------------------------------------------------
+    # BONDING CURVE SNIPER (v3.5)
+    # ----------------------------------------------------------
+    async def execute_sniper_buy(self, signal: dict, amount_sol: float) -> Optional[Trade]:
+        """Ultra-fast bonding curve buy from sniper signal. Minimal checks."""
+        mint = signal.get("mint", "")
+        symbol = signal.get("symbol", "???")
+
+        if not self.curve_engine or not self.session:
+            return None
+        if mint in self._sniper_bought or mint in self.positions:
+            return None
+
+        # Quick rug checks (fast, no deep analysis)
+        creator = signal.get("creator", "")
+        if creator and self.pump_monitor and self.pump_monitor.is_serial_deployer(creator):
+            logger.info(f"SNIPER SKIP {symbol}: serial deployer {creator[:8]}...")
+            self._sniper_bought.add(mint)
+            return None
+
+        # Check bonding curve state
+        curve_state = await self.curve_engine.get_bonding_curve_state(mint, self.session)
+        if not curve_state:
+            logger.debug(f"SNIPER SKIP {symbol}: can't read curve state")
+            return None
+        if curve_state.complete:
+            logger.debug(f"SNIPER SKIP {symbol}: already graduated")
+            return None
+        if curve_state.progress_pct > self.config.bonding_curve_max_progress:
+            logger.info(f"SNIPER SKIP {symbol}: curve {curve_state.progress_pct:.1f}% (max {self.config.bonding_curve_max_progress}%)")
+            return None
+
+        # Execute via PumpPortal (fastest path)
+        logger.info(
+            f"SNIPER BUY ${symbol} | {amount_sol:.4f} SOL | "
+            f"curve {curve_state.progress_pct:.1f}% | {signal.get('buys', 0)} buys | "
+            f"{signal.get('velocity', 0):.1f}/min | {signal.get('unique_buyers', 0)} unique"
+        )
+
+        tx_sig = None
+        if self.config.use_pumpportal:
+            tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
+                mint, amount_sol, self.pubkey, self.keypair, self.session,
+            )
+
+        if not tx_sig:
+            # Fallback to Jupiter (token might have just graduated)
+            tx_sig = await self._jupiter_swap(SOL_MINT, mint, int(amount_sol * LAMPORTS_PER_SOL))
+
+        if tx_sig:
+            self._sniper_bought.add(mint)
+            self.positions[mint] = Position(
+                token_address=mint, symbol=symbol,
+                entry_price=curve_state.price_sol * 1e9,  # approx USD
+                amount_tokens=0, amount_sol_spent=amount_sol,
+                entry_time=time.time(),
+                take_profit_levels=[3.0, 7.0, 15.0],  # higher targets for early entries
+                stop_loss=0.4,  # tighter stop for sniper plays
+                source="bonding_curve",
+            )
+            self.seen_tokens.add(mint)
+            trade = Trade(
+                timestamp=time.time(), action="buy", token_address=mint,
+                symbol=symbol, amount_sol=amount_sol,
+                price_usd=curve_state.price_sol * 1e9,
+                tx_signature=tx_sig,
+                reason=f"SNIPER curve={curve_state.progress_pct:.0f}% buys={signal.get('buys', 0)} vel={signal.get('velocity', 0):.1f}/min",
+            )
+            self.trades.append(trade)
+            self.total_trades += 1
+            self._save_state()
+            logger.info(f"SNIPER BUY OK: ${symbol} tx={tx_sig[:20]}...")
+
+            # Record to memory
+            if self.trading_memory:
+                await self.trading_memory.record_trade(TradeMemoryEntry(
+                    token_address=mint, symbol=symbol, action="buy",
+                    entry_score=80, rug_probability=0.1,
+                    swarm_sentiment="SNIPER", cabal_score=0,
+                    source="bonding_curve", outcome="pending", pnl_multiple=1.0,
+                    hold_minutes=0, liquidity_at_entry=curve_state.sol_raised * 150,  # rough USD
+                    age_at_entry=signal.get("age_seconds", 0) / 60,
+                    timestamp=time.time(),
+                ))
+            return trade
+
+        logger.warning(f"SNIPER BUY FAILED: ${symbol}")
+        self._sniper_bought.add(mint)  # don't retry
+        return None
+
+    async def check_graduation_sells(self):
+        """Check if any bonding curve positions have graduated and sell partial."""
+        if not self.curve_engine or not self.session:
+            return
+
+        for addr in list(self.positions.keys()):
+            pos = self.positions.get(addr)
+            if not pos or pos.source != "bonding_curve":
+                continue
+
+            curve_state = await self.curve_engine.get_bonding_curve_state(addr, self.session)
+            if not curve_state:
+                continue
+
+            # Token graduated! Sell configured percentage for guaranteed profit
+            if curve_state.complete and pos.partial_sells == 0:
+                sell_pct = self.config.graduation_sell_pct
+                logger.info(f"GRADUATION DETECTED: ${pos.symbol} | Selling {sell_pct:.0%}")
+                tx_sig = await self.curve_engine.sell_on_curve_pumpportal(
+                    addr, sell_pct, self.pubkey, self.keypair, self.session,
+                )
+                if tx_sig:
+                    pos.partial_sells += 1
+                    trade = Trade(
+                        timestamp=time.time(), action="sell", token_address=addr,
+                        symbol=pos.symbol, amount_sol=pos.amount_sol_spent * sell_pct,
+                        price_usd=0, tx_signature=tx_sig,
+                        reason=f"GRADUATION_SELL {sell_pct:.0%}",
+                    )
+                    self.trades.append(trade)
+                    self.total_trades += 1
+                    self._save_state()
+
+    # ----------------------------------------------------------
     # TRADE EXECUTION (Jupiter)
     # ----------------------------------------------------------
     async def execute_buy(self, token: TokenInfo, amount_sol: float) -> Optional[Trade]:
         amount_lamports = int(amount_sol * LAMPORTS_PER_SOL)
         logger.info(f"BUY {token.symbol} | {amount_sol:.4f} SOL | score={token.score:.0f} | rug={token.rug_probability:.0%} | swarm={token.swarm_sentiment}")
 
-        tx_sig = await self._jupiter_swap(SOL_MINT, token.address, amount_lamports)
+        # v3.5: Use bonding curve for pre-graduation tokens
+        tx_sig = None
+        if token.on_bonding_curve and self.curve_engine and self.config.use_pumpportal:
+            tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
+                token.address, amount_sol, self.pubkey, self.keypair, self.session,
+            )
+        if not tx_sig:
+            tx_sig = await self._jupiter_swap(SOL_MINT, token.address, amount_lamports)
         if tx_sig:
             self.positions[token.address] = Position(
                 token_address=token.address, symbol=token.symbol,
@@ -2106,13 +2783,15 @@ class DegenTrader:
 
         balance = await self.get_sol_balance()
         logger.info("=" * 60)
-        logger.info("FARNSWORTH DEGEN TRADER v3 - COLLECTIVE INTELLIGENCE")
+        logger.info("FARNSWORTH DEGEN TRADER v3.5 - BONDING CURVE SNIPER")
         logger.info("=" * 60)
         logger.info(f"Wallet:     {self.pubkey}")
         logger.info(f"Balance:    {balance:.4f} SOL")
         logger.info(f"RPC:        {self.config.rpc_url[:40]}...")
         logger.info(f"Fast RPC:   {self.config.fast_rpc_url[:40]}...")
         logger.info(f"Pump.fun:   {'ON' if self.pump_monitor else 'OFF'}")
+        logger.info(f"BondCurve:  {'ON' if self.curve_engine else 'OFF'} (PumpPortal: {'ON' if self.config.use_pumpportal else 'OFF'})")
+        logger.info(f"Sniper:     {'ON' if self.config.sniper_mode else 'OFF'} (max {self.config.bonding_curve_max_sol} SOL, <{self.config.bonding_curve_max_progress}% curve)")
         logger.info(f"Wallets:    {'ON' if self.wallet_analyzer else 'OFF'}")
         logger.info(f"Quantum:    {'ON' if self.quantum_oracle else 'OFF'}")
         logger.info(f"Swarm:      {'ON' if self.config.use_swarm else 'OFF'}")
@@ -2121,6 +2800,7 @@ class DegenTrader:
         logger.info(f"Memory:     {'ON' if self.trading_memory and self.trading_memory._initialized else 'OFF'}")
         logger.info(f"Max trade:  {self.config.max_position_sol} SOL")
         logger.info(f"Max pos:    {self.config.max_positions}")
+        logger.info(f"Grad sell:  {self.config.graduation_sell_pct:.0%} at graduation")
         logger.info("=" * 60)
 
         if balance < self.config.reserve_sol + 0.01:
@@ -2146,7 +2826,32 @@ class DegenTrader:
                 )
 
                 if can_trade:
-                    # v3: Process copy trade signals first (fastest alpha)
+                    # v3.5: Process sniper signals FIRST (fastest alpha - bonding curve)
+                    if self.pump_monitor and self.curve_engine and self.config.sniper_mode:
+                        sniper_signals = []
+                        while not self.pump_monitor.sniper_signals.empty():
+                            try:
+                                sig = self.pump_monitor.sniper_signals.get_nowait()
+                                sniper_signals.append(sig)
+                            except asyncio.QueueEmpty:
+                                break
+                        for signal in sniper_signals[:3]:  # max 3 sniper buys per cycle
+                            mint = signal.get("mint", "")
+                            if mint in self.positions or mint in self._sniper_bought:
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < self.config.bonding_curve_max_sol:
+                                break
+                            await self.execute_sniper_buy(signal, self.config.bonding_curve_max_sol)
+                            await asyncio.sleep(0.3)  # small delay between buys
+
+                    # v3.5: Check graduation sells for bonding curve positions
+                    if self.curve_engine:
+                        await self.check_graduation_sells()
+
+                    # v3: Process copy trade signals (second fastest alpha)
                     if self.copy_engine:
                         copy_signals = self.copy_engine.get_copy_signals()
                         for signal in copy_signals[:2]:
@@ -2304,10 +3009,14 @@ class DegenTrader:
                 "copy_trading": self.copy_engine is not None,
                 "x_sentinel": self.x_sentinel is not None,
                 "trading_memory": self.trading_memory is not None and self.trading_memory._initialized,
+                "bonding_curve": self.curve_engine is not None,
+                "sniper_mode": self.config.sniper_mode,
                 "tracked_wallets": len(self.copy_engine.tracked_wallets) if self.copy_engine else 0,
                 "x_signals_active": len(self.x_sentinel.trending_tokens) if self.x_sentinel else 0,
                 "learned_patterns": len(self.trading_memory.get_historical_patterns()) if self.trading_memory else 0,
                 "fast_rpc": bool(self.config.fast_rpc_url and self.config.fast_rpc_url != self.config.rpc_url),
+                "sniper_buys": len(self._sniper_bought),
+                "hot_tokens_tracked": len(self.pump_monitor.hot_tokens) if self.pump_monitor else 0,
             },
         }
 
@@ -2327,6 +3036,9 @@ async def start_trader(
     use_copy_trading: bool = True,
     use_x_sentinel: bool = True,
     use_trading_memory: bool = True,
+    use_bonding_curve: bool = True,
+    sniper_mode: bool = True,
+    bonding_curve_max_sol: float = 0.08,
 ):
     config = TraderConfig(
         rpc_url=rpc_url,
@@ -2339,6 +3051,9 @@ async def start_trader(
         use_copy_trading=use_copy_trading,
         use_x_sentinel=use_x_sentinel,
         use_trading_memory=use_trading_memory,
+        use_bonding_curve=use_bonding_curve,
+        sniper_mode=sniper_mode,
+        bonding_curve_max_sol=bonding_curve_max_sol,
     )
     trader = DegenTrader(config=config, wallet_name=wallet_name)
     await trader.run()
@@ -2353,10 +3068,11 @@ if __name__ == "__main__":
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="Farnsworth Degen Trader v3")
+    parser = argparse.ArgumentParser(description="Farnsworth Degen Trader v3.5 - Bonding Curve Sniper")
     parser.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL", DEFAULT_RPC))
     parser.add_argument("--wallet", default="degen_trader")
-    parser.add_argument("--max-sol", type=float, default=0.1)
+    parser.add_argument("--max-sol", type=float, default=0.1, help="Max SOL per standard trade")
+    parser.add_argument("--sniper-sol", type=float, default=0.08, help="Max SOL per bonding curve snipe")
     parser.add_argument("--max-positions", type=int, default=10)
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument("--no-swarm", action="store_true")
@@ -2365,6 +3081,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-copy-trading", action="store_true")
     parser.add_argument("--no-x-sentinel", action="store_true")
     parser.add_argument("--no-memory", action="store_true")
+    parser.add_argument("--no-sniper", action="store_true", help="Disable bonding curve sniper mode")
+    parser.add_argument("--no-bonding-curve", action="store_true", help="Disable direct bonding curve trading")
     parser.add_argument("--create-wallet", action="store_true")
     args = parser.parse_args()
 
@@ -2385,4 +3103,7 @@ if __name__ == "__main__":
             use_copy_trading=not args.no_copy_trading,
             use_x_sentinel=not args.no_x_sentinel,
             use_trading_memory=not args.no_memory,
+            use_bonding_curve=not args.no_bonding_curve,
+            sniper_mode=not args.no_sniper,
+            bonding_curve_max_sol=args.sniper_sol,
         ))

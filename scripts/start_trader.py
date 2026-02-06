@@ -18,10 +18,11 @@ logging.basicConfig(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Farnsworth Degen Trader v3")
+    parser = argparse.ArgumentParser(description="Farnsworth Degen Trader v3.5 - Bonding Curve Sniper")
     parser.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL", DEFAULT_RPC))
     parser.add_argument("--wallet", default="degen_trader")
-    parser.add_argument("--max-sol", type=float, default=0.1, help="Max SOL per trade")
+    parser.add_argument("--max-sol", type=float, default=0.1, help="Max SOL per standard trade")
+    parser.add_argument("--sniper-sol", type=float, default=0.08, help="Max SOL per bonding curve snipe")
     parser.add_argument("--max-positions", type=int, default=10)
     parser.add_argument("--interval", type=int, default=8, help="Seconds between scans")
     parser.add_argument("--no-swarm", action="store_true")
@@ -30,6 +31,8 @@ def main():
     parser.add_argument("--no-copy-trading", action="store_true")
     parser.add_argument("--no-x-sentinel", action="store_true")
     parser.add_argument("--no-memory", action="store_true")
+    parser.add_argument("--no-sniper", action="store_true", help="Disable bonding curve sniper mode")
+    parser.add_argument("--no-bonding-curve", action="store_true", help="Disable direct bonding curve trading")
     parser.add_argument("--create-wallet", action="store_true", help="Generate wallet and exit")
     args = parser.parse_args()
 
@@ -54,6 +57,9 @@ def main():
         use_copy_trading=not args.no_copy_trading,
         use_x_sentinel=not args.no_x_sentinel,
         use_trading_memory=not args.no_memory,
+        use_bonding_curve=not args.no_bonding_curve,
+        sniper_mode=not args.no_sniper,
+        bonding_curve_max_sol=args.sniper_sol,
     ))
 
 
