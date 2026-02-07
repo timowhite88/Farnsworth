@@ -618,10 +618,9 @@ async function poll(){
       if(pc.bonk>0)document.getElementById('spBonk').classList.add('active');
       if(pc.bags>0)document.getElementById('spBags').classList.add('active');
 
-      // Live sniper feed
+      // Live sniper feed (triggered signals)
       const sniperFeed=d.sniper_feed||[];
       if(sniperFeed.length>0){
-        const panel=document.getElementById('fSniper');
         sniperFeed.forEach(sig=>{
           const plat=(sig.platform||'pump').toUpperCase();
           const platCls={'PUMP':'t-pump','BONK':'t-bonk','BAGS':'t-bags'}[plat]||'t-pump';
@@ -629,6 +628,24 @@ async function poll(){
           const html=`<span class="fi-t">${t}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">SNIPE</span> $${sig.symbol} <strong>${sig.buys}</strong> buys (${sig.unique_buyers} unique) <strong>${sig.velocity?.toFixed(1)||0}/min</strong> | ${sig.volume_sol?.toFixed(2)||0} SOL</span>`;
           addFeed('fSniper',html,'sniper');
         });
+      }
+      // Scan feed — show top active tokens being tracked (live data even before signals fire)
+      const scanFeed=d.scan_feed||[];
+      if(scanFeed.length>0){
+        const sf=document.getElementById('fSniper');
+        // Clear old scan items, keep sniper signals
+        sf.querySelectorAll('.scan-item').forEach(e=>e.remove());
+        scanFeed.slice(0,8).forEach(tok=>{
+          const plat=(tok.platform||'pump').toUpperCase();
+          const platCls={'PUMP':'t-pump','BONK':'t-bonk','BAGS':'t-bags'}[plat]||'t-pump';
+          const ageTag=tok.age_seconds<60?tok.age_seconds+'s':Math.round(tok.age_seconds/60)+'m';
+          const velCls=tok.velocity>=2?'t-fresh':tok.velocity>=1?'t-lowcap':'';
+          const devTag=tok.largest_buy_sol>=0.3?`<span class="tag t-sniper">DEV ${tok.largest_buy_sol} SOL</span>`:'';
+          const html=`<span class="fi-t">${ageTag}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span> $${tok.symbol} <strong>${tok.buys}</strong>b/${tok.sells}s (${tok.unique_buyers} uniq) <span class="${velCls}">${tok.velocity}/min</span> | ${tok.volume_sol} SOL ${devTag}</span>`;
+          const div=document.createElement('div');div.className='fi scan-item';div.innerHTML=html;
+          sf.appendChild(div);
+        });
+        document.getElementById('fcSniper').textContent=sniperFeed.length+'+'+scanFeed.length;
       }
 
       // Memory bar
@@ -652,6 +669,20 @@ async function poll(){
           const html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-cabal-follow">CABAL</span><span class="tag ${platCls}">${plat}</span> $${sig.symbol} <strong>${sig.connected_wallets}</strong> connected wallets | ${sig.buys} buys | <strong>${sig.velocity?.toFixed(1)||0}/min</strong> | ${sig.volume_sol?.toFixed(2)||0} SOL</span>`;
           addFeed('fCabal',html,'cabal');
         });
+      }
+
+      // Live X sentinel feed
+      const xFeed=d.x_feed||[];
+      if(xFeed.length>0){
+        const xEl=document.getElementById('fX');
+        xEl.querySelectorAll('.live-x').forEach(e=>e.remove());
+        xFeed.forEach(sig=>{
+          const tagCls=sig.signal_type.includes('CABAL')?'t-cabal':sig.signal_type.includes('KOL')?'t-kol':'t-x';
+          const html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${tagCls}">${sig.signal_type}</span> $${sig.symbol} strength <strong>${sig.strength}/10</strong> &mdash; ${sig.reason||'detected'}</span>`;
+          const div=document.createElement('div');div.className='fi live-x';div.innerHTML=html;
+          xEl.appendChild(div);
+        });
+        document.getElementById('fcX').textContent=xFeed.length;
       }
 
       // Positions with velocity tracking

@@ -600,6 +600,42 @@ class PumpFunMonitor:
                 if data["txType"] == "buy":
                     self._check_cabal_coordination(mint, stats)
 
+                # v3.7: Instant snipe — big buy on a very fresh token (< 15 seconds old)
+                # Catches dev buys that come as separate buy txns after create
+                if data["txType"] == "buy" and sol_amount >= 0.3 and mint not in self._cabal_signaled:
+                    age_s = time.time() - stats.get("first_seen", time.time())
+                    if age_s < 15 and stats["buys"] <= 3:
+                        platform = stats.get("platform", PLATFORM_PUMP)
+                        platform_label = "PUMP" if platform == PLATFORM_PUMP else "BONK" if platform == PLATFORM_BONK else "BAGS"
+                        instant_signal = {
+                            "mint": mint,
+                            "symbol": stats.get("symbol", ""),
+                            "name": stats.get("name", ""),
+                            "buys": stats["buys"],
+                            "sells": stats["sells"],
+                            "unique_buyers": len(stats.get("unique_buyers", set())),
+                            "velocity": 0,
+                            "volume_sol": stats["volume_sol"],
+                            "age_seconds": age_s,
+                            "creator": stats.get("creator", ""),
+                            "creator_bought": trader == stats.get("creator", ""),
+                            "creator_sol": sol_amount,
+                            "largest_buy_sol": sol_amount,
+                            "timestamp": time.time(),
+                            "platform": platform,
+                            "instant_snipe": True,
+                            "dev_buy_sol": sol_amount,
+                        }
+                        try:
+                            self.instant_snipe_signals.put_nowait(instant_signal)
+                        except asyncio.QueueFull:
+                            self.instant_snipe_signals.get_nowait()
+                            self.instant_snipe_signals.put_nowait(instant_signal)
+                        logger.info(
+                            f"[{platform_label}] INSTANT SNIPE SIGNAL: ${stats.get('symbol', '?')} | "
+                            f"big buy {sol_amount:.3f} SOL at {age_s:.0f}s age — sniping NOW"
+                        )
+
         # Cleanup old hot tokens (older than 30 min)
         cutoff = time.time() - 1800
         expired_mints = {k for k, v in self.hot_tokens.items() if v.get("first_seen", 0) <= cutoff}
@@ -3400,6 +3436,37 @@ class DegenTrader:
     # ----------------------------------------------------------
     # STATUS
     # ----------------------------------------------------------
+    def _get_scan_feed(self) -> List[dict]:
+        """Get top active tokens being scanned — live data for dashboard feeds."""
+        if not self.pump_monitor:
+            return []
+        now = time.time()
+        result = []
+        for mint, stats in self.pump_monitor.hot_tokens.items():
+            age_s = now - stats.get("first_seen", now)
+            if age_s > self.config.max_age_minutes * 60:
+                continue
+            buys = stats.get("buys", 0)
+            if buys < 1:
+                continue
+            unique = len(stats.get("unique_buyers", set()))
+            velocity = buys / (age_s / 60) if age_s > 0 else 0
+            result.append({
+                "mint": mint,
+                "symbol": stats.get("symbol", "???"),
+                "buys": buys,
+                "sells": stats.get("sells", 0),
+                "unique_buyers": unique,
+                "velocity": round(velocity, 1),
+                "volume_sol": round(stats.get("volume_sol", 0), 3),
+                "age_seconds": round(age_s),
+                "largest_buy_sol": round(stats.get("largest_buy_sol", 0), 3),
+                "creator_bought": stats.get("creator_bought", False),
+                "platform": stats.get("platform", PLATFORM_PUMP),
+            })
+        result.sort(key=lambda x: x["velocity"], reverse=True)
+        return result[:15]
+
     def status(self) -> Dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
         return {
@@ -3455,6 +3522,13 @@ class DegenTrader:
             },
             "sniper_feed": self.pump_monitor.get_sniper_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
             "cabal_feed": self.pump_monitor.get_cabal_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
+            "scan_feed": self._get_scan_feed() if self.pump_monitor else [],
+            "x_feed": [
+                {"symbol": v.get("symbol", ""), "signal_type": v.get("signal_type", ""),
+                 "strength": v.get("strength", 0), "reason": v.get("reason", ""),
+                 "address": v.get("address", ""), "timestamp": v.get("timestamp", 0)}
+                for v in (self.x_sentinel.trending_tokens.values() if self.x_sentinel else [])
+            ][:10],
             "config": {
                 "max_age_minutes": self.config.max_age_minutes,
                 "max_fdv": self.config.max_fdv,
