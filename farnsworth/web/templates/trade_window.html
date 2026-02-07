@@ -120,6 +120,11 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 .t-sniper{background:rgba(234,179,8,0.15);color:var(--yellow);font-weight:700}.t-pump{background:rgba(139,92,246,0.12);color:var(--purple)}
 .t-bonk{background:rgba(249,115,22,0.15);color:var(--orange)}.t-bags{background:rgba(6,182,212,0.12);color:var(--cyan)}
 .t-grad{background:rgba(16,185,129,0.15);color:var(--green);font-weight:700}
+.t-cabal-follow{background:rgba(236,72,153,0.18);color:var(--pink);font-weight:700}.t-vel-drop{background:rgba(239,68,68,0.15);color:var(--red);font-weight:700}
+.t-fresh{background:rgba(16,185,129,0.12);color:var(--green)}.t-lowcap{background:rgba(234,179,8,0.12);color:var(--yellow)}
+.vel-bar{height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:3px;overflow:hidden}
+.vel-fill{height:100%;border-radius:2px;transition:width 0.3s}
+.vel-fill.hot{background:linear-gradient(90deg,var(--green),var(--yellow))}.vel-fill.warm{background:var(--yellow)}.vel-fill.cold{background:var(--red)}
 .sniper-header{display:flex;align-items:center;gap:6px;font-weight:700;letter-spacing:0.12em}
 .sniper-platforms{display:flex;gap:6px;margin-left:auto;font-size:0.5rem}
 .sniper-platforms .sp{padding:2px 6px;border-radius:3px;border:1px solid var(--border);opacity:0.5}
@@ -176,7 +181,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 <div class="topbar">
   <div class="topbar-left">
     <div class="topbar-title">Farnsworth Command Center</div>
-    <div class="topbar-version">v3.5</div>
+    <div class="topbar-version">v3.6 LOW CAP</div>
   </div>
   <div class="topbar-center">
     <div class="status-pill" id="statusPill">
@@ -206,6 +211,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
   <div class="intel-chip" id="icBonk"><span class="dot"></span>Bonk</div>
   <div class="intel-chip" id="icBags"><span class="dot"></span>BAGS</div>
   <div class="intel-chip" id="icSniper"><span class="dot"></span>Sniper</div>
+  <div class="intel-chip" id="icCabal"><span class="dot"></span>Cabal Follow</div>
   <div class="intel-chip" id="icCopy"><span class="dot"></span>Copy Trade</div>
   <div class="intel-chip" id="icX"><span class="dot"></span>X Sentinel</div>
   <div class="intel-chip" id="icQuantum"><span class="dot"></span>Quantum Oracle</div>
@@ -238,7 +244,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
       </div>
       <div class="fp-scroll" id="fSniper"></div>
     </div>
-    <div class="feed-panel"><div class="fp-head" style="color:var(--purple)"><span class="fp-icon">&#128203;</span>Copy Trade<span class="fp-count" id="fcCopy">0</span></div><div class="fp-scroll" id="fCopy"></div></div>
+    <div class="feed-panel"><div class="fp-head" style="color:var(--pink)"><span class="fp-icon">&#128373;</span>Cabal Follow<span class="fp-count" id="fcCabal">0</span></div><div class="fp-scroll" id="fCabal"></div></div>
     <div class="feed-panel"><div class="fp-head" style="color:var(--blue)"><span class="fp-icon">&#128225;</span>X Sentinel<span class="fp-count" id="fcX">0</span></div><div class="fp-scroll" id="fX"></div></div>
     <div class="feed-panel"><div class="fp-head" style="color:var(--cyan)"><span class="fp-icon">&#9883;</span>Quantum Oracle<span class="fp-count" id="fcQ">0</span></div><div class="fp-scroll" id="fQ"></div></div>
     <div class="feed-panel"><div class="fp-head" style="color:var(--orange)"><span class="fp-icon">&#128011;</span>Whale Watch<span class="fp-count" id="fcW">0</span></div><div class="fp-scroll" id="fW"></div></div>
@@ -255,12 +261,13 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 
 <!-- ===== MEMORY BAR ===== -->
 <div class="membar">
-  <span class="ml">Memory</span>
-  <span class="ms">Patterns: <span class="mv" id="mPat">0</span></span>
-  <span class="ms">Tracked: <span class="mv" id="mWal">0</span></span>
-  <span class="ms">X Signals: <span class="mv" id="mXSig">0</span></span>
+  <span class="ml">Low Cap Sniper</span>
+  <span class="ms">Max Age: <span class="mv" id="mAge">15m</span></span>
+  <span class="ms">FDV Cap: <span class="mv" id="mFdv">$500k</span></span>
+  <span class="ms">Cabal Signals: <span class="mv" id="mCabal">0</span></span>
+  <span class="ms">Wallets Tracked: <span class="mv" id="mWalTrack">0</span></span>
   <span class="ms">Sniped: <span class="mv" id="mSnipe">0</span></span>
-  <span class="ms">Hot Tokens: <span class="mv" id="mHot">0</span></span>
+  <span class="ms">Hot: <span class="mv" id="mHot">0</span></span>
   <span class="ms">RPC: <span class="mv" id="mRpc">--</span></span>
   <a href="/demo" class="back-link">&larr; Back to Demo</a>
 </div>
@@ -376,8 +383,9 @@ function spawnP(){
 // ============================================================
 // SIMULATION DATA
 // ============================================================
-const TOKENS=['$BONK','$WIF','$POPCAT','$MYRO','$MEW','$PEPE','$DOGE','$FART','$GIGA','$BOME','$SLERF','$HARAMBE','$NEIRO','$PNUT','$GOAT','$MOODENG','$AI16Z','$GRIFFAIN','$ZEREBRO','$VIRTUAL'];
-const SNIPER_TOKENS=['$RUGPULL','$MOONCOIN','$DEGEN420','$CATGOLD','$SOLBULL','$PEPEMOON','$WOJAK2','$GIGACHAD','$ELONCAT','$TRUMPSOL','$FROGKING','$DOGEMARS'];
+// FRESH LOW-CAP TOKENS ONLY - no established coins
+const TOKENS=['$RUGPULL','$MOONCOIN','$CATGOLD','$SOLBULL','$PEPEMOON','$GIGACHAD','$ELONCAT','$DOGEMARS','$FROGKING','$MOONCAT','$PUMPINU','$DEGENAI','$FARNS420','$BAGSDOG','$TURBOPEPE','$COSMOCOW'];
+const SNIPER_TOKENS=TOKENS;
 const WALLETS=['7xKZ...3mF','4pQr...9Tz','Bv3k...7wN','Dk8j...2cR','9mFz...4qP','3nHx...8bL','Fw2v...5gS','6tYp...1kJ'];
 const SIGNALS=['CABAL_SHILL','KOL_CALL','TRENDING','INSIDER_ALERT','DEV_MOVEMENT'];
 const AGENTS_SHORT=['Grok','DeepSeek','Gemini','Kimi','Farnsworth','Claude'];
@@ -392,7 +400,7 @@ function ts(){return new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2
 function mkAddr(){const c='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz123456789';let s='';for(let i=0;i<4;i++)s+=c[~~(Math.random()*c.length)];return s+'...'+c[~~(Math.random()*c.length)]+c[~~(Math.random()*c.length)]+c[~~(Math.random()*c.length)]}
 
 // Feed counters
-const counts={sniper:0,copy:0,x:0,q:0,w:0,s:0,e:0};
+const counts={sniper:0,cabal:0,x:0,q:0,w:0,s:0,e:0};
 
 function addFeed(panelId,html,countKey){
   const el=document.getElementById(panelId);
@@ -415,38 +423,46 @@ function startSim(){
   // Platform indicators active
   ['spPump','spBonk','spBags'].forEach(id=>document.getElementById(id).classList.add('active'));
 
-  // SNIPER FEED (most important - shows launches from all platforms)
+  // SNIPER FEED - LOW CAP FRESH LAUNCHES ONLY (<15min, <$500k FDV)
   simIntervals.push(setInterval(()=>{
     const t=rnd(SNIPER_TOKENS),plat=rnd(PLATFORMS),platCls=PLAT_CLS[plat];
     const buys=rndI(3,25),unique=rndI(3,Math.min(buys,15)),vel=rndF(2,12);
-    const curve=rndI(2,45),sol=rndF(0.3,8),dev=Math.random()>0.5;
+    const curve=rndI(2,45),sol=rndF(0.3,8);
+    const fdv='$'+rndI(5,95)+'k',age=rndI(0,14)+'m';
     const action=Math.random();
     let html='';
-    if(action<0.35){
-      // New launch detected
-      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">NEW</span> ${t} launched &mdash; dev buy: <strong>${rndF(0.01,2)} SOL</strong><div class="curve-bar"><div class="curve-fill" style="width:${rndI(0,5)}%"></div></div></span>`;
-    } else if(action<0.65){
-      // Sniper signal
-      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">SNIPE</span> ${t} <strong>${buys}</strong> buys (${unique} unique) <strong>${vel}/min</strong> | ${sol} SOL vol<div class="curve-bar"><div class="curve-fill" style="width:${curve}%"></div></div></span>`;
+    if(action<0.3){
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">NEW</span> ${t} <span class="tag t-fresh">${age}</span> dev buy: <strong>${rndF(0.01,2)} SOL</strong><div class="curve-bar"><div class="curve-fill" style="width:${rndI(0,5)}%"></div></div></span>`;
+    } else if(action<0.55){
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-sniper">SNIPE</span> ${t} <span class="tag t-lowcap">${fdv}</span> <span class="tag t-fresh">${age}</span> <strong>${buys}</strong> buys (${unique} uniq) <strong>${vel}/min</strong> | ${sol} SOL<div class="curve-bar"><div class="curve-fill" style="width:${curve}%"></div></div></span>`;
+    } else if(action<0.72){
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-buy">BOUGHT</span> ${t} <span class="tag t-lowcap">${fdv}</span> for <strong>${rndF(0.02,0.08)} SOL</strong> | curve: ${curve}% | vel: ${vel}/min</span>`;
     } else if(action<0.82){
-      // Sniper buy executed
-      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-buy">BOUGHT</span> ${t} for <strong>${rndF(0.02,0.08)} SOL</strong> | curve: ${curve}% | vel: ${vel}/min | tx:${mkAddr()}</span>`;
-    } else if(action<0.92){
-      // Graduation sell
       html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-grad">GRADUATED</span> ${t} hit 85 SOL! Selling 50% &mdash; <strong>+${rndF(2,15)}x</strong></span>`;
+    } else if(action<0.9){
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-vel-drop">VEL DROP</span> ${t} vel ${rndF(0.5,2)}/min (peak ${rndF(5,12)}/min) &mdash; selling</span>`;
     } else {
-      // Skip signal
-      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-rug">SKIP</span> ${t} &mdash; ${rnd(['serial deployer','creator dumped','low velocity','>50% curve'])}</span>`;
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${platCls}">${plat}</span><span class="tag t-rug">SKIP</span> ${t} &mdash; ${rnd(['serial deployer','creator dumped','FDV too high','age >15m','low velocity'])}</span>`;
     }
     addFeed('fSniper',html,'sniper');
     activateBots(['farnsworth','deepseek','grok'],1200);
   },2500+Math.random()*2000));
 
-  // Copy trade
+  // Cabal follow
   simIntervals.push(setInterval(()=>{
-    const w=rnd(WALLETS),t=rnd(TOKENS),sol=rndF(0.3,12);
-    addFeed('fCopy',`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-copy">COPY</span> <strong>${w}</strong> bought ${t} for <strong>${sol} SOL</strong></span>`,'copy');
-    activateBots(['grok','deepseek'],1500);
+    const t=rnd(TOKENS),connected=rndI(2,6),pairs=rndI(1,4),vel=rndF(2,9);
+    const fdv=rndI(8,95)+'k',age=rndI(1,14)+'m';
+    const action=Math.random();
+    let html='';
+    if(action<0.5){
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-cabal-follow">CABAL</span> <strong>${connected}</strong> connected wallets converging on ${t} <span class="tag t-lowcap">FDV $${fdv}</span> <span class="tag t-fresh">${age}</span> vel: <strong>${vel}/min</strong></span>`;
+    }else if(action<0.8){
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-cabal-follow">FOLLOW</span> ${t} <span class="tag t-buy">BOUGHT</span> <strong>${rndF(0.02,0.08)} SOL</strong> | ${connected} wallets (${pairs} pairs) | FDV $${fdv}</span>`;
+    }else{
+      html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-cabal">SKIP</span> ${t} FDV $${rndI(120,500)}k &mdash; above cabal cap ($100k)</span>`;
+    }
+    addFeed('fCabal',html,'cabal');
+    activateBots(['grok','deepseek','farnsworth'],1500);
   },3500+Math.random()*2000));
   // X sentinel
   simIntervals.push(setInterval(()=>{
@@ -479,21 +495,65 @@ function startSim(){
   },6000+Math.random()*3000));
   // Execution
   simIntervals.push(setInterval(()=>{
-    const t=rnd(TOKENS),act=Math.random()>0.4?'buy':'sell',sol=rndF(0.02,0.15);
+    const t=rnd(TOKENS),act=Math.random()>0.4?'buy':'sell',sol=rndF(0.02,0.1);
     const cls=act==='buy'?'t-buy':'t-sell';
-    const reason=act==='buy'?`score=${rndI(62,95)} rug=${rndI(5,40)}% swarm=BUY`:`tp_${rndI(2,5)}x reason=${rnd(['profit','stop_loss','time_exit'])}`;
+    const age=rndI(1,14)+'m',fdv='$'+rndI(8,90)+'k';
+    const reason=act==='buy'?`score=${rndI(62,95)} FDV=${fdv} age=${age}`:`${rnd(['velocity_drop','tp_'+rndI(2,5)+'x','stop_loss','sell_pressure'])}`;
     const tx=mkAddr();
-    addFeed('fE',`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${cls}">${act.toUpperCase()}</span> ${t} <strong>${sol} SOL</strong> &mdash; ${reason} tx:${tx}</span>`,'e');
+    addFeed('fE',`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag ${cls}">${act.toUpperCase()}</span> ${t} <strong>${sol} SOL</strong> <span class="tag t-lowcap">${fdv}</span> <span class="tag t-fresh">${age}</span> ${reason} tx:${tx}</span>`,'e');
     activateBots(['farnsworth','opus'],1600);
   },7000+Math.random()*5000));
-  // cycle counter
+  // Sim stats — keep balance/PnL/positions/trades ticking so dashboard looks alive
+  let simBal=2.4500,simPnl=0,simWins=0,simTrades=0,simPos=0;
+  document.getElementById('sBalance').textContent=simBal.toFixed(4)+' SOL';
+  document.getElementById('walletAddr').textContent='Sim...Demo';
+
+  // cycle counter + stats
   simIntervals.push(setInterval(()=>{
     simCycle++;
+    // Simulate trades happening
+    if(Math.random()<0.3&&simPos<5){
+      simPos++;simTrades++;simBal-=parseFloat(rndF(0.02,0.08));
+    }
+    if(Math.random()<0.2&&simPos>0){
+      simPos--;simTrades++;
+      const won=Math.random()>0.35;
+      const pnl=won?parseFloat(rndF(0.01,0.15)):-parseFloat(rndF(0.01,0.06));
+      simPnl+=pnl;simBal+=parseFloat(rndF(0.02,0.08))+pnl;
+      if(won)simWins++;
+    }
+    const wr=simTrades>0?Math.round(simWins/simTrades*100):0;
+    document.getElementById('sBalance').textContent=simBal.toFixed(4)+' SOL';
+    const pe=document.getElementById('sPnl');
+    pe.textContent=`${simPnl>=0?'+':''}${simPnl.toFixed(4)} SOL`;pe.className=`stat-val ${simPnl>=0?'pos':'neg'}`;
+    document.getElementById('sWinRate').textContent=wr+'%';
+    document.getElementById('sPositions').textContent=simPos;
+    document.getElementById('sTrades').textContent=simTrades;
     document.getElementById('sScans').textContent=simCycle;
-    const phases=['SCANNING','ANALYZING','SCORING','DEEP ANALYZE','EXECUTING'];
+    // Sim positions in bottom panel
+    const posEl=document.getElementById('bpPos');
+    if(simPos>0){
+      let posHtml='';
+      for(let i=0;i<simPos;i++){
+        const t=rnd(TOKENS),v=rndF(2,8),pv=rndF(5,12),pct=Math.round(parseFloat(v)/parseFloat(pv)*100);
+        const vc=pct>70?'hot':pct>40?'warm':'cold';
+        posHtml+=`<div class="bp-row"><span class="bp-sym">${t}</span><span class="bp-det">${rndF(0.02,0.08)} SOL | ${rndI(1,12)}m | sniper | vel:${v}/${pv}<div class="vel-bar"><div class="vel-fill ${vc}" style="width:${Math.min(100,pct)}%"></div></div></span></div>`;
+      }
+      posEl.innerHTML=posHtml;
+    }else posEl.innerHTML='<div class="bp-empty">Scanning fresh launches...</div>';
+    // Sim trades in bottom panel
+    if(simTrades>0){
+      const trEl=document.getElementById('bpTrades');
+      const lastAct=Math.random()>0.4?'buy':'sell';
+      const cls=lastAct==='buy'?'buy':'sell';
+      const rsn=lastAct==='buy'?'score='+rndI(65,92):rnd(['velocity_drop','tp_'+rndI(2,5)+'x','stop_loss']);
+      trEl.innerHTML=`<div class="bp-row"><span class="bp-act ${cls}">${lastAct.toUpperCase()}</span><span class="bp-sym">${rnd(TOKENS)}</span><span class="bp-det">${rndF(0.02,0.08)} SOL</span><span class="bp-reason">${rsn}</span></div>`+trEl.innerHTML;
+      if(trEl.children.length>8)trEl.removeChild(trEl.lastChild);
+    }
+    const phases=['SCANNING','ANALYZING','SCORING','DEEP ANALYZE','EXECUTING','CABAL CHECK'];
     document.getElementById('swarmPhase').textContent=rnd(phases);
     document.getElementById('hudLeft').innerHTML=`AGENTS: 11<br>LATENCY: ${rndI(12,89)}ms<br>CYCLE: ${simCycle}`;
-    document.getElementById('hudRight').innerHTML=`RPC: ALCHEMY<br>PUMP|BONK|BAGS: WSS<br>UPTIME: ${simCycle}m`;
+    document.getElementById('hudRight').innerHTML=`RPC: ALCHEMY<br>MAX AGE: 15m | FDV: &lt;$500k<br>UPTIME: ${simCycle}m`;
   },8000));
 }
 
@@ -544,8 +604,8 @@ async function poll(){
 
       // Intel lights
       const intel=d.intelligence||{};
-      ['Pump','Bonk','Bags','Sniper','Copy','X','Quantum','Swarm','Memory'].forEach((n,i)=>{
-        const keys=['pumpfun','pumpfun','pumpfun','sniper_mode','copy_trading','x_sentinel','quantum_oracle','swarm','trading_memory'];
+      ['Pump','Bonk','Bags','Sniper','Cabal','Copy','X','Quantum','Swarm','Memory'].forEach((n,i)=>{
+        const keys=['pumpfun','pumpfun','pumpfun','sniper_mode','cabal_follow','copy_trading','x_sentinel','quantum_oracle','swarm','trading_memory'];
         const el=document.getElementById('ic'+n);
         if(el){if(intel[keys[i]])el.classList.add('on');else el.classList.remove('on');}
       });
@@ -569,18 +629,37 @@ async function poll(){
       }
 
       // Memory bar
-      document.getElementById('mPat').textContent=intel.learned_patterns||0;
-      document.getElementById('mWal').textContent=intel.tracked_wallets||0;
-      document.getElementById('mXSig').textContent=intel.x_signals_active||0;
+      const cfg=d.config||{};
+      document.getElementById('mAge').textContent=(cfg.max_age_minutes||15)+'m';
+      document.getElementById('mFdv').textContent='$'+(cfg.max_fdv?Math.round(cfg.max_fdv/1000)+'k':'500k');
+      document.getElementById('mCabal').textContent=intel.cabal_signals_seen||0;
+      document.getElementById('mWalTrack').textContent=intel.wallets_tracked||0;
       document.getElementById('mRpc').textContent=intel.fast_rpc?'ALCHEMY':'DEFAULT';
       document.getElementById('mSnipe').textContent=intel.sniper_buys||0;
       document.getElementById('mHot').textContent=intel.hot_tokens_tracked||0;
 
-      // Positions
+      // Live cabal feed
+      const cabalFeed=d.cabal_feed||[];
+      if(cabalFeed.length>0){
+        cabalFeed.forEach(sig=>{
+          const plat=(sig.platform||'pump').toUpperCase();
+          const platCls={'PUMP':'t-pump','BONK':'t-bonk','BAGS':'t-bags'}[plat]||'t-pump';
+          const html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-cabal-follow">CABAL</span><span class="tag ${platCls}">${plat}</span> $${sig.symbol} <strong>${sig.connected_wallets}</strong> connected wallets | ${sig.buys} buys | <strong>${sig.velocity?.toFixed(1)||0}/min</strong> | ${sig.volume_sol?.toFixed(2)||0} SOL</span>`;
+          addFeed('fCabal',html,'cabal');
+        });
+      }
+
+      // Positions with velocity tracking
       const pe2=document.getElementById('bpPos');const positions=d.positions||{};
       if(Object.keys(positions).length>0){
-        pe2.innerHTML=Object.entries(positions).map(([a,p])=>`<div class="bp-row"><span class="bp-sym">${p.symbol}</span><span class="bp-det">${p.sol_spent} SOL | ${p.hold_minutes}m | ${p.source||'--'}</span></div>`).join('');
-      }else pe2.innerHTML='<div class="bp-empty">No open positions</div>';
+        pe2.innerHTML=Object.entries(positions).map(([a,p])=>{
+          const cv=p.current_velocity||0,pv=p.peak_velocity||0;
+          const velPct=pv>0?Math.round(cv/pv*100):0;
+          const velCls=velPct>70?'hot':velPct>40?'warm':'cold';
+          const velHtml=pv>0?` | vel:${cv}/${pv}<div class="vel-bar"><div class="vel-fill ${velCls}" style="width:${Math.min(100,velPct)}%"></div></div>`:'';
+          return `<div class="bp-row"><span class="bp-sym">${p.symbol}</span><span class="bp-det">${p.sol_spent} SOL | ${p.hold_minutes}m | ${p.source||'--'}${velHtml}</span></div>`;
+        }).join('');
+      }else pe2.innerHTML='<div class="bp-empty">Scanning fresh launches...</div>';
 
       // Trades
       const te=document.getElementById('bpTrades');const trades=d.recent_trades||[];
@@ -596,12 +675,17 @@ async function poll(){
       document.getElementById('statusDot').className='status-dot off';
       document.getElementById('statusLabel').textContent='SIMULATION';
       // Intel all on for sim
-      ['Pump','Bonk','Bags','Sniper','Copy','X','Quantum','Swarm','Memory'].forEach(n=>{const el=document.getElementById('ic'+n);if(el)el.classList.add('on')});
+      ['Pump','Bonk','Bags','Sniper','Cabal','Copy','X','Quantum','Swarm','Memory'].forEach(n=>{const el=document.getElementById('ic'+n);if(el)el.classList.add('on')});
       document.getElementById('mRpc').textContent='ALCHEMY';
-      document.getElementById('mWal').textContent='47';
-      document.getElementById('mPat').textContent='128';
-      document.getElementById('mSnipe').textContent='12';
-      document.getElementById('mHot').textContent='89';
+      document.getElementById('mAge').textContent='15m';
+      document.getElementById('mFdv').textContent='$500k';
+      document.getElementById('mCabal').textContent='0';
+      document.getElementById('mWalTrack').textContent='0';
+      document.getElementById('mSnipe').textContent='0';
+      document.getElementById('mHot').textContent='0';
+      // Populate stats if they're still blank
+      if(document.getElementById('sBalance').textContent==='--')document.getElementById('sBalance').textContent='-- SOL';
+      if(document.getElementById('sPnl').textContent==='--')document.getElementById('sPnl').textContent='+0.0000 SOL';
       if(!simRunning)startSim();
     }
   }

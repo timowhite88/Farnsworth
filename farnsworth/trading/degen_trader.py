@@ -212,6 +212,8 @@ class Position:
     stop_loss: float = 0.5
     partial_sells: int = 0
     source: str = ""  # what detected it
+    entry_velocity: float = 0.0    # buys/min at time of entry
+    peak_velocity: float = 0.0     # highest velocity seen since entry
 
 
 @dataclass
@@ -279,12 +281,13 @@ class TraderConfig:
     fast_rpc_url: str = ""          # Alchemy/Helius for speed-critical calls
     max_position_sol: float = 0.1
     max_positions: int = 10
-    min_liquidity: float = 5000.0
-    max_liquidity: float = 500000.0
-    min_age_minutes: float = 1.0
-    max_age_minutes: float = 60.0
+    min_liquidity: float = 1000.0
+    max_liquidity: float = 200000.0
+    max_fdv: float = 500000.0       # low cap only - skip anything above 500k FDV
+    min_age_minutes: float = 0.5
+    max_age_minutes: float = 15.0   # FRESH LAUNCHES ONLY - under 15 minutes
     min_score: float = 60.0
-    scan_interval: int = 8          # faster scanning
+    scan_interval: int = 5          # faster scanning for fresh launches
     slippage_bps: int = 500
     priority_fee_lamports: int = 100000
     reserve_sol: float = 0.05
@@ -311,6 +314,12 @@ class TraderConfig:
     use_pumpportal: bool = True        # use PumpPortal API for faster execution
     graduation_sell_pct: float = 0.5   # sell 50% at graduation for guaranteed profit
     sniper_mode: bool = True           # ultra-fast path: skip deep analysis for hot launches
+    # v3.6: Cabal coordination tracking
+    use_cabal_follow: bool = True       # follow connected wallets into low-cap tokens
+    cabal_follow_max_fdv: float = 100000.0  # only follow cabal into sub-100k FDV
+    cabal_follow_min_wallets: int = 2   # min connected wallets buying same token
+    cabal_follow_max_sol: float = 0.08  # max SOL per cabal-follow buy
+    velocity_drop_sell_pct: float = 0.4 # sell when velocity drops to 40% of peak
 
 
 # ============================================================
@@ -377,10 +386,15 @@ class PumpFunMonitor:
         self.new_tokens: asyncio.Queue = asyncio.Queue(maxsize=500)
         self.hot_tokens: Dict[str, dict] = {}  # mint -> detailed trade stats
         self.sniper_signals: asyncio.Queue = asyncio.Queue(maxsize=100)  # high-priority buys
+        self.cabal_signals: asyncio.Queue = asyncio.Queue(maxsize=100)   # cabal coordination buys
         self.running = False
         self._task = None
         self._bags_task = None
         self._tracked_creators: Dict[str, List[str]] = {}  # creator -> [mints they made]
+        # v3.6: Track buyer wallets per token for cabal coordination detection
+        self._wallet_token_buys: Dict[str, Set[str]] = {}  # wallet -> set of mints they bought
+        self._token_buyer_wallets: Dict[str, Set[str]] = {}  # mint -> set of buyer wallets
+        self._cabal_signaled: Set[str] = set()  # mints already signaled as cabal buys
         # Platform stats
         self.platform_counts = {PLATFORM_PUMP: 0, PLATFORM_BONK: 0, PLATFORM_BAGS: 0}
         self.sniper_history: List[dict] = []  # last N sniper signals for dashboard
@@ -523,6 +537,14 @@ class PumpFunMonitor:
                     if trader == stats.get("creator") and stats["buys"] > 1:
                         stats["creator_bought"] = True
                         stats["creator_sol"] += sol_amount
+                    # v3.6: Track wallet→token buys for cabal coordination detection
+                    if trader:
+                        if trader not in self._wallet_token_buys:
+                            self._wallet_token_buys[trader] = set()
+                        self._wallet_token_buys[trader].add(mint)
+                        if mint not in self._token_buyer_wallets:
+                            self._token_buyer_wallets[mint] = set()
+                        self._token_buyer_wallets[mint].add(trader)
                 else:
                     stats["sells"] += 1
                     # Creator selling = bearish, could be rug
@@ -532,10 +554,23 @@ class PumpFunMonitor:
 
                 # Check sniper signal: fast buys from multiple unique wallets
                 self._check_sniper_signal(mint, stats)
+                # v3.6: Check cabal coordination signal
+                if data["txType"] == "buy":
+                    self._check_cabal_coordination(mint, stats)
 
         # Cleanup old hot tokens (older than 30 min)
         cutoff = time.time() - 1800
-        self.hot_tokens = {k: v for k, v in self.hot_tokens.items() if v.get("first_seen", 0) > cutoff}
+        expired_mints = {k for k, v in self.hot_tokens.items() if v.get("first_seen", 0) <= cutoff}
+        self.hot_tokens = {k: v for k, v in self.hot_tokens.items() if k not in expired_mints}
+        # Cleanup wallet tracking for expired tokens
+        if expired_mints:
+            for mint in expired_mints:
+                self._token_buyer_wallets.pop(mint, None)
+                self._cabal_signaled.discard(mint)
+            for wallet in list(self._wallet_token_buys):
+                self._wallet_token_buys[wallet] -= expired_mints
+                if not self._wallet_token_buys[wallet]:
+                    del self._wallet_token_buys[wallet]
         # Cleanup old creator tracking (keep last 100)
         if len(self._tracked_creators) > 500:
             oldest = sorted(self._tracked_creators.keys(), key=lambda c: len(self._tracked_creators[c]))[:250]
@@ -588,6 +623,68 @@ class PumpFunMonitor:
             logger.info(
                 f"[{platform_label}] SNIPER: ${signal['symbol']} | {buys} buys ({unique} unique) | "
                 f"{velocity:.1f}/min | {stats['volume_sol']:.2f} SOL vol | age {age_seconds:.0f}s"
+            )
+
+    def _check_cabal_coordination(self, mint: str, stats: dict):
+        """Detect when connected wallets (sharing buy history) converge on one token.
+
+        If multiple wallets that have been buying the same OTHER tokens now buy THIS token,
+        it's likely a coordinated cabal play. Emit a cabal signal for low-cap tokens.
+        """
+        if mint in self._cabal_signaled:
+            return
+
+        buyers = self._token_buyer_wallets.get(mint, set())
+        if len(buyers) < 2:
+            return
+
+        # Check how many buyer wallets share purchases in OTHER tokens
+        # (wallets buying same tokens = likely connected/coordinated)
+        buyer_list = list(buyers)
+        connected_pairs = 0
+        connected_wallets = set()
+
+        for i in range(len(buyer_list)):
+            w1_tokens = self._wallet_token_buys.get(buyer_list[i], set())
+            for j in range(i + 1, min(len(buyer_list), i + 10)):  # cap comparisons
+                w2_tokens = self._wallet_token_buys.get(buyer_list[j], set())
+                # Shared buys in OTHER tokens (excluding this mint)
+                shared = (w1_tokens & w2_tokens) - {mint}
+                if len(shared) >= 1:  # bought at least 1 other token in common
+                    connected_pairs += 1
+                    connected_wallets.add(buyer_list[i])
+                    connected_wallets.add(buyer_list[j])
+
+        # Signal if enough connected wallets are converging
+        if len(connected_wallets) >= 2 and connected_pairs >= 1:
+            age_seconds = time.time() - stats.get("first_seen", time.time())
+            velocity = stats["buys"] / (age_seconds / 60) if age_seconds > 0 else 0
+            platform = stats.get("platform", PLATFORM_PUMP)
+            signal = {
+                "mint": mint,
+                "symbol": stats.get("symbol", ""),
+                "name": stats.get("name", ""),
+                "connected_wallets": len(connected_wallets),
+                "connected_pairs": connected_pairs,
+                "total_buyers": len(buyers),
+                "buys": stats["buys"],
+                "velocity": velocity,
+                "volume_sol": stats["volume_sol"],
+                "age_seconds": age_seconds,
+                "creator": stats.get("creator", ""),
+                "platform": platform,
+                "timestamp": time.time(),
+            }
+            try:
+                self.cabal_signals.put_nowait(signal)
+            except asyncio.QueueFull:
+                self.cabal_signals.get_nowait()
+                self.cabal_signals.put_nowait(signal)
+            self._cabal_signaled.add(mint)
+            logger.info(
+                f"CABAL SIGNAL: ${signal['symbol']} | {len(connected_wallets)} connected wallets "
+                f"({connected_pairs} pairs) | {stats['buys']} buys | {velocity:.1f}/min | "
+                f"{stats['volume_sol']:.2f} SOL vol"
             )
 
     def get_buy_velocity(self, mint: str) -> float:
@@ -676,9 +773,37 @@ class PumpFunMonitor:
         if session:
             await session.close()
 
-    def get_sniper_feed(self) -> List[dict]:
-        """Get recent sniper activity for dashboard display."""
-        return list(reversed(self.sniper_history[-20:]))
+    def get_sniper_feed(self, max_age_seconds: float = 900) -> List[dict]:
+        """Get recent sniper activity for dashboard - fresh launches only."""
+        now = time.time()
+        fresh = [s for s in self.sniper_history if now - s.get("timestamp", 0) < max_age_seconds]
+        return list(reversed(fresh[-20:]))
+
+    def get_cabal_feed(self, max_age_seconds: float = 900) -> List[dict]:
+        """Get recent cabal coordination signals for dashboard - fresh only."""
+        now = time.time()
+        result = []
+        for mint in list(self._cabal_signaled):
+            stats = self.hot_tokens.get(mint)
+            if not stats:
+                continue
+            age = now - stats.get("first_seen", now)
+            if age > max_age_seconds:
+                continue
+            buyers = self._token_buyer_wallets.get(mint, set())
+            velocity = stats["buys"] / (age / 60) if age > 0 else 0
+            result.append({
+                "mint": mint,
+                "symbol": stats.get("symbol", ""),
+                "connected_wallets": len(buyers),
+                "buys": stats["buys"],
+                "sells": stats["sells"],
+                "velocity": velocity,
+                "volume_sol": stats["volume_sol"],
+                "age_seconds": age,
+                "platform": stats.get("platform", PLATFORM_PUMP),
+            })
+        return result[:15]
 
 
 # ============================================================
@@ -2297,6 +2422,10 @@ class DegenTrader:
         """Score a token 0-100 based on multiple degen signals."""
         score = 0.0
 
+        # FDV cap - low cap only
+        if token.fdv > self.config.max_fdv and token.fdv > 0:
+            return 0  # HARD REJECT - not low cap
+
         # Liquidity sweet spot (skip for bonding curve tokens - they have no traditional liquidity)
         if not token.on_bonding_curve:
             if token.liquidity_usd < self.config.min_liquidity:
@@ -2304,9 +2433,11 @@ class DegenTrader:
             if token.liquidity_usd > self.config.max_liquidity:
                 return 0
 
-            if 10000 <= token.liquidity_usd <= 100000:
-                score += 20
-            elif 5000 <= token.liquidity_usd < 10000:
+            if 5000 <= token.liquidity_usd <= 50000:
+                score += 20  # sweet spot for fresh low caps
+            elif 1000 <= token.liquidity_usd < 5000:
+                score += 15  # early liquidity
+            elif 50000 < token.liquidity_usd <= 100000:
                 score += 10
             else:
                 score += 5
@@ -2321,17 +2452,17 @@ class DegenTrader:
             else:
                 score += 5
 
-        # Age (newer = more upside; bonding curve tokens can be ultra-fresh)
+        # Age - FRESH LAUNCHES ONLY (hard reject anything over max_age_minutes)
         if not token.on_bonding_curve and token.age_minutes < self.config.min_age_minutes:
             return 0
-        if token.age_minutes <= 15:
-            score += 25
-        elif token.age_minutes <= 30:
-            score += 20
-        elif token.age_minutes <= self.config.max_age_minutes:
-            score += 10
-        else:
-            score += 5
+        if token.age_minutes > self.config.max_age_minutes:
+            return 0  # HARD REJECT - too old, we only trade fresh launches
+        if token.age_minutes <= 3:
+            score += 30  # ultra-fresh = maximum alpha
+        elif token.age_minutes <= 7:
+            score += 25  # still very early
+        elif token.age_minutes <= 15:
+            score += 15  # acceptable freshness
 
         # Buy/sell pressure
         total_txns = token.buy_count_5m + token.sell_count_5m
@@ -2362,11 +2493,13 @@ class DegenTrader:
         elif token.price_change_5m < -20:
             score -= 10
 
-        # FDV (micro cap = huge upside)
-        if 0 < token.fdv < 100000:
-            score += 10
-        elif token.fdv < 1000000:
-            score += 5
+        # FDV (micro/low cap = huge upside on fresh launches)
+        if 0 < token.fdv < 50000:
+            score += 15  # micro cap, maximum upside
+        elif token.fdv < 150000:
+            score += 10  # low cap, great upside
+        elif token.fdv < 500000:
+            score += 5   # still acceptable
 
         # Pump.fun source bonus (earliest detection)
         if token.source == "pumpfun":
@@ -2398,6 +2531,9 @@ class DegenTrader:
         # Cabal bonus/penalty
         if token.top_holders_connected and self.config.cabal_is_bullish:
             score += 15  # organized money backing it
+            # Extra boost for low-cap cabal plays (under 100k FDV = coordinated pump)
+            if token.fdv > 0 and token.fdv < self.config.cabal_follow_max_fdv:
+                score += 10  # low-cap + connected wallets = strong signal
 
         # v3: X sentinel boost
         if self.x_sentinel:
@@ -2556,6 +2692,7 @@ class DegenTrader:
 
         if tx_sig:
             self._sniper_bought.add(mint)
+            entry_vel = signal.get("velocity", 0)
             self.positions[mint] = Position(
                 token_address=mint, symbol=symbol,
                 entry_price=curve_state.price_sol * 1e9,  # approx USD
@@ -2564,6 +2701,8 @@ class DegenTrader:
                 take_profit_levels=[3.0, 7.0, 15.0],  # higher targets for early entries
                 stop_loss=0.4,  # tighter stop for sniper plays
                 source="bonding_curve",
+                entry_velocity=entry_vel,
+                peak_velocity=entry_vel,
             )
             self.seen_tokens.add(mint)
             trade = Trade(
@@ -2892,6 +3031,24 @@ class DegenTrader:
                 await self.execute_sell(addr, reason="sell_pressure")
                 continue
 
+            # v3.6: Velocity-drop sell - exit when buy momentum dies
+            if self.pump_monitor and pos.entry_velocity > 0:
+                current_velocity = self.pump_monitor.get_buy_velocity(addr)
+                # Track peak velocity
+                if current_velocity > pos.peak_velocity:
+                    pos.peak_velocity = current_velocity
+                # Sell when velocity drops below threshold of peak (momentum dying)
+                if pos.peak_velocity > 0 and hold_min >= 2.0:  # give at least 2 min before checking
+                    velocity_ratio = current_velocity / pos.peak_velocity
+                    if velocity_ratio <= self.config.velocity_drop_sell_pct:
+                        logger.info(
+                            f"VELOCITY DROP: ${pos.symbol} | vel {current_velocity:.1f}/min "
+                            f"(peak {pos.peak_velocity:.1f}/min, now {velocity_ratio:.0%}) | "
+                            f"PnL {price_mult:.2f}x | selling"
+                        )
+                        await self.execute_sell(addr, reason=f"velocity_drop_{velocity_ratio:.0%}_of_peak")
+                        continue
+
     # ----------------------------------------------------------
     # MAIN TRADING LOOP
     # ----------------------------------------------------------
@@ -2901,7 +3058,7 @@ class DegenTrader:
 
         balance = await self.get_sol_balance()
         logger.info("=" * 60)
-        logger.info("FARNSWORTH DEGEN TRADER v3.5 - BONDING CURVE SNIPER")
+        logger.info("FARNSWORTH DEGEN TRADER v3.5 - FRESH LAUNCH SNIPER (LOW CAP / <15min)")
         logger.info("=" * 60)
         logger.info(f"Wallet:     {self.pubkey}")
         logger.info(f"Balance:    {balance:.4f} SOL")
@@ -2910,6 +3067,8 @@ class DegenTrader:
         logger.info(f"Pump.fun:   {'ON' if self.pump_monitor else 'OFF'}")
         logger.info(f"BondCurve:  {'ON' if self.curve_engine else 'OFF'} (PumpPortal: {'ON' if self.config.use_pumpportal else 'OFF'})")
         logger.info(f"Sniper:     {'ON' if self.config.sniper_mode else 'OFF'} (max {self.config.bonding_curve_max_sol} SOL, <{self.config.bonding_curve_max_progress}% curve)")
+        logger.info(f"FreshOnly:  <{self.config.max_age_minutes}min | FDV cap: ${self.config.max_fdv:,.0f} | Liq: ${self.config.min_liquidity:,.0f}-${self.config.max_liquidity:,.0f}")
+        logger.info(f"CabalFollow: {'ON' if self.config.use_cabal_follow else 'OFF'} (FDV<${self.config.cabal_follow_max_fdv:,.0f}, {self.config.cabal_follow_min_wallets}+ wallets, vel-drop sell at {self.config.velocity_drop_sell_pct:.0%})")
         logger.info(f"Wallets:    {'ON' if self.wallet_analyzer else 'OFF'}")
         logger.info(f"Quantum:    {'ON' if self.quantum_oracle else 'OFF'}")
         logger.info(f"Swarm:      {'ON' if self.config.use_swarm else 'OFF'}")
@@ -2969,6 +3128,52 @@ class DegenTrader:
                     if self.curve_engine:
                         await self.check_graduation_sells()
 
+                    # v3.6: Process cabal coordination signals (connected wallets converging)
+                    if self.pump_monitor and self.config.use_cabal_follow:
+                        cabal_sigs = []
+                        while not self.pump_monitor.cabal_signals.empty():
+                            try:
+                                sig = self.pump_monitor.cabal_signals.get_nowait()
+                                cabal_sigs.append(sig)
+                            except asyncio.QueueEmpty:
+                                break
+                        for signal in cabal_sigs[:3]:
+                            mint = signal.get("mint", "")
+                            if not mint or mint in self.positions or mint in self.seen_tokens or mint in self._sniper_bought:
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < self.config.cabal_follow_max_sol:
+                                break
+                            # Fetch token data and enforce low-cap + fresh filter
+                            token = await self._fetch_token_data(mint)
+                            if not token:
+                                continue
+                            if token.age_minutes > self.config.max_age_minutes:
+                                logger.debug(f"SKIP cabal {token.symbol}: too old ({token.age_minutes:.0f}m)")
+                                continue
+                            if token.fdv > self.config.cabal_follow_max_fdv and token.fdv > 0:
+                                logger.debug(f"SKIP cabal {token.symbol}: FDV ${token.fdv:.0f} > ${self.config.cabal_follow_max_fdv:.0f}")
+                                continue
+                            # Tag and buy
+                            token.source = "cabal_follow"
+                            token.cabal_score = min(100, signal.get("connected_wallets", 2) * 30)
+                            token.top_holders_connected = True
+                            self.score_token(token)
+                            token.score = min(100, token.score + 25)  # cabal coordination bonus
+                            velocity = signal.get("velocity", 0)
+                            logger.info(
+                                f"CABAL FOLLOW: ${token.symbol} | {signal.get('connected_wallets', 0)} connected wallets | "
+                                f"FDV ${token.fdv:.0f} | age {token.age_minutes:.0f}m | vel {velocity:.1f}/min"
+                            )
+                            buy_result = await self.execute_buy(token, self.config.cabal_follow_max_sol)
+                            if buy_result and mint in self.positions:
+                                # Record entry velocity for velocity-drop sell
+                                self.positions[mint].entry_velocity = velocity
+                                self.positions[mint].peak_velocity = velocity
+                            await asyncio.sleep(0.3)
+
                     # v3: Process copy trade signals (second fastest alpha)
                     if self.copy_engine:
                         copy_signals = self.copy_engine.get_copy_signals()
@@ -2983,10 +3188,14 @@ class DegenTrader:
                                 break
                             token = await self._fetch_token_data(mint)
                             if token and token.liquidity_usd >= self.config.min_liquidity:
+                                # Enforce fresh launch filter on copy trades too
+                                if token.age_minutes > self.config.max_age_minutes:
+                                    logger.debug(f"SKIP copy {token.symbol}: too old ({token.age_minutes:.0f}m > {self.config.max_age_minutes}m)")
+                                    continue
                                 token.source = f"copy_{signal.get('wallet_label', 'unknown')}"
                                 self.score_token(token)
                                 token.score = min(100, token.score + 20)  # copy trade bonus
-                                logger.info(f"COPY TRADE: ${token.symbol} from {signal.get('wallet_label', '?')} ({signal.get('sol_spent', 0):.2f} SOL)")
+                                logger.info(f"COPY TRADE: ${token.symbol} from {signal.get('wallet_label', '?')} ({signal.get('sol_spent', 0):.2f} SOL) age:{token.age_minutes:.0f}m")
                                 await self.execute_buy(token, self.config.copy_trade_max_sol)
                                 await asyncio.sleep(0.5)
 
@@ -3001,6 +3210,11 @@ class DegenTrader:
                                 break
                             token = await self._fetch_token_data(addr)
                             if token and token.liquidity_usd >= self.config.min_liquidity:
+                                # Enforce fresh launch filter on X sentinel too
+                                if token.age_minutes > self.config.max_age_minutes:
+                                    logger.debug(f"SKIP X signal {token.symbol}: too old ({token.age_minutes:.0f}m > {self.config.max_age_minutes}m)")
+                                    self.seen_tokens.add(addr)
+                                    continue
                                 token.source = f"x_{signal.get('signal_type', 'trending')}"
                                 self.score_token(token)
                                 approved = await self.deep_analyze(token)
@@ -3012,11 +3226,17 @@ class DegenTrader:
 
                     # Scan all standard sources
                     tokens = await self.scan_new_tokens()
-                    logger.info(f"Found {len(tokens)} new tokens")
+                    # Pre-filter: fresh launches only
+                    fresh = [t for t in tokens if t.age_minutes <= self.config.max_age_minutes]
+                    stale = len(tokens) - len(fresh)
+                    if stale > 0:
+                        logger.info(f"Found {len(tokens)} tokens, filtered {stale} older than {self.config.max_age_minutes}m → {len(fresh)} fresh launches")
+                    else:
+                        logger.info(f"Found {len(fresh)} fresh tokens (all under {self.config.max_age_minutes}m)")
 
                     # Score
                     scored = []
-                    for t in tokens:
+                    for t in fresh:
                         s = self.score_token(t)
                         if s >= self.config.min_score:
                             scored.append(t)
@@ -3110,6 +3330,9 @@ class DegenTrader:
                     "symbol": p.symbol, "entry_price": p.entry_price,
                     "sol_spent": p.amount_sol_spent, "source": p.source,
                     "hold_minutes": round((time.time() - p.entry_time) / 60, 1),
+                    "entry_velocity": round(p.entry_velocity, 1),
+                    "peak_velocity": round(p.peak_velocity, 1),
+                    "current_velocity": round(self.pump_monitor.get_buy_velocity(addr), 1) if self.pump_monitor else 0,
                 }
                 for addr, p in self.positions.items()
             },
@@ -3134,10 +3357,22 @@ class DegenTrader:
                 "learned_patterns": len(self.trading_memory.get_historical_patterns()) if self.trading_memory else 0,
                 "fast_rpc": bool(self.config.fast_rpc_url and self.config.fast_rpc_url != self.config.rpc_url),
                 "sniper_buys": len(self._sniper_bought),
+                "cabal_follow": self.config.use_cabal_follow,
+                "cabal_follow_max_fdv": self.config.cabal_follow_max_fdv,
+                "cabal_signals_seen": len(self.pump_monitor._cabal_signaled) if self.pump_monitor else 0,
+                "velocity_drop_sell_pct": self.config.velocity_drop_sell_pct,
                 "hot_tokens_tracked": len(self.pump_monitor.hot_tokens) if self.pump_monitor else 0,
+                "wallets_tracked": len(self.pump_monitor._wallet_token_buys) if self.pump_monitor else 0,
                 "platform_counts": self.pump_monitor.platform_counts if self.pump_monitor else {},
             },
-            "sniper_feed": self.pump_monitor.get_sniper_feed() if self.pump_monitor else [],
+            "sniper_feed": self.pump_monitor.get_sniper_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
+            "cabal_feed": self.pump_monitor.get_cabal_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
+            "config": {
+                "max_age_minutes": self.config.max_age_minutes,
+                "max_fdv": self.config.max_fdv,
+                "cabal_follow_max_fdv": self.config.cabal_follow_max_fdv,
+                "velocity_drop_sell_pct": self.config.velocity_drop_sell_pct,
+            },
         }
 
 

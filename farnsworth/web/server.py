@@ -4469,10 +4469,14 @@ async def trading_start(request: Request):
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
         config = TraderConfig(
             rpc_url=body.get("rpc_url", os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")),
+            fast_rpc_url=body.get("fast_rpc_url", os.environ.get("ALCHEMY_SOLANA_RPC", "")),
             max_position_sol=float(body.get("max_position_sol", 0.1)),
             max_positions=int(body.get("max_positions", 10)),
-            scan_interval=int(body.get("scan_interval", 10)),
+            scan_interval=int(body.get("scan_interval", 5)),
             use_swarm=body.get("use_swarm", True),
+            use_cabal_follow=body.get("use_cabal_follow", True),
+            cabal_follow_max_fdv=float(body.get("cabal_follow_max_fdv", 100000)),
+            velocity_drop_sell_pct=float(body.get("velocity_drop_sell_pct", 0.4)),
         )
         _trader_instance = DegenTrader(config=config, wallet_name=body.get("wallet_name", "degen_trader"))
         asyncio.create_task(_trader_instance.run())
