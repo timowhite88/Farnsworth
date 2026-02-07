@@ -181,7 +181,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 <div class="topbar">
   <div class="topbar-left">
     <div class="topbar-title">Farnsworth Command Center</div>
-    <div class="topbar-version">v3.6 LOW CAP</div>
+    <div class="topbar-version">v3.7 INSTANT SNIPE</div>
   </div>
   <div class="topbar-center">
     <div class="status-pill" id="statusPill">
@@ -210,6 +210,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
   <div class="intel-chip" id="icPump"><span class="dot"></span>Pump.fun</div>
   <div class="intel-chip" id="icBonk"><span class="dot"></span>Bonk</div>
   <div class="intel-chip" id="icBags"><span class="dot"></span>BAGS</div>
+  <div class="intel-chip" id="icInstant"><span class="dot"></span>Instant Snipe</div>
   <div class="intel-chip" id="icSniper"><span class="dot"></span>Sniper</div>
   <div class="intel-chip" id="icCabal"><span class="dot"></span>Cabal Follow</div>
   <div class="intel-chip" id="icCopy"><span class="dot"></span>Copy Trade</div>
@@ -261,12 +262,14 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 
 <!-- ===== MEMORY BAR ===== -->
 <div class="membar">
-  <span class="ml">Low Cap Sniper</span>
+  <span class="ml">Instant Snipe + Quantum</span>
   <span class="ms">Max Age: <span class="mv" id="mAge">15m</span></span>
   <span class="ms">FDV Cap: <span class="mv" id="mFdv">$500k</span></span>
+  <span class="ms">Dev Buy Min: <span class="mv" id="mDevBuy">0.3 SOL</span></span>
   <span class="ms">Cabal Signals: <span class="mv" id="mCabal">0</span></span>
   <span class="ms">Wallets Tracked: <span class="mv" id="mWalTrack">0</span></span>
   <span class="ms">Sniped: <span class="mv" id="mSnipe">0</span></span>
+  <span class="ms">WS Reconnects: <span class="mv" id="mWsRecon">0</span></span>
   <span class="ms">Hot: <span class="mv" id="mHot">0</span></span>
   <span class="ms">RPC: <span class="mv" id="mRpc">--</span></span>
   <a href="/demo" class="back-link">&larr; Back to Demo</a>
@@ -604,8 +607,8 @@ async function poll(){
 
       // Intel lights
       const intel=d.intelligence||{};
-      ['Pump','Bonk','Bags','Sniper','Cabal','Copy','X','Quantum','Swarm','Memory'].forEach((n,i)=>{
-        const keys=['pumpfun','pumpfun','pumpfun','sniper_mode','cabal_follow','copy_trading','x_sentinel','quantum_oracle','swarm','trading_memory'];
+      ['Pump','Bonk','Bags','Instant','Sniper','Cabal','Copy','X','Quantum','Swarm','Memory'].forEach((n,i)=>{
+        const keys=['pumpfun','pumpfun','pumpfun','instant_snipe','sniper_mode','cabal_follow','copy_trading','x_sentinel','quantum_oracle','swarm','trading_memory'];
         const el=document.getElementById('ic'+n);
         if(el){if(intel[keys[i]])el.classList.add('on');else el.classList.remove('on');}
       });
@@ -637,6 +640,8 @@ async function poll(){
       document.getElementById('mRpc').textContent=intel.fast_rpc?'ALCHEMY':'DEFAULT';
       document.getElementById('mSnipe').textContent=intel.sniper_buys||0;
       document.getElementById('mHot').textContent=intel.hot_tokens_tracked||0;
+      document.getElementById('mDevBuy').textContent=(cfg.instant_snipe_min_dev_sol||0.3)+' SOL';
+      document.getElementById('mWsRecon').textContent=intel.ws_reconnects||0;
 
       // Live cabal feed
       const cabalFeed=d.cabal_feed||[];

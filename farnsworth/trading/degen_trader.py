@@ -1,5 +1,5 @@
 """
-Farnsworth Degen Trader v3.5 - Pre-Bonding Curve Sniper Edition
+Farnsworth Degen Trader v3.7 - Instant Snipe + Quantum Analysis Edition
 
 High-frequency Solana memecoin trader powered by the Farnsworth swarm.
 - DIRECT Pump.fun bonding curve buys (no Jupiter needed pre-graduation)
@@ -320,6 +320,10 @@ class TraderConfig:
     cabal_follow_min_wallets: int = 2   # min connected wallets buying same token
     cabal_follow_max_sol: float = 0.08  # max SOL per cabal-follow buy
     velocity_drop_sell_pct: float = 0.4 # sell when velocity drops to 40% of peak
+    # v3.7: Instant snipe on big dev buy at pool creation
+    instant_snipe: bool = True             # snipe pool the moment it launches if dev buy is big
+    instant_snipe_min_dev_sol: float = 0.3 # minimum dev buy SOL to trigger instant snipe
+    instant_snipe_max_sol: float = 0.06    # max SOL to spend on instant snipe
 
 
 # ============================================================
@@ -395,6 +399,9 @@ class PumpFunMonitor:
         self._wallet_token_buys: Dict[str, Set[str]] = {}  # wallet -> set of mints they bought
         self._token_buyer_wallets: Dict[str, Set[str]] = {}  # mint -> set of buyer wallets
         self._cabal_signaled: Set[str] = set()  # mints already signaled as cabal buys
+        # v3.7: Instant snipe signals for big dev buys at launch
+        self.instant_snipe_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
+        self._reconnect_count = 0
         # Platform stats
         self.platform_counts = {PLATFORM_PUMP: 0, PLATFORM_BONK: 0, PLATFORM_BAGS: 0}
         self.sniper_history: List[dict] = []  # last N sniper signals for dashboard
@@ -424,11 +431,17 @@ class PumpFunMonitor:
 
         while self.running:
             try:
-                async with websockets.connect(PUMPFUN_WS_URL) as ws:
+                async with websockets.connect(
+                    PUMPFUN_WS_URL,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=5,
+                ) as ws:
                     self.ws = ws
+                    self._reconnect_count += 1
                     # Subscribe to new token creates + token trades
                     await ws.send(json.dumps({"method": "subscribeNewToken"}))
-                    logger.info("Subscribed to pump.fun new tokens + trades")
+                    logger.info(f"PumpPortal WS connected (attempt #{self._reconnect_count}), subscribed to new tokens + trades")
 
                     async for msg in ws:
                         if not self.running:
@@ -442,8 +455,8 @@ class PumpFunMonitor:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning(f"PumpFun WS error: {e}, reconnecting in 5s...")
-                await asyncio.sleep(5)
+                logger.warning(f"PumpFun WS error: {e}, reconnecting in 2s... (reconnects: {self._reconnect_count})")
+                await asyncio.sleep(2)
 
     def _detect_platform(self, data: dict) -> str:
         """Detect which launchpad a PumpPortal event came from."""
@@ -510,6 +523,35 @@ class PumpFunMonitor:
                     self.new_tokens.get_nowait()
                     self.new_tokens.put_nowait(token_data)
                 logger.info(f"[{platform_label}] NEW: ${token_data['symbol']} by {creator[:8]}... (dev buy: {initial_sol:.3f} SOL)")
+
+                # v3.7: Instant snipe on big dev buy at pool creation
+                # If dev launches with significant SOL, snipe immediately before others pile in
+                if initial_sol >= 0.3:  # threshold checked against config in main loop
+                    instant_signal = {
+                        "mint": mint,
+                        "symbol": data.get("symbol", ""),
+                        "name": data.get("name", ""),
+                        "buys": 1,
+                        "sells": 0,
+                        "unique_buyers": 1,
+                        "velocity": 0,
+                        "volume_sol": initial_sol,
+                        "age_seconds": 0,
+                        "creator": creator,
+                        "creator_bought": True,
+                        "creator_sol": initial_sol,
+                        "largest_buy_sol": initial_sol,
+                        "timestamp": time.time(),
+                        "platform": platform,
+                        "instant_snipe": True,
+                        "dev_buy_sol": initial_sol,
+                    }
+                    try:
+                        self.instant_snipe_signals.put_nowait(instant_signal)
+                    except asyncio.QueueFull:
+                        self.instant_snipe_signals.get_nowait()
+                        self.instant_snipe_signals.put_nowait(instant_signal)
+                    logger.info(f"[{platform_label}] INSTANT SNIPE SIGNAL: ${data.get('symbol', '?')} dev buy {initial_sol:.3f} SOL — sniping before others!")
 
         elif data.get("txType") in ("buy", "sell"):
             mint = data.get("mint", "")
@@ -1696,6 +1738,15 @@ class XSentinelMonitor:
         except (asyncio.TimeoutError, Exception) as e:
             logger.debug(f"X sentinel Grok timeout: {e}")
 
+    # Established tokens that will NEVER pass fresh-launch filters — skip them
+    ESTABLISHED_BLACKLIST = {
+        "WIF", "BONK", "DOGE", "SHIB", "PEPE", "FLOKI", "MYRO", "MEW",
+        "POPCAT", "WEN", "BOME", "SLERF", "SAMO", "ORCA", "RAY", "JUP",
+        "JTO", "PYTH", "RENDER", "HNT", "SOL", "USDC", "USDT", "BTC",
+        "ETH", "TRUMP", "MELANIA", "PNUT", "GOAT", "MOODENG", "SPX",
+        "GIGA", "RETARDIO", "PONKE", "MOTHER", "FWOG", "MICHI", "LUCE",
+    }
+
     def _parse_x_signals(self, response: str):
         if not response:
             return
@@ -1708,6 +1759,10 @@ class XSentinelMonitor:
                 if len(parts) < 4:
                     continue
                 symbol = parts[0].strip().lstrip("$")
+                # Skip established tokens — they'll never pass our fresh launch filters
+                if symbol.upper() in self.ESTABLISHED_BLACKLIST:
+                    logger.debug(f"X sentinel: skipping established token ${symbol}")
+                    continue
                 address = parts[1].strip() if len(parts[1].strip()) > 20 else ""
                 signal_type = parts[2].strip()
                 strength = min(10, max(1, int(parts[3].strip())))
@@ -3058,7 +3113,7 @@ class DegenTrader:
 
         balance = await self.get_sol_balance()
         logger.info("=" * 60)
-        logger.info("FARNSWORTH DEGEN TRADER v3.5 - FRESH LAUNCH SNIPER (LOW CAP / <15min)")
+        logger.info("FARNSWORTH DEGEN TRADER v3.7 - INSTANT SNIPE + QUANTUM ANALYSIS")
         logger.info("=" * 60)
         logger.info(f"Wallet:     {self.pubkey}")
         logger.info(f"Balance:    {balance:.4f} SOL")
@@ -3066,6 +3121,7 @@ class DegenTrader:
         logger.info(f"Fast RPC:   {self.config.fast_rpc_url[:40]}...")
         logger.info(f"Pump.fun:   {'ON' if self.pump_monitor else 'OFF'}")
         logger.info(f"BondCurve:  {'ON' if self.curve_engine else 'OFF'} (PumpPortal: {'ON' if self.config.use_pumpportal else 'OFF'})")
+        logger.info(f"InstSnipe:  {'ON' if self.config.instant_snipe else 'OFF'} (dev buy >= {self.config.instant_snipe_min_dev_sol} SOL → instant {self.config.instant_snipe_max_sol} SOL)")
         logger.info(f"Sniper:     {'ON' if self.config.sniper_mode else 'OFF'} (max {self.config.bonding_curve_max_sol} SOL, <{self.config.bonding_curve_max_progress}% curve)")
         logger.info(f"FreshOnly:  <{self.config.max_age_minutes}min | FDV cap: ${self.config.max_fdv:,.0f} | Liq: ${self.config.min_liquidity:,.0f}-${self.config.max_liquidity:,.0f}")
         logger.info(f"CabalFollow: {'ON' if self.config.use_cabal_follow else 'OFF'} (FDV<${self.config.cabal_follow_max_fdv:,.0f}, {self.config.cabal_follow_min_wallets}+ wallets, vel-drop sell at {self.config.velocity_drop_sell_pct:.0%})")
@@ -3103,7 +3159,36 @@ class DegenTrader:
                 )
 
                 if can_trade:
-                    # v3.5: Process sniper signals FIRST (fastest alpha - bonding curve)
+                    # v3.7: INSTANT SNIPE — big dev buy at pool creation, buy BEFORE others
+                    if (self.pump_monitor and self.curve_engine
+                            and self.config.instant_snipe and self.config.sniper_mode):
+                        instant_signals = []
+                        while not self.pump_monitor.instant_snipe_signals.empty():
+                            try:
+                                sig = self.pump_monitor.instant_snipe_signals.get_nowait()
+                                instant_signals.append(sig)
+                            except asyncio.QueueEmpty:
+                                break
+                        for signal in instant_signals[:2]:  # max 2 instant snipes per cycle
+                            mint = signal.get("mint", "")
+                            dev_sol = signal.get("dev_buy_sol", 0)
+                            if mint in self.positions or mint in self._sniper_bought:
+                                continue
+                            if dev_sol < self.config.instant_snipe_min_dev_sol:
+                                continue  # below threshold
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < self.config.instant_snipe_max_sol:
+                                break
+                            logger.info(
+                                f"INSTANT SNIPE: ${signal.get('symbol', '?')} | dev buy {dev_sol:.3f} SOL | "
+                                f"buying {self.config.instant_snipe_max_sol} SOL BEFORE the crowd"
+                            )
+                            await self.execute_sniper_buy(signal, self.config.instant_snipe_max_sol)
+                            await asyncio.sleep(0.2)  # minimal delay — speed is everything
+
+                    # v3.5: Process sniper signals (momentum-based, bonding curve)
                     if self.pump_monitor and self.curve_engine and self.config.sniper_mode:
                         sniper_signals = []
                         while not self.pump_monitor.sniper_signals.empty():
@@ -3352,6 +3437,9 @@ class DegenTrader:
                 "trading_memory": self.trading_memory is not None and self.trading_memory._initialized,
                 "bonding_curve": self.curve_engine is not None,
                 "sniper_mode": self.config.sniper_mode,
+                "instant_snipe": self.config.instant_snipe,
+                "instant_snipe_min_dev_sol": self.config.instant_snipe_min_dev_sol,
+                "ws_reconnects": self.pump_monitor._reconnect_count if self.pump_monitor else 0,
                 "tracked_wallets": len(self.copy_engine.tracked_wallets) if self.copy_engine else 0,
                 "x_signals_active": len(self.x_sentinel.trending_tokens) if self.x_sentinel else 0,
                 "learned_patterns": len(self.trading_memory.get_historical_patterns()) if self.trading_memory else 0,
@@ -3372,6 +3460,9 @@ class DegenTrader:
                 "max_fdv": self.config.max_fdv,
                 "cabal_follow_max_fdv": self.config.cabal_follow_max_fdv,
                 "velocity_drop_sell_pct": self.config.velocity_drop_sell_pct,
+                "instant_snipe": self.config.instant_snipe,
+                "instant_snipe_min_dev_sol": self.config.instant_snipe_min_dev_sol,
+                "instant_snipe_max_sol": self.config.instant_snipe_max_sol,
             },
         }
 

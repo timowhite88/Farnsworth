@@ -4477,6 +4477,9 @@ async def trading_start(request: Request):
             use_cabal_follow=body.get("use_cabal_follow", True),
             cabal_follow_max_fdv=float(body.get("cabal_follow_max_fdv", 100000)),
             velocity_drop_sell_pct=float(body.get("velocity_drop_sell_pct", 0.4)),
+            instant_snipe=body.get("instant_snipe", True),
+            instant_snipe_min_dev_sol=float(body.get("instant_snipe_min_dev_sol", 0.3)),
+            instant_snipe_max_sol=float(body.get("instant_snipe_max_sol", 0.06)),
         )
         _trader_instance = DegenTrader(config=config, wallet_name=body.get("wallet_name", "degen_trader"))
         asyncio.create_task(_trader_instance.run())
