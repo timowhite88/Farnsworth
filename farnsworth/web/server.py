@@ -4478,8 +4478,15 @@ async def trading_start(request: Request):
             cabal_follow_max_fdv=float(body.get("cabal_follow_max_fdv", 100000)),
             velocity_drop_sell_pct=float(body.get("velocity_drop_sell_pct", 0.4)),
             instant_snipe=body.get("instant_snipe", True),
-            instant_snipe_min_dev_sol=float(body.get("instant_snipe_min_dev_sol", 0.3)),
+            instant_snipe_min_dev_sol=float(body.get("instant_snipe_min_dev_sol", 7.0)),
             instant_snipe_max_sol=float(body.get("instant_snipe_max_sol", 0.06)),
+            bundle_snipe=body.get("bundle_snipe", True),
+            bundle_min_buys=int(body.get("bundle_min_buys", 3)),
+            bundle_snipe_max_sol=float(body.get("bundle_snipe_max_sol", 0.06)),
+            reentry_enabled=body.get("reentry_enabled", True),
+            reentry_velocity_min=float(body.get("reentry_velocity_min", 3.0)),
+            reentry_max_sol=float(body.get("reentry_max_sol", 0.05)),
+            reentry_stop_loss=float(body.get("reentry_stop_loss", 0.25)),
         )
         _trader_instance = DegenTrader(config=config, wallet_name=body.get("wallet_name", "degen_trader"))
         asyncio.create_task(_trader_instance.run())

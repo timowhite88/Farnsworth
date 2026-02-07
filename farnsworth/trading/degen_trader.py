@@ -320,10 +320,20 @@ class TraderConfig:
     cabal_follow_min_wallets: int = 2   # min connected wallets buying same token
     cabal_follow_max_sol: float = 0.08  # max SOL per cabal-follow buy
     velocity_drop_sell_pct: float = 0.4 # sell when velocity drops to 40% of peak
-    # v3.7: Instant snipe on big dev buy at pool creation
+    # v3.7: Instant snipe on big dev buy / bundle at pool creation
     instant_snipe: bool = True             # snipe pool the moment it launches if dev buy is big
-    instant_snipe_min_dev_sol: float = 0.3 # minimum dev buy SOL to trigger instant snipe
+    instant_snipe_min_dev_sol: float = 7.0 # minimum dev buy SOL to trigger instant snipe (HIGH CONVICTION)
     instant_snipe_max_sol: float = 0.06    # max SOL to spend on instant snipe
+    bundle_snipe: bool = True              # snipe when bundle detected (multiple buys within seconds)
+    bundle_min_buys: int = 3               # min buys within bundle_window_sec to trigger
+    bundle_window_sec: float = 5.0         # time window to detect bundle (coordinated buys)
+    bundle_snipe_max_sol: float = 0.06     # max SOL per bundle snipe
+    # v3.7: Re-entry after velocity dump
+    reentry_enabled: bool = True           # watch dumped tokens, re-enter on strength
+    reentry_velocity_min: float = 3.0      # min velocity to trigger re-entry
+    reentry_max_sol: float = 0.05          # smaller size on re-entry
+    reentry_stop_loss: float = 0.25        # tight 25% stop loss on re-entry positions
+    reentry_ignore_fdv_cap: bool = True    # re-entry can exceed normal FDV cap if quantum signals strong
 
 
 # ============================================================
@@ -399,8 +409,10 @@ class PumpFunMonitor:
         self._wallet_token_buys: Dict[str, Set[str]] = {}  # wallet -> set of mints they bought
         self._token_buyer_wallets: Dict[str, Set[str]] = {}  # mint -> set of buyer wallets
         self._cabal_signaled: Set[str] = set()  # mints already signaled as cabal buys
-        # v3.7: Instant snipe signals for big dev buys at launch
+        # v3.7: Instant snipe signals for big dev buys / bundles at launch
         self.instant_snipe_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
+        self.bundle_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
+        self._bundle_detected: Set[str] = set()  # mints already bundle-signaled
         self._reconnect_count = 0
         # Platform stats
         self.platform_counts = {PLATFORM_PUMP: 0, PLATFORM_BONK: 0, PLATFORM_BAGS: 0}
@@ -526,7 +538,7 @@ class PumpFunMonitor:
 
                 # v3.7: Instant snipe on big dev buy at pool creation
                 # If dev launches with significant SOL, snipe immediately before others pile in
-                if initial_sol >= 0.3:  # threshold checked against config in main loop
+                if initial_sol >= 7.0:  # HIGH CONVICTION: dev put 7+ SOL in at launch
                     instant_signal = {
                         "mint": mint,
                         "symbol": data.get("symbol", ""),
@@ -600,9 +612,52 @@ class PumpFunMonitor:
                 if data["txType"] == "buy":
                     self._check_cabal_coordination(mint, stats)
 
+                # v3.7: Bundle detection — multiple buys within seconds = coordinated
+                if data["txType"] == "buy" and mint not in self._bundle_detected:
+                    ts_list = stats.get("buy_timestamps", [])
+                    now_t = time.time()
+                    if len(ts_list) >= 3:
+                        # Count buys in last 5 seconds
+                        recent = [t for t in ts_list if now_t - t <= 5.0]
+                        if len(recent) >= 3:
+                            unique_recent = len({b for b in stats.get("unique_buyers", set())})
+                            age_s = now_t - stats.get("first_seen", now_t)
+                            if age_s < 60 and unique_recent >= 2:  # fresh + multiple wallets
+                                platform = stats.get("platform", PLATFORM_PUMP)
+                                platform_label = "PUMP" if platform == PLATFORM_PUMP else "BONK" if platform == PLATFORM_BONK else "BAGS"
+                                bundle_sig = {
+                                    "mint": mint,
+                                    "symbol": stats.get("symbol", ""),
+                                    "name": stats.get("name", ""),
+                                    "buys": stats["buys"],
+                                    "sells": stats["sells"],
+                                    "unique_buyers": unique_recent,
+                                    "velocity": stats["buys"] / (age_s / 60) if age_s > 0 else 0,
+                                    "volume_sol": stats["volume_sol"],
+                                    "age_seconds": age_s,
+                                    "creator": stats.get("creator", ""),
+                                    "largest_buy_sol": stats.get("largest_buy_sol", 0),
+                                    "timestamp": now_t,
+                                    "platform": platform,
+                                    "bundle_buys": len(recent),
+                                    "dev_buy_sol": 0,
+                                    "instant_snipe": True,
+                                }
+                                try:
+                                    self.bundle_signals.put_nowait(bundle_sig)
+                                except asyncio.QueueFull:
+                                    self.bundle_signals.get_nowait()
+                                    self.bundle_signals.put_nowait(bundle_sig)
+                                self._bundle_detected.add(mint)
+                                logger.info(
+                                    f"[{platform_label}] BUNDLE DETECTED: ${stats.get('symbol', '?')} | "
+                                    f"{len(recent)} buys in 5s | {unique_recent} unique wallets | "
+                                    f"age {age_s:.0f}s — SNIPING"
+                                )
+
                 # v3.7: Instant snipe — big buy on a very fresh token (< 15 seconds old)
                 # Catches dev buys that come as separate buy txns after create
-                if data["txType"] == "buy" and sol_amount >= 0.3 and mint not in self._cabal_signaled:
+                if data["txType"] == "buy" and sol_amount >= 7.0 and mint not in self._cabal_signaled:
                     age_s = time.time() - stats.get("first_seen", time.time())
                     if age_s < 15 and stats["buys"] <= 3:
                         platform = stats.get("platform", PLATFORM_PUMP)
@@ -2462,6 +2517,8 @@ class DegenTrader:
         # v3.5: Bonding curve direct trading
         self.curve_engine: Optional[BondingCurveEngine] = None
         self._sniper_bought: set = set()  # mints already sniped
+        # v3.7: Re-entry watch list — tokens we sold that we keep monitoring
+        self._reentry_watchlist: Dict[str, dict] = {}  # mint -> {sold_at, sold_price, peak_vel, symbol}
         # v3.7: Quantum wallet prediction
         self.wallet_predictor: Optional[QuantumWalletPredictor] = None
 
@@ -2585,7 +2642,14 @@ class DegenTrader:
     # TOKEN SCANNING (DexScreener + Pump.fun)
     # ----------------------------------------------------------
     async def scan_new_tokens(self) -> List[TokenInfo]:
-        """Scan all sources for promising new Solana launches."""
+        """Scan all sources for promising new Solana launches.
+
+        Multi-source scanning with fallbacks to avoid rate limits:
+        1. PumpPortal WSS (real-time, primary for fresh launches)
+        2. DexScreener boosted + profiles (backup, slower indexing)
+        3. GMGN new pairs (backup, catches tokens DexScreener misses)
+        4. Birdeye new tokens (backup, requires API key)
+        """
         tokens = []
 
         # Source 1: Pump.fun real-time (fastest)
@@ -2596,6 +2660,16 @@ class DegenTrader:
         # Source 2: DexScreener boosted + profiles
         dx_tokens = await self._scan_dexscreener()
         tokens.extend(dx_tokens)
+
+        # Source 3: GMGN new pairs (backup — catches what DexScreener misses)
+        if self._scan_count % 3 == 0:  # every 3rd cycle to avoid rate limits
+            gmgn_tokens = await self._scan_gmgn_new_pairs()
+            tokens.extend(gmgn_tokens)
+
+        # Source 4: Birdeye new tokens (backup — requires API key)
+        if self._scan_count % 4 == 0 and os.environ.get("BIRDEYE_API_KEY"):
+            birdeye_tokens = await self._scan_birdeye_new()
+            tokens.extend(birdeye_tokens)
 
         # Deduplicate by address
         seen = set()
@@ -2694,8 +2768,81 @@ class DegenTrader:
             logger.error(f"DexScreener scan error: {e}")
         return tokens
 
+    async def _scan_gmgn_new_pairs(self) -> List[TokenInfo]:
+        """Backup scan: GMGN new Solana pairs (catches tokens DexScreener misses)."""
+        tokens = []
+        try:
+            url = "https://gmgn.ai/defi/quotation/v1/pairs/sol/new_pairs?limit=15&orderby=open_timestamp&direction=desc"
+            headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return tokens
+                data = await resp.json()
+                pairs = data.get("data", {}).get("pairs", []) if isinstance(data.get("data"), dict) else []
+                for pair in pairs[:10]:
+                    addr = pair.get("base_address", pair.get("token_address", ""))
+                    if not addr or addr in self.seen_tokens:
+                        continue
+                    # Quick build from GMGN data
+                    created = pair.get("open_timestamp", 0)
+                    age_min = (time.time() - created) / 60 if created else 999
+                    if age_min > self.config.max_age_minutes:
+                        continue
+                    fdv = pair.get("fdv", 0) or 0
+                    liq = pair.get("liquidity", 0) or 0
+                    token = TokenInfo(
+                        address=addr,
+                        symbol=pair.get("base_symbol", pair.get("symbol", "?")),
+                        name=pair.get("base_name", pair.get("name", "")),
+                        pair_address=pair.get("pair_address", ""),
+                        price_usd=pair.get("price", 0) or 0,
+                        liquidity_usd=liq,
+                        volume_24h=pair.get("volume_24h", 0) or 0,
+                        age_minutes=age_min,
+                        fdv=fdv,
+                        buy_count_5m=pair.get("buys_5m", 0) or 0,
+                        sell_count_5m=pair.get("sells_5m", 0) or 0,
+                        source="gmgn",
+                    )
+                    tokens.append(token)
+        except Exception as e:
+            logger.debug(f"GMGN new pairs scan error: {e}")
+        if tokens:
+            logger.info(f"GMGN backup: found {len(tokens)} fresh pairs")
+        return tokens
+
+    async def _scan_birdeye_new(self) -> List[TokenInfo]:
+        """Backup scan: Birdeye new tokens (requires BIRDEYE_API_KEY)."""
+        tokens = []
+        try:
+            key = os.environ.get("BIRDEYE_API_KEY", "")
+            if not key:
+                return tokens
+            url = f"{BIRDEYE_BASE_URL}/defi/v3/token/new_listing"
+            headers = {"X-API-KEY": key, "x-chain": "solana"}
+            params = {"limit": 15, "sort_by": "created_at", "sort_type": "desc"}
+            async with self.session.get(url, headers=headers, params=params,
+                                        timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return tokens
+                data = await resp.json()
+                items = data.get("data", {}).get("items", []) if isinstance(data.get("data"), dict) else []
+                for item in items[:10]:
+                    addr = item.get("address", "")
+                    if not addr or addr in self.seen_tokens:
+                        continue
+                    token = await self._fetch_token_data(addr)
+                    if token:
+                        token.source = "birdeye"
+                        tokens.append(token)
+        except Exception as e:
+            logger.debug(f"Birdeye new tokens scan error: {e}")
+        if tokens:
+            logger.info(f"Birdeye backup: found {len(tokens)} fresh tokens")
+        return tokens
+
     async def _fetch_token_data(self, address: str) -> Optional[TokenInfo]:
-        """Fetch detailed token data from DexScreener."""
+        """Fetch detailed token data from DexScreener, with Birdeye fallback."""
         try:
             url = f"{DEXSCREENER_TOKENS}/{address}"
             async with self.session.get(url) as resp:
@@ -2728,8 +2875,39 @@ class DegenTrader:
                     sell_count_5m=int(txns_5m.get("sells", 0) or 0),
                 )
         except Exception as e:
-            logger.debug(f"Fetch token error {address}: {e}")
-            return None
+            logger.debug(f"DexScreener fetch error {address}: {e}")
+
+        # Birdeye fallback (if DexScreener rate-limited or failed)
+        try:
+            birdeye_key = os.environ.get("BIRDEYE_API_KEY", "")
+            if birdeye_key:
+                url = f"{BIRDEYE_BASE_URL}/defi/v3/token/overview"
+                headers = {"X-API-KEY": birdeye_key, "x-chain": "solana"}
+                params = {"address": address}
+                async with self.session.get(url, headers=headers, params=params,
+                                            timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        d = data.get("data", {})
+                        if d:
+                            return TokenInfo(
+                                address=address,
+                                symbol=d.get("symbol", "???"),
+                                name=d.get("name", "Unknown"),
+                                pair_address="",
+                                price_usd=float(d.get("price", 0) or 0),
+                                liquidity_usd=float(d.get("liquidity", 0) or 0),
+                                volume_24h=float(d.get("v24hUSD", 0) or 0),
+                                age_minutes=0,
+                                fdv=float(d.get("mc", 0) or 0),  # market cap as FDV proxy
+                                buy_count_5m=int(d.get("buy24h", 0) or 0),
+                                sell_count_5m=int(d.get("sell24h", 0) or 0),
+                                source="birdeye_fallback",
+                            )
+        except Exception as e:
+            logger.debug(f"Birdeye fallback error {address}: {e}")
+
+        return None
 
     # ----------------------------------------------------------
     # TOKEN SCORING (enhanced)
@@ -3360,8 +3538,19 @@ class DegenTrader:
                         logger.info(
                             f"VELOCITY DROP: ${pos.symbol} | vel {current_velocity:.1f}/min "
                             f"(peak {pos.peak_velocity:.1f}/min, now {velocity_ratio:.0%}) | "
-                            f"PnL {price_mult:.2f}x | selling"
+                            f"PnL {price_mult:.2f}x | selling — adding to RE-ENTRY watchlist"
                         )
+                        # Add to re-entry watchlist BEFORE selling so we keep watching
+                        if self.config.reentry_enabled:
+                            self._reentry_watchlist[addr] = {
+                                "symbol": pos.symbol,
+                                "sold_at": time.time(),
+                                "sold_price": token.price_usd if token else 0,
+                                "peak_velocity": pos.peak_velocity,
+                                "entry_velocity": pos.entry_velocity,
+                                "source": pos.source,
+                                "pnl_at_sell": price_mult,
+                            }
                         await self.execute_sell(addr, reason=f"velocity_drop_{velocity_ratio:.0%}_of_peak")
                         continue
 
@@ -3383,6 +3572,8 @@ class DegenTrader:
         logger.info(f"Pump.fun:   {'ON' if self.pump_monitor else 'OFF'}")
         logger.info(f"BondCurve:  {'ON' if self.curve_engine else 'OFF'} (PumpPortal: {'ON' if self.config.use_pumpportal else 'OFF'})")
         logger.info(f"InstSnipe:  {'ON' if self.config.instant_snipe else 'OFF'} (dev buy >= {self.config.instant_snipe_min_dev_sol} SOL → instant {self.config.instant_snipe_max_sol} SOL)")
+        logger.info(f"BundleSnipe:{'ON' if self.config.bundle_snipe else 'OFF'} ({self.config.bundle_min_buys}+ buys in {self.config.bundle_window_sec}s → {self.config.bundle_snipe_max_sol} SOL)")
+        logger.info(f"Re-Entry:   {'ON' if self.config.reentry_enabled else 'OFF'} (vel>={self.config.reentry_velocity_min}/min | qPredict>50% → {self.config.reentry_max_sol} SOL, SL {self.config.reentry_stop_loss:.0%})")
         logger.info(f"Sniper:     {'ON' if self.config.sniper_mode else 'OFF'} (max {self.config.bonding_curve_max_sol} SOL, <{self.config.bonding_curve_max_progress}% curve)")
         logger.info(f"FreshOnly:  <{self.config.max_age_minutes}min | FDV cap: ${self.config.max_fdv:,.0f} | Liq: ${self.config.min_liquidity:,.0f}-${self.config.max_liquidity:,.0f}")
         logger.info(f"CabalFollow: {'ON' if self.config.use_cabal_follow else 'OFF'} (FDV<${self.config.cabal_follow_max_fdv:,.0f}, {self.config.cabal_follow_min_wallets}+ wallets, vel-drop sell at {self.config.velocity_drop_sell_pct:.0%})")
@@ -3449,6 +3640,34 @@ class DegenTrader:
                             )
                             await self.execute_sniper_buy(signal, self.config.instant_snipe_max_sol)
                             await asyncio.sleep(0.2)  # minimal delay — speed is everything
+
+                    # v3.7: BUNDLE SNIPE — coordinated buys detected
+                    if (self.pump_monitor and self.curve_engine
+                            and self.config.bundle_snipe and self.config.sniper_mode):
+                        bundle_sigs = []
+                        while not self.pump_monitor.bundle_signals.empty():
+                            try:
+                                sig = self.pump_monitor.bundle_signals.get_nowait()
+                                bundle_sigs.append(sig)
+                            except asyncio.QueueEmpty:
+                                break
+                        for signal in bundle_sigs[:2]:
+                            mint = signal.get("mint", "")
+                            if mint in self.positions or mint in self._sniper_bought:
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < self.config.bundle_snipe_max_sol:
+                                break
+                            logger.info(
+                                f"BUNDLE SNIPE: ${signal.get('symbol', '?')} | "
+                                f"{signal.get('bundle_buys', 0)} buys in 5s | "
+                                f"{signal.get('unique_buyers', 0)} unique wallets | "
+                                f"buying {self.config.bundle_snipe_max_sol} SOL"
+                            )
+                            await self.execute_sniper_buy(signal, self.config.bundle_snipe_max_sol)
+                            await asyncio.sleep(0.2)
 
                     # v3.5: Process sniper signals (momentum-based, bonding curve)
                     if self.pump_monitor and self.curve_engine and self.config.sniper_mode:
@@ -3658,6 +3877,78 @@ class DegenTrader:
                         await self.execute_buy(token, self.config.max_position_sol)
                         await asyncio.sleep(1)
 
+                    # v3.7: RE-ENTRY CHECK — watch dumped tokens, buy back on strength
+                    if self.config.reentry_enabled and self._reentry_watchlist and self.pump_monitor:
+                        expired = []
+                        for mint, watch in self._reentry_watchlist.items():
+                            # Expire after 15 min
+                            if time.time() - watch.get("sold_at", 0) > 900:
+                                expired.append(mint)
+                                continue
+                            # Already re-entered
+                            if mint in self.positions:
+                                expired.append(mint)
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+                            # Check current velocity from PumpPortal
+                            current_vel = self.pump_monitor.get_buy_velocity(mint)
+                            stats = self.pump_monitor.hot_tokens.get(mint, {})
+                            if not stats:
+                                continue
+                            buys_now = stats.get("buys", 0)
+                            unique_now = len(stats.get("unique_buyers", set()))
+
+                            # Re-entry triggers:
+                            # 1. Velocity resurgence (exceeds our min threshold)
+                            # 2. Quantum wallet prediction targets this token
+                            # 3. More unique buyers piling in
+                            velocity_strong = current_vel >= self.config.reentry_velocity_min
+                            quantum_predicted = (self.wallet_predictor
+                                                 and mint in self.wallet_predictor.predictions
+                                                 and self.wallet_predictor.predictions[mint].get("confidence", 0) > 0.5)
+
+                            if velocity_strong or quantum_predicted:
+                                balance = await self.get_sol_balance()
+                                if balance - self.config.reserve_sol < self.config.reentry_max_sol:
+                                    break
+                                reason_parts = []
+                                if velocity_strong:
+                                    reason_parts.append(f"vel={current_vel:.1f}/min")
+                                if quantum_predicted:
+                                    qconf = self.wallet_predictor.predictions[mint].get("confidence", 0)
+                                    reason_parts.append(f"qPredict={qconf:.0%}")
+                                reason = " + ".join(reason_parts)
+                                logger.info(
+                                    f"RE-ENTRY: ${watch.get('symbol', '?')} | {reason} | "
+                                    f"{buys_now} buys ({unique_now} unique) | "
+                                    f"was sold at {watch.get('pnl_at_sell', 0):.2f}x — buying back with stop loss"
+                                )
+                                # Build signal and buy
+                                signal = {
+                                    "mint": mint,
+                                    "symbol": watch.get("symbol", ""),
+                                    "buys": buys_now,
+                                    "unique_buyers": unique_now,
+                                    "velocity": current_vel,
+                                    "creator": "",
+                                    "platform": stats.get("platform", PLATFORM_PUMP),
+                                    "instant_snipe": True,
+                                    "dev_buy_sol": 0,
+                                }
+                                result = await self.execute_sniper_buy(signal, self.config.reentry_max_sol)
+                                if result and mint in self.positions:
+                                    # Apply tight stop loss for re-entry
+                                    self.positions[mint].stop_loss = self.config.reentry_stop_loss
+                                    self.positions[mint].source = "reentry"
+                                    self.positions[mint].entry_velocity = current_vel
+                                    self.positions[mint].peak_velocity = current_vel
+                                    logger.info(f"RE-ENTRY OK: ${watch.get('symbol', '?')} | stop loss at {self.config.reentry_stop_loss:.0%}")
+                                expired.append(mint)
+                                await asyncio.sleep(0.3)
+                        for mint in expired:
+                            self._reentry_watchlist.pop(mint, None)
+
                 await asyncio.sleep(self.config.scan_interval)
 
             except asyncio.CancelledError:
@@ -3791,6 +4082,8 @@ class DegenTrader:
                 "hot_tokens_tracked": len(self.pump_monitor.hot_tokens) if self.pump_monitor else 0,
                 "wallets_tracked": len(self.pump_monitor._wallet_token_buys) if self.pump_monitor else 0,
                 "platform_counts": self.pump_monitor.platform_counts if self.pump_monitor else {},
+                "bundles_detected": len(self.pump_monitor._bundle_detected) if self.pump_monitor else 0,
+                "reentry_watchlist": len(self._reentry_watchlist),
             },
             "sniper_feed": self.pump_monitor.get_sniper_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
             "cabal_feed": self.pump_monitor.get_cabal_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
