@@ -685,6 +685,29 @@ async function poll(){
         document.getElementById('fcX').textContent=xFeed.length;
       }
 
+      // Quantum prediction feed
+      const predFeed=d.prediction_feed||[];
+      const predStats=d.prediction_stats||{};
+      if(predFeed.length>0||predStats.wallets_modeled>0){
+        const qEl=document.getElementById('fQ');
+        qEl.querySelectorAll('.live-pred').forEach(e=>e.remove());
+        predFeed.forEach(p=>{
+          const confPct=Math.round(p.confidence*100);
+          const confCls=confPct>=70?'t-fresh':confPct>=50?'t-lowcap':'t-x';
+          const qf=p.quantum_factor||0.5;
+          const qCls=qf>0.7?'t-sniper':qf>0.4?'t-quantum':'t-x';
+          const html=`<span class="fi-t">${p.age_seconds||0}s</span><span class="fi-c"><span class="tag t-quantum">PREDICT</span> $${p.symbol} <strong>${p.predicted_buyers}</strong> wallets predicted | conf: <span class="tag ${confCls}">${confPct}%</span> | q: <span class="tag ${qCls}">${qf.toFixed(2)}</span> | ${p.current_buys} buys now</span>`;
+          const div=document.createElement('div');div.className='fi live-pred';div.innerHTML=html;
+          qEl.appendChild(div);
+        });
+        document.getElementById('fcQ').textContent=predFeed.length;
+        // Update memory bar with prediction stats
+        if(predStats.wallets_modeled>0){
+          const mHotEl=document.getElementById('mHot');
+          mHotEl.textContent=(intel.hot_tokens_tracked||0)+' ('+predStats.wallets_modeled+'w)';
+        }
+      }
+
       // Positions with velocity tracking
       const pe2=document.getElementById('bpPos');const positions=d.positions||{};
       if(Object.keys(positions).length>0){

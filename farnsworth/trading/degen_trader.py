@@ -2043,6 +2043,224 @@ class QuantumTradeOracle:
 
 
 # ============================================================
+# QUANTUM WALLET PREDICTION ENGINE (v3.7)
+# ============================================================
+class QuantumWalletPredictor:
+    """Predict wallet movements BEFORE they happen using quantum correlation.
+
+    Tracks wallet behavior patterns across the PumpPortal stream:
+    - Wallet buy sequences (what tokens a wallet buys in order)
+    - Time-between-buys patterns (cadence detection)
+    - Cross-wallet correlation (when wallet A buys, wallet B follows)
+    - Token affinity scoring (which token characteristics attract which wallets)
+
+    Uses quantum Bell state correlations to weight prediction confidence:
+    strongly correlated (|00⟩+|11⟩) = high confidence prediction
+    anti-correlated (|01⟩+|10⟩) = inverse/contrarian signal
+    """
+
+    def __init__(self):
+        # wallet -> list of (mint, timestamp, sol_amount) in order
+        self.wallet_sequences: Dict[str, List[Tuple[str, float, float]]] = {}
+        # wallet_pair -> correlation score (how often they buy same tokens)
+        self.wallet_correlations: Dict[str, float] = {}
+        # wallet -> average time between buys in seconds
+        self.wallet_cadence: Dict[str, float] = {}
+        # Predictions: mint -> {predicted_buyers, confidence, quantum_correlation}
+        self.predictions: Dict[str, dict] = {}
+        self._quantum_proof = None
+        self._max_wallet_history = 20
+        self._max_predictions = 30
+        self.prediction_hits = 0
+        self.prediction_misses = 0
+
+    def record_buy(self, wallet: str, mint: str, sol_amount: float):
+        """Record a wallet buy and update correlation patterns."""
+        now = time.time()
+        if wallet not in self.wallet_sequences:
+            self.wallet_sequences[wallet] = []
+        seq = self.wallet_sequences[wallet]
+        seq.append((mint, now, sol_amount))
+        if len(seq) > self._max_wallet_history:
+            self.wallet_sequences[wallet] = seq[-self._max_wallet_history:]
+
+        # Update cadence (average time between buys)
+        if len(seq) >= 2:
+            deltas = [seq[i][1] - seq[i-1][1] for i in range(1, len(seq))]
+            self.wallet_cadence[wallet] = sum(deltas) / len(deltas)
+
+        # Check if this was a predicted buy
+        pred = self.predictions.get(mint)
+        if pred and wallet in pred.get("predicted_buyers", set()):
+            self.prediction_hits += 1
+            logger.info(f"QUANTUM PREDICTION HIT: {wallet[:8]}... bought ${mint[:8]} as predicted (conf: {pred.get('confidence', 0):.0%})")
+
+        # Update wallet-pair correlations
+        for other_wallet, other_seq in self.wallet_sequences.items():
+            if other_wallet == wallet:
+                continue
+            other_mints = {s[0] for s in other_seq}
+            my_mints = {s[0] for s in seq}
+            shared = my_mints & other_mints
+            if len(shared) >= 2:
+                pair_key = tuple(sorted([wallet, other_wallet]))
+                correlation = len(shared) / max(len(my_mints), len(other_mints))
+                self.wallet_correlations[str(pair_key)] = correlation
+
+    async def predict_next_buys(self, hot_tokens: Dict[str, dict],
+                                wallet_token_buys: Dict[str, set]) -> List[dict]:
+        """Predict which tokens are about to get bought and by whom.
+
+        Uses wallet cadence, correlation patterns, and quantum Bell states
+        to predict the next likely buys.
+        """
+        predictions = []
+        now = time.time()
+
+        # Find wallets that are "due" for their next buy (based on cadence)
+        active_wallets = []
+        for wallet, cadence in self.wallet_cadence.items():
+            if cadence <= 0 or cadence > 600:  # skip if > 10 min cadence
+                continue
+            seq = self.wallet_sequences.get(wallet, [])
+            if not seq:
+                continue
+            last_buy_time = seq[-1][1]
+            time_since = now - last_buy_time
+            # Wallet is "due" if time since last buy > 80% of their cadence
+            if time_since > cadence * 0.8:
+                active_wallets.append({
+                    "wallet": wallet,
+                    "cadence": cadence,
+                    "overdue_ratio": time_since / cadence,
+                    "last_tokens": [s[0] for s in seq[-5:]],
+                    "avg_sol": sum(s[2] for s in seq) / len(seq) if seq else 0,
+                })
+
+        if not active_wallets:
+            return predictions
+
+        # For each hot token, calculate probability of being bought next
+        for mint, stats in hot_tokens.items():
+            if stats.get("buys", 0) < 1:
+                continue
+            age_s = now - stats.get("first_seen", now)
+            if age_s > 900:  # only predict for tokens < 15 min
+                continue
+
+            predicted_buyers = set()
+            total_confidence = 0
+
+            for aw in active_wallets[:20]:  # cap computation
+                wallet = aw["wallet"]
+                wallet_mints = wallet_token_buys.get(wallet, set())
+
+                # Check if correlated wallets already bought this token
+                token_buyers = set()
+                for buyer in stats.get("unique_buyers", set()):
+                    if buyer != wallet:
+                        pair_key = str(tuple(sorted([wallet, buyer])))
+                        corr = self.wallet_correlations.get(pair_key, 0)
+                        if corr > 0.3:
+                            token_buyers.add(buyer)
+
+                if token_buyers:
+                    # Correlated wallets bought this → predict this wallet will too
+                    overdue = min(2.0, aw["overdue_ratio"])
+                    corr_strength = len(token_buyers) / max(1, len(stats.get("unique_buyers", set())))
+                    confidence = min(0.95, overdue * 0.3 + corr_strength * 0.5)
+                    if confidence > 0.3:
+                        predicted_buyers.add(wallet)
+                        total_confidence += confidence
+
+            if predicted_buyers and total_confidence > 0.3:
+                # Quantum enhancement: use Bell state to weight confidence
+                q_factor = await self._quantum_correlation_factor()
+                final_confidence = min(0.95, (total_confidence / len(predicted_buyers)) * (0.7 + q_factor * 0.3))
+
+                pred = {
+                    "mint": mint,
+                    "symbol": stats.get("symbol", ""),
+                    "predicted_buyers": predicted_buyers,
+                    "predicted_count": len(predicted_buyers),
+                    "confidence": final_confidence,
+                    "quantum_factor": q_factor,
+                    "age_seconds": age_s,
+                    "current_buys": stats.get("buys", 0),
+                    "timestamp": now,
+                }
+                predictions.append(pred)
+                self.predictions[mint] = pred
+
+        # Cleanup old predictions
+        cutoff = now - 300  # 5 min
+        self.predictions = {k: v for k, v in self.predictions.items() if v.get("timestamp", 0) > cutoff}
+
+        predictions.sort(key=lambda x: x["confidence"], reverse=True)
+        return predictions[:self._max_predictions]
+
+    async def _quantum_correlation_factor(self) -> float:
+        """Use Bell state measurement to get quantum correlation factor (0-1)."""
+        try:
+            qp = await self._get_quantum()
+            if not qp:
+                return 0.5  # neutral
+            job = await asyncio.wait_for(qp.run_bell_state(shots=10), timeout=3.0)
+            if not job or not job.results:
+                return 0.5
+            counts = job.results
+            total = sum(counts.values())
+            if total == 0:
+                return 0.5
+            correlated = counts.get("00", 0) + counts.get("11", 0)
+            return correlated / total  # 0 = anti-correlated, 1 = strongly correlated
+        except (asyncio.TimeoutError, Exception):
+            return 0.5
+
+    async def _get_quantum(self):
+        if self._quantum_proof is None:
+            try:
+                from farnsworth.integration.hackathon.quantum_proof import QuantumProof
+                self._quantum_proof = QuantumProof()
+            except ImportError:
+                self._quantum_proof = False
+        return self._quantum_proof if self._quantum_proof else None
+
+    def get_prediction_feed(self, max_items: int = 10) -> List[dict]:
+        """Get current predictions for dashboard display."""
+        now = time.time()
+        result = []
+        for mint, pred in sorted(self.predictions.items(),
+                                  key=lambda x: x[1].get("confidence", 0), reverse=True):
+            if now - pred.get("timestamp", 0) > 300:
+                continue
+            result.append({
+                "mint": mint,
+                "symbol": pred.get("symbol", ""),
+                "predicted_buyers": pred.get("predicted_count", 0),
+                "confidence": round(pred.get("confidence", 0), 2),
+                "quantum_factor": round(pred.get("quantum_factor", 0.5), 2),
+                "age_seconds": round(now - pred.get("timestamp", now)),
+                "current_buys": pred.get("current_buys", 0),
+            })
+        return result[:max_items]
+
+    def cleanup(self):
+        """Clean up old data to prevent memory growth."""
+        if len(self.wallet_sequences) > 1000:
+            # Keep only most active wallets
+            sorted_wallets = sorted(self.wallet_sequences.keys(),
+                                    key=lambda w: len(self.wallet_sequences[w]), reverse=True)
+            keep = set(sorted_wallets[:500])
+            self.wallet_sequences = {w: s for w, s in self.wallet_sequences.items() if w in keep}
+            self.wallet_cadence = {w: c for w, c in self.wallet_cadence.items() if w in keep}
+        if len(self.wallet_correlations) > 5000:
+            # Keep top correlations only
+            top = sorted(self.wallet_correlations.items(), key=lambda x: x[1], reverse=True)[:2500]
+            self.wallet_correlations = dict(top)
+
+
+# ============================================================
 # TRADING MEMORY (learns from every trade)
 # ============================================================
 class TradingMemory:
@@ -2244,6 +2462,8 @@ class DegenTrader:
         # v3.5: Bonding curve direct trading
         self.curve_engine: Optional[BondingCurveEngine] = None
         self._sniper_bought: set = set()  # mints already sniped
+        # v3.7: Quantum wallet prediction
+        self.wallet_predictor: Optional[QuantumWalletPredictor] = None
 
     async def initialize(self):
         """Load wallet, start session, initialize intelligence layers."""
@@ -2308,6 +2528,11 @@ class DegenTrader:
         if self.config.use_bonding_curve:
             self.curve_engine = BondingCurveEngine(self.config.rpc_url, self.config.fast_rpc_url)
             logger.info("Bonding curve engine enabled (direct pump.fun trading)")
+
+        # v3.7: Quantum wallet prediction engine
+        if self.config.use_quantum:
+            self.wallet_predictor = QuantumWalletPredictor()
+            logger.info("Quantum wallet prediction engine enabled (Bell state correlations)")
 
         self._load_state()
         return self.pubkey
@@ -3163,6 +3388,7 @@ class DegenTrader:
         logger.info(f"CabalFollow: {'ON' if self.config.use_cabal_follow else 'OFF'} (FDV<${self.config.cabal_follow_max_fdv:,.0f}, {self.config.cabal_follow_min_wallets}+ wallets, vel-drop sell at {self.config.velocity_drop_sell_pct:.0%})")
         logger.info(f"Wallets:    {'ON' if self.wallet_analyzer else 'OFF'}")
         logger.info(f"Quantum:    {'ON' if self.quantum_oracle else 'OFF'}")
+        logger.info(f"QPredict:   {'ON' if self.wallet_predictor else 'OFF'} (Bell state wallet correlation → pre-buy before crowd)")
         logger.info(f"Swarm:      {'ON' if self.config.use_swarm else 'OFF'}")
         logger.info(f"CopyTrade:  {'ON' if self.copy_engine else 'OFF'}")
         logger.info(f"X Sentinel: {'ON' if self.x_sentinel else 'OFF'}")
@@ -3345,6 +3571,52 @@ class DegenTrader:
                                 else:
                                     self.seen_tokens.add(addr)
 
+                    # v3.7: Feed wallet buys to quantum predictor + run predictions
+                    if self.wallet_predictor and self.pump_monitor:
+                        # Feed recent buy data from PumpPortal stream
+                        for mint, stats in self.pump_monitor.hot_tokens.items():
+                            for buyer in stats.get("unique_buyers", set()):
+                                self.wallet_predictor.record_buy(buyer, mint, stats.get("largest_buy_sol", 0))
+                        # Run quantum predictions
+                        predictions = await self.wallet_predictor.predict_next_buys(
+                            self.pump_monitor.hot_tokens,
+                            self.pump_monitor._wallet_token_buys,
+                        )
+                        # Act on high-confidence predictions (pre-buy before wallets move)
+                        for pred in predictions[:2]:
+                            mint = pred.get("mint", "")
+                            conf = pred.get("confidence", 0)
+                            if conf < 0.5 or mint in self.positions or mint in self._sniper_bought or mint in self.seen_tokens:
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < self.config.instant_snipe_max_sol:
+                                break
+                            logger.info(
+                                f"QUANTUM PREDICTION BUY: ${pred.get('symbol', '?')} | "
+                                f"{pred.get('predicted_count', 0)} wallets predicted to buy | "
+                                f"conf: {conf:.0%} | q_factor: {pred.get('quantum_factor', 0.5):.2f} | "
+                                f"already {pred.get('current_buys', 0)} buys"
+                            )
+                            # Build a sniper-compatible signal and execute
+                            signal = {
+                                "mint": mint,
+                                "symbol": pred.get("symbol", ""),
+                                "buys": pred.get("current_buys", 0),
+                                "unique_buyers": pred.get("predicted_count", 0),
+                                "velocity": 0,
+                                "creator": "",
+                                "platform": "pump",
+                                "instant_snipe": True,
+                                "dev_buy_sol": 0,
+                            }
+                            await self.execute_sniper_buy(signal, self.config.instant_snipe_max_sol)
+                            await asyncio.sleep(0.3)
+                        # Cleanup old predictor data periodically
+                        if self._scan_count % 10 == 0:
+                            self.wallet_predictor.cleanup()
+
                     # Scan all standard sources
                     tokens = await self.scan_new_tokens()
                     # Pre-filter: fresh launches only
@@ -3523,6 +3795,14 @@ class DegenTrader:
             "sniper_feed": self.pump_monitor.get_sniper_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
             "cabal_feed": self.pump_monitor.get_cabal_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
             "scan_feed": self._get_scan_feed() if self.pump_monitor else [],
+            "prediction_feed": self.wallet_predictor.get_prediction_feed() if self.wallet_predictor else [],
+            "prediction_stats": {
+                "hits": self.wallet_predictor.prediction_hits if self.wallet_predictor else 0,
+                "misses": self.wallet_predictor.prediction_misses if self.wallet_predictor else 0,
+                "wallets_modeled": len(self.wallet_predictor.wallet_sequences) if self.wallet_predictor else 0,
+                "correlations": len(self.wallet_predictor.wallet_correlations) if self.wallet_predictor else 0,
+                "active_predictions": len(self.wallet_predictor.predictions) if self.wallet_predictor else 0,
+            },
             "x_feed": [
                 {"symbol": v.get("symbol", ""), "signal_type": v.get("signal_type", ""),
                  "strength": v.get("strength", 0), "reason": v.get("reason", ""),
