@@ -1101,6 +1101,13 @@ try:
 except ImportError as e:
     logging.warning(f"VTuber module not available: {e}")
 
+# Register DEXAI routes (proxy to Node.js server on port 3847)
+try:
+    from farnsworth.dex.dex_proxy import register_dex_routes
+    register_dex_routes(app)
+except ImportError as e:
+    logging.warning(f"DEXAI module not available: {e}")
+
 # Mount uploads directory for AutoGram avatars and post images
 UPLOADS_DIR = WEB_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1200,6 +1207,13 @@ try:
     logger.info("Route module loaded: skills")
 except Exception as e:
     logger.warning(f"Failed to load skills routes: {e}")
+
+try:
+    from farnsworth.web.routes.cli_bridge_api import router as cli_bridge_router
+    app.include_router(cli_bridge_router, tags=["CLI Bridge"])
+    logger.info("Route module loaded: cli_bridge_api")
+except Exception as e:
+    logger.warning(f"Failed to load cli_bridge_api routes: {e}")
 
 
 # ============================================
@@ -4446,6 +4460,63 @@ async def vtuber_panel(request: Request):
     return HTMLResponse("<h1>VTuber Panel Not Found</h1>", status_code=404)
 
 
+# DEXAI - Farnsworth AI-Powered DEX Screener
+# ==========================================
+
+# 1. API Proxy for DEXAI backend (Must come BEFORE static mount)
+DEXAI_BACKEND_URL = os.getenv("DEXAI_URL", "http://localhost:3847")
+
+@app.api_route("/api/dex/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def dex_api_proxy(path: str, request: Request):
+    """Proxy DEXAI API requests to the Node.js backend."""
+    import httpx
+    # Ensure correct URL construction
+    url = f"{DEXAI_BACKEND_URL}/api/{path}"
+    if request.query_params:
+        url += f"?{request.query_params}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            if request.method == "GET":
+                resp = await client.get(url)
+            else:
+                body = await request.body()
+                resp = await client.request(
+                    method=request.method,
+                    url=url,
+                    content=body,
+                    headers={"Content-Type": request.headers.get("content-type", "application/json")}
+                )
+            
+            from fastapi import Response
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                media_type=resp.headers.get("content-type", "application/json")
+            )
+    except httpx.ConnectError:
+        return JSONResponse({"error": "DEXAI backend not running", "hint": "Start the Node.js server on port 3847"}, status_code=502)
+    except Exception as e:
+        logger.error(f"DEXAI proxy error: {e}")
+        return JSONResponse({"error": "DEXAI unavailable"}, status_code=502)
+
+
+# 2. WebSocket Handler (Must come BEFORE static mount to prevent AssertionError)
+@app.websocket("/dex/ws")
+async def dex_ws_handler(websocket: WebSocket):
+    """Handle DEXAI WebSocket connections (graceful close to force polling)."""
+    await websocket.accept()
+    # Close immediately to signal client to fallback to polling
+    # (Full proxying would require 'websockets' lib which may not be present)
+    await websocket.close()
+
+
+# 3. Mount DEXAI Frontend (Serves index.html at /dex/ and assets at /dex/*)
+_dex_public = Path(__file__).parent.parent / "dex" / "public"
+if _dex_public.exists():
+    app.mount("/dex", StaticFiles(directory=str(_dex_public), html=True), name="dex")
+
+
 # ==========================================================================
 # TRADING API ENDPOINTS
 # ==========================================================================
@@ -4456,7 +4527,7 @@ async def trading_status():
     """Get current trader status, positions, PnL."""
     if _trader_instance is None:
         return {"running": False, "message": "Trader not started"}
-    return _trader_instance.status()
+    return await _trader_instance.status()
 
 @app.post("/api/trading/start")
 async def trading_start(request: Request):
@@ -4465,29 +4536,37 @@ async def trading_start(request: Request):
     if _trader_instance and _trader_instance.running:
         return {"status": "already_running", "wallet": _trader_instance.pubkey}
     try:
-        from farnsworth.trading.degen_trader import DegenTrader, TraderConfig
+        from farnsworth.trading.degen_trader import DegenTrader, TraderConfig, _FarnsworthAuthLock
+        # Generate session token so the trader knows it's running inside Farnsworth
+        _FarnsworthAuthLock.generate_session_token()
         body = await request.json() if request.headers.get("content-type") == "application/json" else {}
-        config = TraderConfig(
-            rpc_url=body.get("rpc_url", os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")),
-            fast_rpc_url=body.get("fast_rpc_url", os.environ.get("ALCHEMY_SOLANA_RPC", "")),
-            max_position_sol=float(body.get("max_position_sol", 0.1)),
-            max_positions=int(body.get("max_positions", 10)),
-            scan_interval=int(body.get("scan_interval", 5)),
-            use_swarm=body.get("use_swarm", True),
-            use_cabal_follow=body.get("use_cabal_follow", True),
-            cabal_follow_max_fdv=float(body.get("cabal_follow_max_fdv", 100000)),
-            velocity_drop_sell_pct=float(body.get("velocity_drop_sell_pct", 0.4)),
-            instant_snipe=body.get("instant_snipe", True),
-            instant_snipe_min_dev_sol=float(body.get("instant_snipe_min_dev_sol", 7.0)),
-            instant_snipe_max_sol=float(body.get("instant_snipe_max_sol", 0.06)),
-            bundle_snipe=body.get("bundle_snipe", True),
-            bundle_min_buys=int(body.get("bundle_min_buys", 3)),
-            bundle_snipe_max_sol=float(body.get("bundle_snipe_max_sol", 0.06)),
-            reentry_enabled=body.get("reentry_enabled", True),
-            reentry_velocity_min=float(body.get("reentry_velocity_min", 3.0)),
-            reentry_max_sol=float(body.get("reentry_max_sol", 0.05)),
-            reentry_stop_loss=float(body.get("reentry_stop_loss", 0.25)),
-        )
+        # v4.0: Use TraderConfig class defaults (tightened in v4.0)
+        # Only override fields explicitly passed in the request body
+        helius_key = body.get("helius_api_key", os.environ.get("HELIUS_API_KEY", ""))
+        config_kwargs = {
+            "rpc_url": body.get("rpc_url", os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")),
+            "fast_rpc_url": body.get("fast_rpc_url", os.environ.get("ALCHEMY_SOLANA_RPC", "")),
+            "helius_api_key": helius_key,
+            "helius_rpc_url": f"https://mainnet.helius-rpc.com/?api-key={helius_key}" if helius_key else "",
+        }
+        # Map of optional overrides — only set if present in request body
+        optional_fields = {
+            "max_position_sol": float, "max_positions": int, "scan_interval": int,
+            "use_swarm": bool, "use_cabal_follow": bool, "cabal_follow_max_fdv": float,
+            "velocity_drop_sell_pct": float, "instant_snipe": bool,
+            "instant_snipe_min_dev_sol": float, "instant_snipe_max_sol": float,
+            "bundle_snipe": bool, "bundle_min_buys": int, "bundle_snipe_max_sol": float,
+            "reentry_enabled": bool, "reentry_velocity_min": float,
+            "reentry_max_sol": float, "reentry_stop_loss": float,
+            "quick_take_profit": float, "quick_take_profit_2": float,
+            "max_hold_minutes": float, "dynamic_adapt": bool,
+            "bonding_curve_min_buys": int, "bonding_curve_min_velocity": float,
+            "min_score": float,
+        }
+        for field, cast in optional_fields.items():
+            if field in body:
+                config_kwargs[field] = cast(body[field])
+        config = TraderConfig(**config_kwargs)
         _trader_instance = DegenTrader(config=config, wallet_name=body.get("wallet_name", "degen_trader"))
         asyncio.create_task(_trader_instance.run())
         await asyncio.sleep(2)  # let it initialize
@@ -4506,6 +4585,34 @@ async def trading_stop():
         return {"status": "stopped"}
     return {"status": "not_running"}
 
+@app.post("/api/trading/reset")
+async def trading_reset():
+    """v3.9: Reset PnL counters for fresh start."""
+    global _trader_instance
+    if _trader_instance:
+        _trader_instance.reset_pnl()
+        return {"status": "reset", "pnl": 0, "trades": 0}
+    return {"status": "not_running"}
+
+@app.get("/api/trading/learner")
+async def trading_learner():
+    """v4.0: Get adaptive learner status — what the bot has learned."""
+    if _trader_instance and _trader_instance.adaptive_learner:
+        return {
+            "status": _trader_instance.adaptive_learner.get_status(),
+            "summary": _trader_instance.adaptive_learner.get_learnings_summary(),
+            "config": {
+                "min_score": _trader_instance.config.min_score,
+                "bonding_curve_min_velocity": _trader_instance.config.bonding_curve_min_velocity,
+                "bonding_curve_min_buys": _trader_instance.config.bonding_curve_min_buys,
+                "quick_take_profit": _trader_instance.config.quick_take_profit,
+                "quick_take_profit_2": _trader_instance.config.quick_take_profit_2,
+                "max_hold_minutes": _trader_instance.config.max_hold_minutes,
+                "velocity_drop_sell_pct": _trader_instance.config.velocity_drop_sell_pct,
+            },
+        }
+    return {"status": "not_running"}
+
 @app.get("/api/trading/wallet")
 async def trading_wallet():
     """Get wallet public address."""
@@ -4522,6 +4629,35 @@ async def trading_wallet():
     except Exception:
         pass
     return {"wallet": None, "message": "No wallet found. Start the trader to create one."}
+
+@app.get("/api/trading/whales")
+async def trading_whales():
+    """v4.1: Get whale hunter status — tracked wallets, signals, mixer monitoring."""
+    if _trader_instance and _trader_instance.whale_hunter:
+        wh = _trader_instance.whale_hunter
+        return {
+            "status": wh.get_status(),
+            "whale_feed": wh.get_whale_feed(),
+            "mixer_fresh_wallets": len(wh._mixer_fresh_wallets),
+            "mixer_outflows": wh._mixer_outflows[-10:],
+            "top_wallets": [
+                {
+                    "address": addr[:12] + "...",
+                    "label": w.get("label", ""),
+                    "win_rate": w.get("win_rate", 0),
+                    "total_pnl_sol": w.get("total_pnl_sol", 0),
+                    "tags": w.get("tags", []),
+                    "connected": len(w.get("connected_wallets", [])),
+                    "last_active": w.get("last_active", 0),
+                }
+                for addr, w in sorted(
+                    wh.wallets.items(),
+                    key=lambda x: x[1].get("total_pnl_sol", 0),
+                    reverse=True,
+                )[:20]
+            ],
+        }
+    return {"status": "not_running"}
 
 
 # ==========================================================================
@@ -7016,3 +7152,4 @@ async def bot_tracker_regenerate_token(request: Request):
     except Exception as e:
         logger.error(f"Token regeneration failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+

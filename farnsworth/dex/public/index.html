@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEXAI - Farnsworth Collective DEX</title>
+<meta name="description" content="AI-powered DEX screener. Collective intelligence, quantum predictions, on-chain research. Powered by Farnsworth.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- Ambient particles -->
+<canvas id="ambientCanvas"></canvas>
+
+<!-- Header -->
+<header class="hdr">
+  <div class="hdr-left">
+    <a href="/" class="logo" onclick="goHome(event)">
+      <div class="logo-mark"><span class="logo-f">F</span></div>
+      <div class="logo-words">
+        <span class="logo-name">DEXAI</span>
+        <span class="logo-tag">by Farnsworth</span>
+      </div>
+    </a>
+    <nav class="nav" id="mainNav">
+      <button class="nav-btn active" data-sort="trending">Trending</button>
+      <button class="nav-btn" data-sort="volume">Volume</button>
+      <button class="nav-btn" data-sort="velocity">Velocity</button>
+      <button class="nav-btn" data-sort="new">New Pairs</button>
+      <button class="nav-btn" data-sort="gainers">Gainers</button>
+      <button class="nav-btn" data-sort="losers">Losers</button>
+    </nav>
+  </div>
+  <div class="hdr-right">
+    <div class="search-box">
+      <svg class="search-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+      <input type="text" id="searchInput" placeholder="Search token or paste address..." autocomplete="off">
+      <kbd class="search-kbd">/</kbd>
+      <div id="searchDrop" class="search-drop hidden"></div>
+    </div>
+    <div class="live-badge" id="liveBadge">
+      <span class="live-dot"></span>
+      <span id="liveCount">0</span> tokens
+    </div>
+    <button class="wallet-btn" id="walletBtn">Connect</button>
+  </div>
+</header>
+
+<!-- Ticker tape -->
+<div class="ticker" id="ticker"></div>
+
+<!-- ======== LIST VIEW ======== -->
+<main class="main" id="listView">
+  <div class="list-top">
+    <h2 class="view-title" id="viewTitle">Trending</h2>
+    <div class="list-meta">
+      <span class="meta-refresh" id="metaRefresh">Updated just now</span>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th class="th-rank">#</th>
+          <th class="th-token">Token</th>
+          <th class="th-price">Price</th>
+          <th class="th-chg sortable" data-key="m5">5m</th>
+          <th class="th-chg sortable" data-key="h1">1h</th>
+          <th class="th-chg sortable" data-key="h24">24h</th>
+          <th class="th-vol sortable" data-key="vol">Volume 24h</th>
+          <th class="th-liq sortable" data-key="liq">Liquidity</th>
+          <th class="th-mcap sortable" data-key="mcap">Mkt Cap</th>
+          <th class="th-txn">Txns</th>
+          <th class="th-ai">AI</th>
+          <th class="th-act"></th>
+        </tr>
+      </thead>
+      <tbody id="tblBody"></tbody>
+    </table>
+  </div>
+  <div class="load-more" id="loadMore">
+    <button class="load-btn" onclick="loadMore()">Load More</button>
+  </div>
+</main>
+
+<!-- ======== DETAIL VIEW ======== -->
+<div class="detail hidden" id="detailView">
+  <div class="detail-top">
+    <button class="back-btn" onclick="goBack()">
+      <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
+      Back
+    </button>
+    <div class="detail-token">
+      <img id="dImg" src="" alt="" class="detail-img">
+      <div>
+        <div class="detail-sym" id="dSym">---</div>
+        <div class="detail-name" id="dName">Loading...</div>
+      </div>
+    </div>
+    <div class="detail-addr-wrap">
+      <code class="detail-addr" id="dAddr">---</code>
+      <button class="copy-btn" onclick="copyAddr()">Copy</button>
+    </div>
+    <div class="detail-actions">
+      <button class="boost-btn" onclick="openBoost()">Boost</button>
+      <a class="dex-link" id="dDexLink" href="#" target="_blank">DexScreener</a>
+    </div>
+  </div>
+
+  <!-- Price banner -->
+  <div class="price-banner">
+    <div class="price-main">
+      <span class="price-big" id="dPrice">$0.00</span>
+      <span class="price-chg" id="dChg">+0.00%</span>
+    </div>
+    <div class="price-stats">
+      <div class="ps"><span class="ps-l">5m</span><span class="ps-v" id="dChg5m">--</span></div>
+      <div class="ps"><span class="ps-l">1h</span><span class="ps-v" id="dChg1h">--</span></div>
+      <div class="ps"><span class="ps-l">6h</span><span class="ps-v" id="dChg6h">--</span></div>
+      <div class="ps"><span class="ps-l">24h</span><span class="ps-v" id="dChg24h">--</span></div>
+    </div>
+    <div class="price-stats">
+      <div class="ps"><span class="ps-l">Volume 24h</span><span class="ps-v" id="dVol">--</span></div>
+      <div class="ps"><span class="ps-l">Liquidity</span><span class="ps-v" id="dLiq">--</span></div>
+      <div class="ps"><span class="ps-l">FDV</span><span class="ps-v" id="dFdv">--</span></div>
+      <div class="ps"><span class="ps-l">Mkt Cap</span><span class="ps-v" id="dMcap">--</span></div>
+    </div>
+  </div>
+
+  <!-- Detail grid -->
+  <div class="detail-grid">
+    <!-- Chart -->
+    <div class="card card-chart">
+      <div class="card-head">
+        <span>Chart</span>
+        <div class="tf-tabs" id="tfTabs">
+          <button class="tf active" data-tf="1m">1m</button>
+          <button class="tf" data-tf="5m">5m</button>
+          <button class="tf active" data-tf="15m">15m</button>
+          <button class="tf" data-tf="1h">1H</button>
+          <button class="tf" data-tf="4h">4H</button>
+          <button class="tf" data-tf="1d">1D</button>
+        </div>
+      </div>
+      <div id="chartContainer" class="chart-box"></div>
+    </div>
+
+    <!-- Buy/Sell pressure -->
+    <div class="card card-pressure">
+      <div class="card-head">Buy / Sell Pressure</div>
+      <div class="pressure-wrap">
+        <div class="pressure-bar"><div class="pressure-fill" id="pressureFill" style="width:50%"></div></div>
+        <div class="pressure-labels">
+          <span class="buys" id="dBuys">0 Buys</span>
+          <span class="sells" id="dSells">0 Sells</span>
+        </div>
+      </div>
+      <div class="txn-grid">
+        <div class="txn-cell"><span class="txn-l">5m</span><span class="txn-b" id="txB5m">0</span>/<span class="txn-s" id="txS5m">0</span></div>
+        <div class="txn-cell"><span class="txn-l">1h</span><span class="txn-b" id="txB1h">0</span>/<span class="txn-s" id="txS1h">0</span></div>
+        <div class="txn-cell"><span class="txn-l">6h</span><span class="txn-b" id="txB6h">0</span>/<span class="txn-s" id="txS6h">0</span></div>
+        <div class="txn-cell"><span class="txn-l">24h</span><span class="txn-b" id="txB24h">0</span>/<span class="txn-s" id="txS24h">0</span></div>
+      </div>
+    </div>
+
+    <!-- AI Collective -->
+    <div class="card card-ai">
+      <div class="card-head"><span class="ai-pulse"></span> Collective Analysis</div>
+      <div id="aiPanel" class="ai-panel">
+        <div class="ai-loading"><div class="ai-ring"></div><span>Querying the Collective...</span></div>
+      </div>
+    </div>
+
+    <!-- Quantum -->
+    <div class="card card-quantum">
+      <div class="card-head"><span class="q-icon">&#9883;</span> Quantum Simulation</div>
+      <div id="quantumPanel" class="quantum-panel">
+        <div class="q-loading"><div class="q-spinner"></div><span>Running simulations...</span></div>
+      </div>
+    </div>
+
+    <!-- Links -->
+    <div class="card card-links">
+      <div class="card-head">Links & Info</div>
+      <div id="linksPanel" class="links-panel"><span class="no-data">No verified links</span></div>
+    </div>
+
+    <!-- Pair info -->
+    <div class="card card-pair">
+      <div class="card-head">Pair Info</div>
+      <div id="pairPanel" class="pair-panel"><span class="no-data">--</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ======== BOOST MODAL ======== -->
+<div class="modal-overlay hidden" id="boostModal">
+  <div class="modal-bg" onclick="closeBoost()"></div>
+  <div class="modal">
+    <button class="modal-x" onclick="closeBoost()">&times;</button>
+    <h2 class="modal-title">Boost Token</h2>
+    <p class="modal-sub">Increase visibility in DEXAI rankings. First boost is open; additional boosts require Collective approval.</p>
+    <div class="boost-opts">
+      <div class="boost-opt selected" data-type="sol" onclick="selectBoostType(this)">
+        <div class="bo-icon">&#9788;</div>
+        <div class="bo-info"><strong>Pay with SOL</strong><br><small>$25 equivalent &rarr; Farnsworth ecosystem</small></div>
+      </div>
+      <div class="boost-opt" data-type="farns" onclick="selectBoostType(this)">
+        <div class="bo-badge">BURN</div>
+        <div class="bo-icon">&#x1F525;</div>
+        <div class="bo-info"><strong>Pay with FARNS</strong><br><small>$25 equivalent &rarr; permanently burned!</small></div>
+      </div>
+    </div>
+    <button class="boost-confirm" onclick="confirmBoost()">Confirm Boost</button>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toasts" class="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
