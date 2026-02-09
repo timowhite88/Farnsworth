@@ -36,6 +36,12 @@ const xOAuthState = new Map();
 const FETCH_INTERVAL = 30000;
 const COLLECTIVE_FETCH_INTERVAL = 60000;
 
+// Real-time price APIs (Birdeye + Jupiter)
+const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY || 'c9d915af3f1f49ec9c017e89dbb77784';
+const JUPITER_API_KEY = process.env.JUPITER_API_KEY || 'c872736b-676d-4279-a76c-93515999cd70';
+const BIRDEYE_BASE = 'https://public-api.birdeye.so';
+const JUPITER_PRICE_BASE = 'https://api.jup.ag/price/v2';
+
 // Platform suffixes for main list filtering
 const ALLOWED_SUFFIXES = ['pump', 'bonk', 'bags'];
 
@@ -935,18 +941,149 @@ app.post('/api/extended-info/purchase', (req, res) => {
 });
 
 // ============================================================
-// LIVE PRICE (lightweight endpoint for real-time charting)
+// REAL-TIME PRICE ENGINE (Birdeye + Jupiter, 1-second resolution)
 // ============================================================
-app.get('/api/live/:address', (req, res) => {
-    const token = tokenCache.get(req.params.address);
-    if (!token) return res.json({ price: null });
+const livepriceCache = new Map(); // address -> { price, priceNative, ts, source }
+const livePriceWatchers = new Map(); // address -> { clients: Set, interval, lastFetch }
+
+async function fetchBirdeyePrice(address) {
+    try {
+        const res = await fetch(`${BIRDEYE_BASE}/defi/price?address=${address}`, {
+            signal: AbortSignal.timeout(3000),
+            headers: { 'X-API-KEY': BIRDEYE_API_KEY, 'x-chain': 'solana' }
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data?.data?.value) {
+            return { price: data.data.value, source: 'birdeye', ts: Date.now() };
+        }
+        return null;
+    } catch { return null; }
+}
+
+async function fetchJupiterPrice(address) {
+    try {
+        const res = await fetch(`${JUPITER_PRICE_BASE}?ids=${address}`, {
+            signal: AbortSignal.timeout(3000),
+            headers: { 'x-api-key': JUPITER_API_KEY }
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data?.data?.[address]?.price) {
+            return { price: parseFloat(data.data[address].price), source: 'jupiter', ts: Date.now() };
+        }
+        return null;
+    } catch { return null; }
+}
+
+async function fetchBirdeyeMultiPrice(addresses) {
+    if (!addresses.length) return {};
+    try {
+        const list = addresses.slice(0, 50).join(',');
+        const res = await fetch(`${BIRDEYE_BASE}/defi/multi_price?list_address=${list}`, {
+            signal: AbortSignal.timeout(5000),
+            headers: { 'X-API-KEY': BIRDEYE_API_KEY, 'x-chain': 'solana' }
+        });
+        if (!res.ok) return {};
+        const data = await res.json();
+        const results = {};
+        if (data?.data) {
+            for (const [addr, info] of Object.entries(data.data)) {
+                if (info?.value) results[addr] = { price: info.value, source: 'birdeye', ts: Date.now() };
+            }
+        }
+        return results;
+    } catch { return {}; }
+}
+
+async function fetchLivePrice(address) {
+    // Try Birdeye first (fastest, best Solana coverage)
+    let result = await fetchBirdeyePrice(address);
+    if (result) { livepriceCache.set(address, result); return result; }
+    // Fallback to Jupiter
+    result = await fetchJupiterPrice(address);
+    if (result) { livepriceCache.set(address, result); return result; }
+    // Fallback to token cache
+    const token = tokenCache.get(address);
+    if (token?.price) return { price: token.price, source: 'cache', ts: Date.now() };
+    return null;
+}
+
+// Start watching a token for real-time prices (called when clients subscribe)
+function startLiveWatch(address) {
+    if (livePriceWatchers.has(address)) return;
+    const watcher = {
+        clients: new Set(),
+        lastFetch: 0,
+        interval: setInterval(async () => {
+            const result = await fetchLivePrice(address);
+            if (!result) return;
+            livepriceCache.set(address, result);
+            // Push to WebSocket subscribers
+            const msg = JSON.stringify({ type: 'price', token: address, price: result.price, source: result.source, ts: result.ts });
+            for (const ws of wsClients) {
+                if (ws.readyState === 1 && ws.subs?.has(address)) {
+                    try { ws.send(msg); } catch {}
+                }
+            }
+        }, 1000) // 1-second polling
+    };
+    livePriceWatchers.set(address, watcher);
+    console.log(`[LIVE] Started 1s price watch: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
+    // Auto-stop after 10 minutes of no REST requests
+    watcher.autoStop = setTimeout(() => stopLiveWatch(address), 600000);
+}
+
+function stopLiveWatch(address) {
+    const watcher = livePriceWatchers.get(address);
+    if (!watcher) return;
+    clearInterval(watcher.interval);
+    if (watcher.autoStop) clearTimeout(watcher.autoStop);
+    livePriceWatchers.delete(address);
+    console.log(`[LIVE] Stopped price watch: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
+}
+
+function touchLiveWatch(address) {
+    const watcher = livePriceWatchers.get(address);
+    if (!watcher) { startLiveWatch(address); return; }
+    // Reset auto-stop timer
+    if (watcher.autoStop) clearTimeout(watcher.autoStop);
+    watcher.autoStop = setTimeout(() => stopLiveWatch(address), 600000);
+}
+
+// ============================================================
+// LIVE PRICE (real-time endpoint — Birdeye/Jupiter, 1s resolution)
+// ============================================================
+app.get('/api/live/:address', async (req, res) => {
+    const address = req.params.address;
+    // Ensure we're watching this token
+    touchLiveWatch(address);
+    // Return latest cached price (updated every 1s by the watcher)
+    const cached = livepriceCache.get(address);
+    if (cached && Date.now() - cached.ts < 2000) {
+        const token = tokenCache.get(address);
+        return res.json({
+            price: cached.price,
+            priceNative: token?.priceNative || null,
+            priceChange: token?.priceChange || null,
+            volume: token?.volume || null,
+            txns: token?.txns || null,
+            source: cached.source,
+            ts: cached.ts,
+        });
+    }
+    // Fetch fresh if no recent cache
+    const result = await fetchLivePrice(address);
+    if (!result) return res.json({ price: null });
+    const token = tokenCache.get(address);
     res.json({
-        price: token.price,
-        priceNative: token.priceNative,
-        priceChange: token.priceChange,
-        volume: token.volume,
-        txns: token.txns,
-        ts: Date.now(),
+        price: result.price,
+        priceNative: token?.priceNative || null,
+        priceChange: token?.priceChange || null,
+        volume: token?.volume || null,
+        txns: token?.txns || null,
+        source: result.source,
+        ts: result.ts,
     });
 });
 

@@ -17,7 +17,7 @@ DEXAI_URL = "http://localhost:3847"
 def register_dex_routes(app):
     """Register DEX proxy routes on the FastAPI app."""
     from fastapi import Request
-    from fastapi.responses import Response, JSONResponse
+    from fastapi.responses import Response, JSONResponse, RedirectResponse
 
     async def _proxy(path: str, request: Request):
         """Proxy a request to the DEXAI Node.js server."""
@@ -60,11 +60,20 @@ def register_dex_routes(app):
                 return JSONResponse({"error": "DEXAI unavailable"}, status_code=502)
 
     # Register routes for both /dex and /DEXAI paths
+    # Redirect bare /dex to /dex/ so relative asset paths (styles.css, app.js) resolve correctly
     @app.get("/dex")
+    async def dex_redirect():
+        return RedirectResponse(url="/dex/", status_code=301)
+
+    @app.get("/DEXAI")
+    async def dexai_redirect():
+        return RedirectResponse(url="/DEXAI/", status_code=301)
+
+    @app.get("/dex/")
     async def dex_home():
         return await _proxy_home()
 
-    @app.get("/DEXAI")
+    @app.get("/DEXAI/")
     async def dexai_home():
         return await _proxy_home()
 

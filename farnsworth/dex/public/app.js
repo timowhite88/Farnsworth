@@ -925,7 +925,7 @@ async function loadLiveChart(address) {
     var tfBtns = document.querySelectorAll('#tfTabs .tf');
     tfBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tf') === 'live'); });
 
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Connecting live feed...</div>';
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Connecting 1s live feed (Birdeye/Jupiter)...</div>';
 
     // Seed with 1m candle data for context
     var seedCandles = [];
@@ -991,8 +991,8 @@ async function loadLiveChart(address) {
                 point.time = t;
             }
             liveDataPoints.push(point);
-            if (liveDataPoints.length > 600) {
-                liveDataPoints = liveDataPoints.slice(-500);
+            if (liveDataPoints.length > 3600) {
+                liveDataPoints = liveDataPoints.slice(-3000);
                 liveSeries.setData(liveDataPoints);
             } else {
                 liveSeries.update(point);
@@ -1001,7 +1001,7 @@ async function loadLiveChart(address) {
             // Update price display
             setText('dPrice', formatPrice(data.price));
         } catch (e) { /* ignore */ }
-    }, 3000);
+    }, 1000);
 
     // Resize
     chartResizeObserver = new ResizeObserver(function(entries) {
