@@ -1,6 +1,6 @@
 /**
- * DEXAI v2.0 - Farnsworth Collective DEX Screener
- * A DexScreener replacement powered by the Farnsworth AI Collective
+ * DEXAI v2.1 - Farnsworth Collective DEX Screener
+ * Powered by: Whale Hunter, Quantum FarSight, Collective Intelligence, Burn Economy
  */
 
 const express = require('express');
@@ -8,6 +8,7 @@ const cors = require('cors');
 const { WebSocketServer } = require('ws');
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,9 +18,26 @@ const PORT = process.env.DEXAI_PORT || 3847;
 const FARNSWORTH_API = process.env.FARNSWORTH_API || 'http://localhost:8080';
 const ECOSYSTEM_WALLET = '3fSS5RVErbgcJEDCQmCXpKsD2tWqfhxFZtkDUB8qw';
 const FARNS_TOKEN = '9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS';
-const BOOST_PRICE_USD = 25;
+const BOOST_PRICES = { 1: 25, 2: 50, 3: 100 };
+const BOOST_PRICE_USD = 25;  // kept for backward compat
 const EXTENDED_INFO_PRICE_USD = 10;
+
+// X OAuth 2.0 Configuration
+const X_CLIENT_ID = process.env.X_CLIENT_ID || 'OUJSQ3BEX0Npc3pxZm1HcmxxWDc6MTpjaQ';
+const X_CLIENT_SECRET = process.env.X_CLIENT_SECRET || '';
+const X_REDIRECT_URI = process.env.X_REDIRECT_URI || 'https://ai.farnsworth.cloud/dex/api/x/callback';
+const X_SCOPES = 'tweet.read users.read follows.read';
+const BAGS_FM_API = 'https://public-api-v2.bags.fm/api/v1';
+
+// X Connection storage: wallet -> { xId, xUsername, xName, xProfileImage, connectedAt }
+const xConnections = new Map();
+// OAuth state storage: state -> { codeVerifier, wallet, ts }
+const xOAuthState = new Map();
 const FETCH_INTERVAL = 30000;
+const COLLECTIVE_FETCH_INTERVAL = 60000;
+
+// Platform suffixes for main list filtering
+const ALLOWED_SUFFIXES = ['pump', 'bonk', 'bags'];
 
 app.use(cors());
 app.use(express.json());
@@ -27,7 +45,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => { console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`); next(); });
 
 // ============================================================
-// TOKEN CACHE
+// TOKEN CACHE & COLLECTIVE INTELLIGENCE
 // ============================================================
 const tokenCache = new Map();
 let sortedByVolume = [];
@@ -36,10 +54,39 @@ let sortedByVelocity = [];
 let sortedByNew = [];
 let sortedByGainers = [];
 let sortedByLosers = [];
+let sortedByCollective = [];    // Collective's own picks
+let sortedByWhaleHeat = [];     // Whale/smart money activity
 let cacheReady = false;
+
 const boosts = new Map();
 const pendingBoosts = new Map();
 const aiScoreCache = new Map();
+
+// Collective intelligence data
+const collectiveData = {
+    whales: { topWallets: [], whaleFeed: [], lastFetch: 0 },
+    trader: { running: false, positions: [], winRate: 0, lastFetch: 0 },
+    learner: { bestCondition: null, worstCondition: null, config: {}, lastFetch: 0 },
+    quantumCache: new Map(),     // address -> { bullProb, confidence, targets, ts }
+    whaleTokenHeat: new Map(),   // address -> { whaleCount, smartMoneyBuys, totalSolInflow }
+    collectivePicks: new Map(),  // address -> { score, reason, agents, ts }
+};
+
+// ============================================================
+// PLATFORM HELPERS
+// ============================================================
+function getTokenPlatform(address) {
+    if (!address) return null;
+    const lower = address.toLowerCase();
+    if (lower.endsWith('pump')) return 'pump';
+    if (lower.endsWith('bonk')) return 'bonk';
+    if (lower.endsWith('bags')) return 'bags';
+    return null;
+}
+
+function isAllowedPlatform(address) {
+    return getTokenPlatform(address) !== null;
+}
 
 function parsePair(pair) {
     const base = pair.baseToken || {};
@@ -52,8 +99,11 @@ function parsePair(pair) {
     const socials = {};
     for (const s of (info.socials || [])) socials[s.type || 'unknown'] = s.url || '';
 
+    const address = base.address || '';
+    const platform = getTokenPlatform(address);
+
     return {
-        address: base.address || '',
+        address,
         symbol: base.symbol || '???',
         name: base.name || 'Unknown',
         price: parseFloat(pair.priceUsd) || 0,
@@ -88,16 +138,29 @@ function parsePair(pair) {
         headerImg: info.header || '',
         websites: (info.websites || []).map(w => typeof w === 'string' ? w : (w.url || '')),
         socials,
+        platform,
+        isBags: platform === 'bags',
+        // Scoring fields
         boostAmount: 0,
+        burnBoostAmount: 0,      // FARNS burned specifically
+        solBoostAmount: 0,       // SOL paid specifically
         aiScore: null,
         aiVerdict: null,
         collectiveVerified: false,
+        collectivePick: false,
+        collectiveReason: null,
         velocity: 0,
+        whaleHeat: 0,            // whale/smart money activity score
+        quantumBull: null,       // quantum simulation bull probability
+        quantumConfidence: null,
         trendScore: 0,
         updatedAt: Date.now(),
     };
 }
 
+// ============================================================
+// FETCH HELPERS
+// ============================================================
 async function safeFetch(url, opts = {}) {
     try {
         const res = await fetch(url, { signal: AbortSignal.timeout(15000), ...opts });
@@ -129,6 +192,190 @@ async function fetchTokenBatch(addresses) {
     return results;
 }
 
+// ============================================================
+// COLLECTIVE INTELLIGENCE FETCHER
+// ============================================================
+async function fetchCollectiveData() {
+    try {
+        // 1. Whale Hunter data
+        const whaleData = await safeFetch(`${FARNSWORTH_API}/api/trading/whales`);
+        if (whaleData && whaleData.status !== 'not_running') {
+            collectiveData.whales = {
+                topWallets: whaleData.top_wallets || [],
+                whaleFeed: whaleData.whale_feed || [],
+                mixerFresh: whaleData.mixer_fresh_wallets || 0,
+                lastFetch: Date.now(),
+            };
+
+            // Build whale heat map per token from whale feed
+            collectiveData.whaleTokenHeat.clear();
+            for (const event of (whaleData.whale_feed || [])) {
+                const addr = event.token_address || event.mint;
+                if (!addr) continue;
+                const existing = collectiveData.whaleTokenHeat.get(addr) || { whaleCount: 0, smartMoneyBuys: 0, totalSolInflow: 0 };
+                existing.whaleCount++;
+                if (event.is_smart_money || event.label?.includes('smart')) existing.smartMoneyBuys++;
+                existing.totalSolInflow += parseFloat(event.sol_amount || event.amount_sol || 0);
+                collectiveData.whaleTokenHeat.set(addr, existing);
+            }
+        }
+
+        // 2. Trader status & positions
+        const traderData = await safeFetch(`${FARNSWORTH_API}/api/trading/status`);
+        if (traderData && traderData.running) {
+            collectiveData.trader = {
+                running: true,
+                positions: traderData.positions || [],
+                winRate: traderData.win_rate || traderData.stats?.win_rate || 0,
+                totalTrades: traderData.stats?.total_trades || 0,
+                pnl: traderData.stats?.total_pnl_sol || 0,
+                lastFetch: Date.now(),
+            };
+
+            // Tokens the trader is actively holding = collective endorsement
+            for (const pos of (traderData.positions || [])) {
+                const addr = pos.mint || pos.token_address;
+                if (!addr) continue;
+                if (!collectiveData.collectivePicks.has(addr)) {
+                    collectiveData.collectivePicks.set(addr, {
+                        score: 70,
+                        reason: `Active trader position (${collectiveData.trader.winRate}% WR)`,
+                        agents: ['DegenTrader'],
+                        ts: Date.now(),
+                    });
+                }
+            }
+        }
+
+        // 3. Adaptive learner insights
+        const learnerData = await safeFetch(`${FARNSWORTH_API}/api/trading/learner`);
+        if (learnerData && learnerData.status !== 'not_running') {
+            collectiveData.learner = {
+                bestCondition: learnerData.summary?.best_condition || null,
+                worstCondition: learnerData.summary?.worst_condition || null,
+                config: learnerData.config || {},
+                lastFetch: Date.now(),
+            };
+        }
+
+        console.log(`[DEXAI] Collective sync: ${collectiveData.whales.topWallets.length} whales, ${collectiveData.whaleTokenHeat.size} whale-touched tokens, ${collectiveData.collectivePicks.size} collective picks, trader ${collectiveData.trader.running ? 'LIVE' : 'OFF'}`);
+    } catch (e) {
+        console.error('[DEXAI] Collective fetch error:', e.message);
+    }
+}
+
+// ============================================================
+// QUANTUM SIMULATION CACHE
+// ============================================================
+async function getQuantumPrediction(address) {
+    const cached = collectiveData.quantumCache.get(address);
+    if (cached && Date.now() - cached.ts < 300000) return cached;
+
+    const data = await safeFetch(`${FARNSWORTH_API}/api/farsight/crypto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token_address: address, simulations: 1000 }),
+    });
+
+    if (data && data.available !== false) {
+        const result = {
+            bullProb: parseFloat(data.bull_probability || data.bullProb || 0),
+            confidence: parseFloat(data.confidence || 0),
+            rugProb: parseFloat(data.rug_probability || 0),
+            targets: data.price_targets || data.targets || {},
+            simulations: data.simulation_count || data.simulations || 1000,
+            ts: Date.now(),
+        };
+        collectiveData.quantumCache.set(address, result);
+        return result;
+    }
+    return null;
+}
+
+// Background quantum scoring for top tokens
+async function batchQuantumScore() {
+    const topTokens = sortedByVolume.slice(0, 20);
+    for (const token of topTokens) {
+        const q = await getQuantumPrediction(token.address);
+        if (q) {
+            token.quantumBull = q.bullProb;
+            token.quantumConfidence = q.confidence;
+        }
+        await new Promise(r => setTimeout(r, 500));
+    }
+}
+
+// ============================================================
+// COMPOSITE TRENDING ALGORITHM — Farnsworth Collective Score
+// ============================================================
+function calculateTrendScore(token) {
+    const addr = token.address;
+
+    // ── BASE MARKET DATA (35%) ──
+    const volScore = token.volume.h24 > 0 ? Math.log10(token.volume.h24) * 8 : 0;
+    const txnScore = (token.txns.h1.buys + token.txns.h1.sells) * 0.08;
+    const momentumScore = Math.max(0, token.priceChange.h1) * 0.3;
+    const velocityScore = (parseFloat(token.velocity) || 0) * 1.5;
+    const buyPressure = token.txns.h1.buys > 0
+        ? (token.txns.h1.buys / (token.txns.h1.buys + token.txns.h1.sells)) * 5
+        : 0;
+    const baseScore = volScore + txnScore + momentumScore + velocityScore + buyPressure;
+
+    // ── COLLECTIVE INTELLIGENCE (25%) ──
+    let collectiveScore = 0;
+    // AI score from Farnsworth collective
+    if (token.aiScore !== null) {
+        collectiveScore += (token.aiScore / 100) * 15;  // 0-15 points
+    }
+    // Collective pick bonus
+    const pick = collectiveData.collectivePicks.get(addr);
+    if (pick) {
+        collectiveScore += (pick.score / 100) * 10;  // 0-10 points
+        token.collectivePick = true;
+        token.collectiveReason = pick.reason;
+    }
+    // Trader is holding this token = strong signal
+    if (collectiveData.trader.running) {
+        const isHeld = (collectiveData.trader.positions || []).some(p => (p.mint || p.token_address) === addr);
+        if (isHeld) collectiveScore += 8;
+    }
+
+    // ── QUANTUM SIMULATION (15%) ──
+    let quantumScore = 0;
+    const qData = collectiveData.quantumCache.get(addr);
+    if (qData) {
+        token.quantumBull = qData.bullProb;
+        token.quantumConfidence = qData.confidence;
+        // High bull probability + high confidence = major signal
+        quantumScore = (qData.bullProb * qData.confidence) * 20;
+        // Penalize high rug probability
+        if (qData.rugProb > 0.5) quantumScore -= qData.rugProb * 10;
+    }
+
+    // ── WHALE / SMART MONEY (15%) ──
+    let whaleScore = 0;
+    const heat = collectiveData.whaleTokenHeat.get(addr);
+    if (heat) {
+        token.whaleHeat = heat.whaleCount * 3 + heat.smartMoneyBuys * 8 + Math.min(heat.totalSolInflow, 100) * 0.5;
+        whaleScore = Math.min(token.whaleHeat, 25);  // Cap at 25 points
+    }
+
+    // ── BURN ECONOMY / BOOSTS (10%) ──
+    let boostScore = 0;
+    // FARNS burned = conviction signal (weighted 3x more than SOL)
+    boostScore += (token.burnBoostAmount || 0) * 0.4;
+    boostScore += (token.solBoostAmount || 0) * 0.12;
+    // Collective verified tokens get extra
+    if (token.collectiveVerified) boostScore += 5;
+    boostScore = Math.min(boostScore, 15);  // Cap
+
+    // ── FINAL COMPOSITE ──
+    return baseScore + collectiveScore + quantumScore + whaleScore + boostScore;
+}
+
+// ============================================================
+// TOKEN CACHE UPDATE
+// ============================================================
 async function updateTokenCache() {
     try {
         const addresses = new Set();
@@ -156,7 +403,7 @@ async function updateTokenCache() {
         await new Promise(r => setTimeout(r, 300));
 
         // 3. Search popular terms for broader coverage
-        for (const term of ['SOL', 'pump', 'meme', 'BONK', 'WIF', 'AI']) {
+        for (const term of ['SOL', 'pump', 'meme', 'BONK', 'WIF', 'AI', 'bags', 'BAGS']) {
             const data = await safeFetch(`https://api.dexscreener.com/latest/dex/search?q=${term}`);
             if (data?.pairs) {
                 for (const pair of data.pairs.slice(0, 40)) {
@@ -166,6 +413,17 @@ async function updateTokenCache() {
                 }
             }
             await new Promise(r => setTimeout(r, 250));
+        }
+
+        // 4. Add tokens from whale heat map (whales are buying these)
+        for (const addr of collectiveData.whaleTokenHeat.keys()) {
+            addresses.add(addr);
+        }
+
+        // 5. Add tokens from trader positions
+        for (const pos of (collectiveData.trader.positions || [])) {
+            const addr = pos.mint || pos.token_address;
+            if (addr) addresses.add(addr);
         }
 
         console.log(`[DEXAI] Fetching details for ${addresses.size} tokens...`);
@@ -183,42 +441,62 @@ async function updateTokenCache() {
                 } else {
                     token.velocity = existing.velocity;
                 }
+                // Preserve intelligence data
                 token.aiScore = existing.aiScore;
                 token.aiVerdict = existing.aiVerdict;
                 token.collectiveVerified = existing.collectiveVerified;
+                token.collectivePick = existing.collectivePick;
+                token.collectiveReason = existing.collectiveReason;
+                token.quantumBull = existing.quantumBull;
+                token.quantumConfidence = existing.quantumConfidence;
+                token.whaleHeat = existing.whaleHeat;
+                token.burnBoostAmount = existing.burnBoostAmount || 0;
+                token.solBoostAmount = existing.solBoostAmount || 0;
             }
             token.boostAmount = boostAmounts[token.address] || token.boostAmount;
 
-            // Trend score: volume + boosts + velocity + price momentum
-            token.trendScore = (
-                (token.volume.h24 > 0 ? Math.log10(token.volume.h24) * 10 : 0) +
-                (token.boostAmount * 5) +
-                (parseFloat(token.velocity) || 0) * 2 +
-                Math.max(0, token.priceChange.h1) * 0.5 +
-                (token.txns.h1.buys + token.txns.h1.sells) * 0.1
-            );
+            // Calculate composite trend score
+            token.trendScore = calculateTrendScore(token);
 
             tokenCache.set(token.address, token);
         }
 
-        // Build sorted arrays
+        // Build sorted arrays — main list filtered to allowed platforms only
         const all = [...tokenCache.values()].filter(t => t.volume.h24 > 0);
-        sortedByVolume = [...all].sort((a, b) => b.volume.h24 - a.volume.h24).slice(0, 200);
-        sortedByTrending = [...all].sort((a, b) => b.trendScore - a.trendScore).slice(0, 200);
-        sortedByVelocity = [...all].sort((a, b) => (parseFloat(b.velocity) || 0) - (parseFloat(a.velocity) || 0)).slice(0, 200);
-        sortedByNew = [...all].filter(t => t.pairCreatedAt).sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0)).slice(0, 200);
-        sortedByGainers = [...all].sort((a, b) => b.priceChange.h24 - a.priceChange.h24).slice(0, 200);
-        sortedByLosers = [...all].sort((a, b) => a.priceChange.h24 - b.priceChange.h24).slice(0, 200);
+        const platformFiltered = all.filter(t => isAllowedPlatform(t.address));
+
+        sortedByVolume = [...platformFiltered].sort((a, b) => b.volume.h24 - a.volume.h24).slice(0, 200);
+        sortedByTrending = [...platformFiltered].sort((a, b) => b.trendScore - a.trendScore).slice(0, 200);
+        sortedByVelocity = [...platformFiltered].sort((a, b) => (parseFloat(b.velocity) || 0) - (parseFloat(a.velocity) || 0)).slice(0, 200);
+        sortedByNew = [...platformFiltered].filter(t => t.pairCreatedAt).sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0)).slice(0, 200);
+        sortedByGainers = [...platformFiltered].sort((a, b) => b.priceChange.h24 - a.priceChange.h24).slice(0, 200);
+        sortedByLosers = [...platformFiltered].sort((a, b) => a.priceChange.h24 - b.priceChange.h24).slice(0, 200);
+
+        // Collective picks — tokens endorsed by the collective (no platform filter for these)
+        sortedByCollective = [...all].filter(t => {
+            return t.collectivePick ||
+                   (t.aiScore !== null && t.aiScore >= 70) ||
+                   (t.quantumBull !== null && t.quantumBull >= 0.7) ||
+                   (t.whaleHeat > 10);
+        }).sort((a, b) => b.trendScore - a.trendScore).slice(0, 100);
+
+        // Whale heat — tokens whales/smart money are buying (no platform filter)
+        sortedByWhaleHeat = [...all].filter(t => t.whaleHeat > 0)
+            .sort((a, b) => b.whaleHeat - a.whaleHeat).slice(0, 100);
 
         // Trim cache
         if (tokenCache.size > 600) {
             const keep = new Set(sortedByVolume.slice(0, 300).map(t => t.address));
+            for (const addr of sortedByCollective.map(t => t.address)) keep.add(addr);
+            for (const addr of sortedByWhaleHeat.map(t => t.address)) keep.add(addr);
             for (const [addr] of tokenCache) { if (!keep.has(addr)) tokenCache.delete(addr); }
         }
 
         cacheReady = true;
-        console.log(`[DEXAI] Cache: ${tokenCache.size} tokens | Top volume: ${sortedByVolume[0]?.symbol} ($${(sortedByVolume[0]?.volume.h24 / 1e6).toFixed(1)}M)`);
-        broadcastAll({ type: 'update', count: tokenCache.size, ts: Date.now() });
+        const topSym = sortedByTrending[0]?.symbol || '---';
+        const topVol = sortedByVolume[0] ? `${sortedByVolume[0].symbol} ($${(sortedByVolume[0].volume.h24 / 1e6).toFixed(1)}M)` : '---';
+        console.log(`[DEXAI] Cache: ${tokenCache.size} tokens (${platformFiltered.length} on-platform) | Top trending: ${topSym} | Top vol: ${topVol} | Whale heat: ${sortedByWhaleHeat.length} | Collective picks: ${sortedByCollective.length}`);
+        broadcastAll({ type: 'update', count: tokenCache.size, platformCount: platformFiltered.length, ts: Date.now() });
     } catch (e) {
         console.error('[DEXAI] Cache error:', e.message);
     }
@@ -248,9 +526,13 @@ async function getAIScore(address) {
                 agents: data.agents || [],
             };
             aiScoreCache.set(address, { data: result, ts: Date.now() });
-            // Update token cache
             const token = tokenCache.get(address);
-            if (token) { token.aiScore = result.score; token.aiVerdict = result.verdict; }
+            if (token) {
+                token.aiScore = result.score;
+                token.aiVerdict = result.verdict;
+                // Recalculate trend score with new AI data
+                token.trendScore = calculateTrendScore(token);
+            }
             return result;
         }
     } catch {}
@@ -261,10 +543,20 @@ async function getAIScore(address) {
 // API ROUTES
 // ============================================================
 app.get('/api/health', (req, res) => {
+    const platformFiltered = [...tokenCache.values()].filter(t => isAllowedPlatform(t.address) && t.volume.h24 > 0);
     res.json({
-        status: 'ok', service: 'DEXAI', version: '2.0.0',
-        tokens: tokenCache.size, cacheReady,
+        status: 'ok', service: 'DEXAI', version: '2.1.0',
+        tokens: tokenCache.size, platformTokens: platformFiltered.length, cacheReady,
         ecosystem_wallet: ECOSYSTEM_WALLET, farns_token: FARNS_TOKEN,
+        collective: {
+            whalesTracked: collectiveData.whales.topWallets.length,
+            whaleHeatTokens: collectiveData.whaleTokenHeat.size,
+            collectivePicks: sortedByCollective.length,
+            traderRunning: collectiveData.trader.running,
+            traderWinRate: collectiveData.trader.winRate,
+            quantumCached: collectiveData.quantumCache.size,
+        },
+        platforms: ALLOWED_SUFFIXES,
     });
 });
 
@@ -276,6 +568,7 @@ app.get('/api/tokens', (req, res) => {
     const lists = {
         volume: sortedByVolume, trending: sortedByTrending, velocity: sortedByVelocity,
         new: sortedByNew, gainers: sortedByGainers, losers: sortedByLosers,
+        collective: sortedByCollective, whales: sortedByWhaleHeat,
     };
     const list = lists[sort] || sortedByTrending;
     const page = list.slice(off, off + lim);
@@ -287,7 +580,6 @@ app.get('/api/token/:address', async (req, res) => {
     let token = tokenCache.get(address);
 
     if (!token) {
-        // Fetch directly
         const data = await safeFetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
         if (data?.pairs?.length) {
             const pairs = data.pairs.filter(p => p.chainId === 'solana')
@@ -300,6 +592,12 @@ app.get('/api/token/:address', async (req, res) => {
     }
 
     if (!token) return res.status(404).json({ error: 'Token not found' });
+
+    // Enrich with collective data
+    const whaleHeat = collectiveData.whaleTokenHeat.get(address);
+    if (whaleHeat) token.whaleHeat = whaleHeat.whaleCount * 3 + whaleHeat.smartMoneyBuys * 8;
+    const qData = collectiveData.quantumCache.get(address);
+    if (qData) { token.quantumBull = qData.bullProb; token.quantumConfidence = qData.confidence; }
 
     // Fetch AI score in background
     getAIScore(address).then(ai => {
@@ -314,7 +612,6 @@ app.get('/api/search', async (req, res) => {
     const { q } = req.query;
     if (!q || q.length < 2) return res.json({ tokens: [] });
 
-    // Check cache first
     const query = q.toLowerCase();
     const cacheResults = [...tokenCache.values()].filter(t =>
         t.symbol.toLowerCase().includes(query) ||
@@ -324,26 +621,24 @@ app.get('/api/search', async (req, res) => {
 
     if (cacheResults.length >= 5) return res.json({ tokens: cacheResults });
 
-    // Fall back to DexScreener search
     const data = await safeFetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`);
     const tokens = (data?.pairs || []).filter(p => p.chainId === 'solana').slice(0, 30).map(parsePair);
-    // Merge cache results + API results, deduplicate
     const seen = new Set(cacheResults.map(t => t.address));
     for (const t of tokens) { if (!seen.has(t.address)) { cacheResults.push(t); seen.add(t.address); } }
     res.json({ tokens: cacheResults.slice(0, 30) });
 });
 
-// Chart data via GeckoTerminal (free OHLCV)
+// Chart data via GeckoTerminal
 app.get('/api/chart/:address', async (req, res) => {
     const { address } = req.params;
     const { timeframe = '15m' } = req.query;
-    const tfMap = { '1m': 'minute&aggregate=1', '5m': 'minute&aggregate=5', '15m': 'minute&aggregate=15', '1h': 'hour&aggregate=1', '4h': 'hour&aggregate=4', '1d': 'day&aggregate=1' };
-    const tf = tfMap[timeframe] || tfMap['15m'];
+    const tfMap = { '1m': ['minute', 1], '5m': ['minute', 5], '15m': ['minute', 15], '1h': ['hour', 1], '4h': ['hour', 4], '1d': ['day', 1] };
+    const [period, agg] = tfMap[timeframe] || tfMap['15m'];
 
     const token = tokenCache.get(address);
     const poolAddr = token?.pairAddress || address;
 
-    const data = await safeFetch(`https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddr}/ohlcv/${tf}&limit=300&currency=usd`);
+    const data = await safeFetch(`https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddr}/ohlcv/${period}?aggregate=${agg}&limit=300&currency=usd`);
     if (!data?.data?.attributes?.ohlcv_list) {
         return res.json({ candles: [], source: 'unavailable' });
     }
@@ -364,63 +659,243 @@ app.get('/api/ai/score/:address', async (req, res) => {
 
 // Quantum Simulation
 app.get('/api/quantum/:address', async (req, res) => {
-    const data = await safeFetch(`${FARNSWORTH_API}/api/farsight/crypto`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token_address: req.params.address, simulations: 1000 }),
+    const result = await getQuantumPrediction(req.params.address);
+    if (result) {
+        res.json({
+            available: true,
+            bull_probability: result.bullProb,
+            confidence: result.confidence,
+            rug_probability: result.rugProb,
+            price_targets: result.targets,
+            simulation_count: result.simulations,
+        });
+    } else {
+        res.json({ available: false });
+    }
+});
+
+// Collective status — public endpoint showing the intelligence layer
+app.get('/api/collective/status', (req, res) => {
+    res.json({
+        whales: {
+            tracked: collectiveData.whales.topWallets.length,
+            hotTokens: sortedByWhaleHeat.slice(0, 10).map(t => ({
+                address: t.address, symbol: t.symbol, whaleHeat: t.whaleHeat,
+            })),
+        },
+        trader: {
+            running: collectiveData.trader.running,
+            winRate: collectiveData.trader.winRate,
+            totalTrades: collectiveData.trader.totalTrades,
+            activePositions: (collectiveData.trader.positions || []).length,
+        },
+        picks: sortedByCollective.slice(0, 10).map(t => ({
+            address: t.address, symbol: t.symbol, name: t.name, platform: t.platform,
+            trendScore: Math.round(t.trendScore), aiScore: t.aiScore,
+            quantumBull: t.quantumBull, whaleHeat: t.whaleHeat,
+            reason: t.collectiveReason || 'High composite score',
+        })),
+        scoring: {
+            formula: 'Base Market (35%) + Collective AI (25%) + Quantum Sim (15%) + Whale/Smart Money (15%) + Burn Economy (10%)',
+            burnMultiplier: '3x vs SOL boost',
+            platforms: ALLOWED_SUFFIXES,
+        },
     });
-    res.json(data || { available: false });
 });
 
 // ============================================================
-// BOOST SYSTEM
+// BOOST SYSTEM — Burn Economy
 // ============================================================
 app.get('/api/boost/:address', (req, res) => {
     res.json({ boost: boosts.get(req.params.address) || null });
 });
 
 app.post('/api/boost/request', (req, res) => {
-    const { address, paymentType = 'sol' } = req.body;
+    const { address, paymentType = 'sol', level = 1 } = req.body;
     if (!address) return res.status(400).json({ error: 'Token address required' });
 
+    const boostLevel = Math.min(Math.max(parseInt(level) || 1, 1), 3);
+    const priceUsd = BOOST_PRICES[boostLevel] || 25;
+
     const existing = boosts.get(address);
-    if (existing?.boostCount > 0 && !existing.collectiveApproved) {
-        return res.json({ status: 'requires_approval', message: 'Additional boosts require Collective approval.', boostCount: existing.boostCount });
+    if (boostLevel >= 2 && existing?.boostCount > 0 && !existing.collectiveApproved) {
+        return res.json({ status: 'requires_approval', message: 'Level 2+ boosts require passing verification checks.', boostCount: existing.boostCount });
     }
 
     const requestId = `boost_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const payment = paymentType === 'farns'
-        ? { type: 'farns_burn', tokenMint: FARNS_TOKEN, burnAddress: '1nc1nerator11111111111111111111111111111111', amountUsd: BOOST_PRICE_USD }
-        : { type: 'sol', recipient: ECOSYSTEM_WALLET, amountUsd: BOOST_PRICE_USD };
+        ? { type: 'farns_burn', tokenMint: FARNS_TOKEN, burnAddress: '1nc1nerator11111111111111111111111111111111', amountUsd: priceUsd }
+        : { type: 'sol', recipient: ECOSYSTEM_WALLET, amountUsd: priceUsd };
 
-    pendingBoosts.set(requestId, { address, paymentType, requestedAt: Date.now() });
-    res.json({ requestId, paymentInstructions: payment, boostPrice: BOOST_PRICE_USD });
+    pendingBoosts.set(requestId, { address, paymentType, level: boostLevel, requestedAt: Date.now() });
+    res.json({ requestId, paymentInstructions: payment, boostPrice: priceUsd, level: boostLevel });
 });
 
 app.post('/api/boost/confirm', (req, res) => {
-    const { requestId, txSignature } = req.body;
-    if (!requestId || !txSignature) return res.status(400).json({ error: 'Request ID and tx signature required' });
+    const { address, txSignature, paymentType, level, wallet, amountUsd, farnsBurned, requestId } = req.body;
 
-    const pending = pendingBoosts.get(requestId);
-    if (!pending) return res.status(404).json({ error: 'Boost request not found' });
+    // Support both new direct-tx flow and legacy requestId flow
+    const tokenAddr = address || (requestId && pendingBoosts.get(requestId) ? pendingBoosts.get(requestId).address : null);
+    const pType = paymentType || (requestId && pendingBoosts.get(requestId) ? pendingBoosts.get(requestId).paymentType : 'sol');
 
-    const existing = boosts.get(pending.address) || {
-        address: pending.address, boostCount: 0, totalSolPaid: 0, totalFarnsBurned: 0,
+    if (!tokenAddr || !txSignature) return res.status(400).json({ error: 'Token address and tx signature required' });
+
+    const boostLevel = parseInt(level) || 1;
+    const priceUsd = BOOST_PRICES[boostLevel] || 25;
+
+    const existing = boosts.get(tokenAddr) || {
+        address: tokenAddr, boostCount: 0, boostLevel: 0, totalSolPaid: 0, totalFarnsBurned: 0,
         collectiveApproved: false, extendedInfo: false, lastBoostAt: null,
+        boostHistory: [], wallet: null,
     };
     existing.boostCount++;
+    existing.boostLevel = Math.max(existing.boostLevel || 0, boostLevel);
     existing.lastBoostAt = Date.now();
-    if (pending.paymentType === 'farns') existing.totalFarnsBurned += BOOST_PRICE_USD;
-    else existing.totalSolPaid += BOOST_PRICE_USD;
+    existing.wallet = wallet || existing.wallet;
 
-    boosts.set(pending.address, existing);
-    pendingBoosts.delete(requestId);
+    // Track payment
+    const token = tokenCache.get(tokenAddr);
+    if (pType === 'farns') {
+        existing.totalFarnsBurned += amountUsd || priceUsd;
+        if (token) token.burnBoostAmount = (token.burnBoostAmount || 0) + (amountUsd || priceUsd);
+    } else {
+        existing.totalSolPaid += amountUsd || priceUsd;
+        if (token) token.solBoostAmount = (token.solBoostAmount || 0) + (amountUsd || priceUsd);
+    }
 
-    // Update token in cache
-    const token = tokenCache.get(pending.address);
-    if (token) { token.boostAmount += BOOST_PRICE_USD; token.trendScore += BOOST_PRICE_USD * 5; }
+    // Record in history
+    existing.boostHistory = existing.boostHistory || [];
+    existing.boostHistory.push({
+        level: boostLevel, paymentType: pType, txSignature,
+        wallet: wallet || null, amountUsd: amountUsd || priceUsd,
+        farnsBurned: farnsBurned || 0, ts: Date.now(),
+    });
 
+    // Auto-approve collective if level 2+ passed eligibility
+    if (boostLevel >= 2) existing.collectiveApproved = true;
+    if (boostLevel >= 3 && token) token.collectiveVerified = true;
+
+    boosts.set(tokenAddr, existing);
+    if (requestId) pendingBoosts.delete(requestId);
+
+    // Recalculate trend score
+    if (token) {
+        token.boostAmount = existing.totalSolPaid + existing.totalFarnsBurned;
+        token.trendScore = calculateTrendScore(token);
+    }
+
+    console.log(`[DEXAI] Boost confirmed: ${tokenAddr.slice(0, 8)}... Level ${boostLevel} via ${pType} (${txSignature.slice(0, 12)}...)`);
     res.json({ success: true, boost: existing });
+});
+
+// ============================================================
+// BOOST LEVEL ELIGIBILITY CHECK
+// When a token is boosted at level 2+, the collective verifies:
+//   - Holder distribution (top holders, concentration)
+//   - Rug probability (bundle detection, LP locks)
+//   - X engagement (who is shilling, organic vs paid)
+//   - Collective approval (multi-agent consensus)
+// ============================================================
+app.post('/api/boost/check-level', async (req, res) => {
+    const { address, level = 1 } = req.body;
+    if (!address) return res.status(400).json({ error: 'Token address required' });
+    if (level <= 1) return res.json({ eligible: true, level: 1, checks: [] });
+
+    const checks = [];
+    let eligible = true;
+    let reason = '';
+
+    try {
+        // 1. Run deep analysis via Farnsworth collective
+        const analysis = await safeFetch(`${FARNSWORTH_API}/api/tools/deep-analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token_address: address,
+                checks: ['bundles', 'holder_distribution', 'creator_history', 'liquidity_locks']
+            }),
+        });
+
+        // Holder distribution check
+        const distPassed = analysis && (analysis.holder_distribution_score || analysis.score || 0) >= 50
+            && !(analysis.top_holder_concentration > 0.5);
+        checks.push({ name: 'Holder Distribution', passed: distPassed,
+            detail: distPassed ? 'Healthy distribution' : 'Top holders too concentrated' });
+
+        // Rug probability check
+        const rugPassed = analysis && (analysis.rug_probability || 1) < 0.35 && !analysis.bundle_detected;
+        checks.push({ name: 'Rug Check', passed: rugPassed,
+            detail: rugPassed ? 'Low rug risk' : 'High rug probability or bundles detected' });
+
+        // Liquidity check
+        const token = tokenCache.get(address);
+        const liqPassed = token && token.liquidity > 5000;
+        checks.push({ name: 'Liquidity', passed: liqPassed,
+            detail: liqPassed ? 'Sufficient liquidity' : 'Liquidity too low' });
+
+        // Level 2 requires: distribution + rug + liquidity
+        if (level === 2) {
+            eligible = distPassed && rugPassed && liqPassed;
+            if (!eligible) reason = 'Token must have healthy distribution, low rug risk, and sufficient liquidity for Level 2';
+        }
+
+        // Level 3 requires all of the above PLUS X engagement audit and collective approval
+        if (level >= 3) {
+            // X Engagement audit — search X for the token CA
+            let xPassed = false;
+            try {
+                const xData = await safeFetch(`${FARNSWORTH_API}/api/tools/search-x`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: address, type: 'token_audit' }),
+                });
+                if (xData) {
+                    const tweetCount = xData.tweet_count || xData.results_count || 0;
+                    const uniquePosters = xData.unique_posters || xData.unique_authors || 0;
+                    const organicRatio = xData.organic_ratio || (uniquePosters > 3 ? 0.7 : 0.2);
+                    xPassed = tweetCount >= 5 && uniquePosters >= 3 && organicRatio > 0.4;
+                    checks.push({ name: 'X Engagement Audit', passed: xPassed,
+                        detail: xPassed
+                            ? `${tweetCount} posts by ${uniquePosters} unique accounts, ${Math.round(organicRatio * 100)}% organic`
+                            : `Insufficient X engagement (${tweetCount} posts, ${uniquePosters} accounts)` });
+                } else {
+                    checks.push({ name: 'X Engagement Audit', passed: false, detail: 'X audit unavailable' });
+                }
+            } catch (e) {
+                checks.push({ name: 'X Engagement Audit', passed: false, detail: 'X audit failed' });
+            }
+
+            // Collective approval — multi-agent consensus
+            let collectivePassed = false;
+            try {
+                const collectiveResult = await safeFetch(`${FARNSWORTH_API}/api/tools/score-token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token_address: address, deep: true }),
+                });
+                if (collectiveResult && (collectiveResult.score || 0) >= 65) {
+                    collectivePassed = true;
+                }
+                checks.push({ name: 'Collective Approval', passed: collectivePassed,
+                    detail: collectivePassed
+                        ? `Score: ${collectiveResult.score}/100 — approved`
+                        : `Score: ${collectiveResult ? collectiveResult.score : 0}/100 — needs 65+` });
+            } catch (e) {
+                checks.push({ name: 'Collective Approval', passed: false, detail: 'Collective unavailable' });
+            }
+
+            eligible = distPassed && rugPassed && liqPassed && xPassed && collectivePassed;
+            if (!eligible) reason = 'Level 3 requires all checks to pass: distribution, rug, liquidity, X audit, and collective approval';
+        }
+
+    } catch (e) {
+        console.error('[DEXAI] Boost eligibility check error:', e.message);
+        eligible = false;
+        reason = 'Verification system temporarily unavailable';
+        checks.push({ name: 'System', passed: false, detail: 'Verification error' });
+    }
+
+    res.json({ eligible, level, reason, checks });
 });
 
 app.post('/api/boost/submit-for-approval', async (req, res) => {
@@ -440,6 +915,8 @@ app.post('/api/boost/submit-for-approval', async (req, res) => {
         const existing = boosts.get(address) || { address, boostCount: 0, totalSolPaid: 0, totalFarnsBurned: 0, collectiveApproved: false, extendedInfo: false, lastBoostAt: null };
         existing.collectiveApproved = true;
         boosts.set(address, existing);
+        const token = tokenCache.get(address);
+        if (token) { token.collectiveVerified = true; token.trendScore = calculateTrendScore(token); }
     }
     res.json({ status: approved ? 'approved' : 'rejected', analysis: { score: analysis.score, rugProb: analysis.rug_probability, bundled: analysis.bundle_detected } });
 });
@@ -455,6 +932,90 @@ app.post('/api/extended-info/purchase', (req, res) => {
 
     res.json({ requestId, paymentInstructions: payment, price: EXTENDED_INFO_PRICE_USD,
         features: ['Custom description', 'Social links', 'Team info', 'Roadmap', 'Header image', 'Search priority'] });
+});
+
+// ============================================================
+// LIVE PRICE (lightweight endpoint for real-time charting)
+// ============================================================
+app.get('/api/live/:address', (req, res) => {
+    const token = tokenCache.get(req.params.address);
+    if (!token) return res.json({ price: null });
+    res.json({
+        price: token.price,
+        priceNative: token.priceNative,
+        priceChange: token.priceChange,
+        volume: token.volume,
+        txns: token.txns,
+        ts: Date.now(),
+    });
+});
+
+// ============================================================
+// RECENT TRADES (via GeckoTerminal)
+// ============================================================
+const tradesCache = new Map();
+
+app.get('/api/trades/:address', async (req, res) => {
+    const { address } = req.params;
+    const cached = tradesCache.get(address);
+    if (cached && Date.now() - cached.ts < 8000) return res.json({ trades: cached.trades });
+
+    const token = tokenCache.get(address);
+    const poolAddr = token?.pairAddress || address;
+
+    const data = await safeFetch(
+        `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddr}/trades`
+    );
+
+    if (!data?.data) return res.json({ trades: [] });
+
+    const trades = data.data.slice(0, 50).map(t => {
+        const a = t.attributes || {};
+        return {
+            type: a.kind || 'unknown',
+            priceUsd: parseFloat(a.price_to_in_usd || a.price_from_in_usd || 0),
+            volumeUsd: parseFloat(a.volume_in_usd || 0),
+            tokenAmount: parseFloat(a.to_token_amount || a.from_token_amount || 0),
+            txHash: a.tx_hash || '',
+            maker: a.tx_from_address || '',
+            timestamp: a.block_timestamp || null,
+        };
+    });
+
+    tradesCache.set(address, { trades, ts: Date.now() });
+    res.json({ trades });
+});
+
+// ============================================================
+// BONDING CURVE STATUS (pump.fun tokens)
+// ============================================================
+app.get('/api/bonding/:address', (req, res) => {
+    const token = tokenCache.get(req.params.address);
+    if (!token) return res.json({ available: false });
+
+    const isPump = token.platform === 'pump';
+    if (!isPump) {
+        return res.json({ available: true, bonded: true, graduated: true, platform: token.platform || 'other', progress: 100 });
+    }
+
+    const GRAD_THRESHOLD = 69000;
+    const mcap = token.marketCap || token.fdv || 0;
+    const liq = token.liquidity || 0;
+    const progress = Math.min((mcap / GRAD_THRESHOLD) * 100, 100);
+    const graduated = mcap >= GRAD_THRESHOLD || token.dexId === 'raydium';
+
+    res.json({
+        available: true,
+        bonded: graduated,
+        graduated,
+        platform: 'pump',
+        progress: graduated ? 100 : Math.round(progress * 10) / 10,
+        marketCap: mcap,
+        threshold: GRAD_THRESHOLD,
+        remainingUsd: graduated ? 0 : Math.max(0, GRAD_THRESHOLD - mcap),
+        liquidity: liq,
+        dexId: token.dexId,
+    });
 });
 
 // ============================================================
@@ -482,13 +1043,213 @@ function broadcastAll(data) {
     for (const ws of wsClients) { if (ws.readyState === 1) ws.send(msg); }
 }
 
-// Heartbeat
 setInterval(() => {
     for (const ws of wsClients) {
         if (!ws.isAlive) { ws.terminate(); wsClients.delete(ws); continue; }
         ws.isAlive = false; ws.ping();
     }
 }, 30000);
+
+// ============================================================
+// X OAUTH 2.0 — Connect X (read-only: tweets, followers)
+// ============================================================
+
+// Step 1: Generate auth URL with PKCE
+app.get('/api/x/auth', (req, res) => {
+    const { wallet } = req.query;
+    if (!wallet) return res.status(400).json({ error: 'Wallet address required' });
+
+    // Generate PKCE code verifier + challenge
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    const state = crypto.randomBytes(16).toString('hex');
+
+    // Store state for callback
+    xOAuthState.set(state, { codeVerifier, wallet, ts: Date.now() });
+
+    // Clean up old states (> 10 min)
+    for (const [s, data] of xOAuthState) {
+        if (Date.now() - data.ts > 600000) xOAuthState.delete(s);
+    }
+
+    const authUrl = 'https://x.com/i/oauth2/authorize?' + new URLSearchParams({
+        response_type: 'code',
+        client_id: X_CLIENT_ID,
+        redirect_uri: X_REDIRECT_URI,
+        scope: X_SCOPES,
+        state: state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+    }).toString();
+
+    res.json({ authUrl, state });
+});
+
+// Step 2: OAuth callback — exchange code for token, fetch profile
+app.get('/api/x/callback', async (req, res) => {
+    const { code, state } = req.query;
+
+    if (!code || !state) {
+        return res.redirect('/?x_error=missing_params');
+    }
+
+    const oauthData = xOAuthState.get(state);
+    if (!oauthData) {
+        return res.redirect('/?x_error=invalid_state');
+    }
+    xOAuthState.delete(state);
+
+    try {
+        // Exchange code for access token
+        const basicAuth = Buffer.from(`${X_CLIENT_ID}:${X_CLIENT_SECRET}`).toString('base64');
+        const tokenRes = await fetch('https://api.x.com/2/oauth2/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': `Basic ${basicAuth}`,
+            },
+            body: new URLSearchParams({
+                code: code,
+                grant_type: 'authorization_code',
+                redirect_uri: X_REDIRECT_URI,
+                code_verifier: oauthData.codeVerifier,
+            }).toString(),
+        });
+
+        if (!tokenRes.ok) {
+            console.error('[DEXAI] X token exchange failed:', tokenRes.status, await tokenRes.text());
+            return res.redirect('/?x_error=token_exchange');
+        }
+
+        const tokenData = await tokenRes.json();
+        const accessToken = tokenData.access_token;
+
+        // Fetch X user profile
+        const profileRes = await fetch('https://api.x.com/2/users/me?user.fields=id,name,username,profile_image_url', {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+        });
+
+        if (!profileRes.ok) {
+            console.error('[DEXAI] X profile fetch failed:', profileRes.status);
+            return res.redirect('/?x_error=profile_fetch');
+        }
+
+        const profileData = await profileRes.json();
+        const xUser = profileData.data;
+
+        // Store X connection linked to wallet
+        xConnections.set(oauthData.wallet, {
+            xId: xUser.id,
+            xUsername: xUser.username,
+            xName: xUser.name,
+            xProfileImage: xUser.profile_image_url,
+            connectedAt: Date.now(),
+        });
+
+        console.log(`[DEXAI] X connected: @${xUser.username} → wallet ${oauthData.wallet.slice(0, 8)}...`);
+
+        // Redirect back to DEXAI with success
+        res.redirect(`/?x_connected=${encodeURIComponent(xUser.username)}`);
+
+    } catch (e) {
+        console.error('[DEXAI] X OAuth error:', e.message);
+        res.redirect('/?x_error=server_error');
+    }
+});
+
+// Step 3: Get current X connection for a wallet
+app.get('/api/x/connection', (req, res) => {
+    const { wallet } = req.query;
+    if (!wallet) return res.status(400).json({ error: 'Wallet required' });
+
+    const conn = xConnections.get(wallet);
+    if (!conn) return res.json({ connected: false });
+
+    res.json({
+        connected: true,
+        username: conn.xUsername,
+        name: conn.xName,
+        profileImage: conn.xProfileImage,
+        connectedAt: conn.connectedAt,
+    });
+});
+
+// Step 4: X badge for token — checks if deployer/fee-recipient has X linked
+app.get('/api/x/badge/:tokenAddress', async (req, res) => {
+    const { tokenAddress } = req.params;
+    if (!tokenAddress) return res.json({ badges: [] });
+
+    const badges = [];
+
+    try {
+        // Check BAGS.FM for token creator and fee recipients
+        const [creatorData, feeData] = await Promise.all([
+            safeFetch(`${BAGS_FM_API}/tokens/${tokenAddress}/creators`),
+            safeFetch(`${BAGS_FM_API}/tokens/${tokenAddress}/fee-claimers`),
+        ]);
+
+        // Collect all associated wallets (deployer + fee recipients)
+        const associatedWallets = new Set();
+
+        if (creatorData) {
+            const creator = creatorData.creator || creatorData.deployer || creatorData.wallet;
+            if (creator) associatedWallets.add(typeof creator === 'string' ? creator : creator.wallet || creator.address);
+            // Handle array format
+            if (Array.isArray(creatorData)) {
+                for (const c of creatorData) {
+                    const w = c.wallet || c.address || c.creator;
+                    if (w) associatedWallets.add(w);
+                }
+            }
+        }
+
+        if (feeData) {
+            const claimers = feeData.claimers || feeData.fee_recipients || feeData;
+            if (Array.isArray(claimers)) {
+                for (const c of claimers) {
+                    const w = c.wallet || c.address || c.claimer;
+                    if (w) associatedWallets.add(w);
+                }
+            }
+        }
+
+        // Also try the generic BAGS.FM token endpoint
+        const tokenInfo = await safeFetch(`${BAGS_FM_API}/tokens/${tokenAddress}`);
+        if (tokenInfo) {
+            if (tokenInfo.creator) associatedWallets.add(tokenInfo.creator);
+            if (tokenInfo.fee_recipient) associatedWallets.add(tokenInfo.fee_recipient);
+            if (tokenInfo.deployer) associatedWallets.add(tokenInfo.deployer);
+        }
+
+        // Check which associated wallets have X connections
+        for (const wallet of associatedWallets) {
+            const xConn = xConnections.get(wallet);
+            if (xConn) {
+                badges.push({
+                    wallet: wallet.slice(0, 4) + '..' + wallet.slice(-4),
+                    role: creatorData && (creatorData.creator === wallet || creatorData.deployer === wallet || creatorData.wallet === wallet)
+                        ? 'deployer' : 'fee_recipient',
+                    xUsername: xConn.xUsername,
+                    xName: xConn.xName,
+                    xProfileImage: xConn.xProfileImage,
+                });
+            }
+        }
+    } catch (e) {
+        console.error('[DEXAI] X badge lookup error:', e.message);
+    }
+
+    res.json({ badges });
+});
+
+// Disconnect X from wallet
+app.post('/api/x/disconnect', (req, res) => {
+    const { wallet } = req.body;
+    if (!wallet) return res.status(400).json({ error: 'Wallet required' });
+
+    const had = xConnections.delete(wallet);
+    res.json({ disconnected: had });
+});
 
 // ============================================================
 // SPA ROUTING
@@ -500,10 +1261,20 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 // START
 // ============================================================
 server.listen(PORT, () => {
-    console.log(`\n  DEXAI v2.0 — Farnsworth Collective DEX Screener`);
-    console.log(`  Port: ${PORT} | Ecosystem: ${ECOSYSTEM_WALLET.slice(0, 8)}... | FARNS: ${FARNS_TOKEN.slice(0, 8)}...\n`);
+    console.log(`\n  DEXAI v2.1 — Farnsworth Collective DEX Screener`);
+    console.log(`  Port: ${PORT} | Ecosystem: ${ECOSYSTEM_WALLET.slice(0, 8)}... | FARNS: ${FARNS_TOKEN.slice(0, 8)}...`);
+    console.log(`  Trending: Market(35%) + Collective(25%) + Quantum(15%) + Whale(15%) + Burn(10%)`);
+    console.log(`  Platforms: ${ALLOWED_SUFFIXES.join(', ')} | Burn boost = 3x SOL boost\n`);
+
+    // Initial data fetch
+    fetchCollectiveData();
     updateTokenCache();
+
+    // Refresh cycles
     setInterval(updateTokenCache, FETCH_INTERVAL);
+    setInterval(fetchCollectiveData, COLLECTIVE_FETCH_INTERVAL);
+    // Quantum scoring for top tokens every 5 minutes
+    setTimeout(() => { batchQuantumScore(); setInterval(batchQuantumScore, 300000); }, 60000);
 });
 
 module.exports = { app, server, broadcastAll };

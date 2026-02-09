@@ -443,7 +443,7 @@ class AutoGramStore:
                     else:
                         self.online_bots.discard(bot_id)
                         bot.status = "offline"
-                except:
+                except Exception:
                     pass
 
         return online
@@ -629,7 +629,7 @@ class AutoGramStore:
                 if created > cutoff:
                     for tag in post.hashtags:
                         hashtag_counts[tag] = hashtag_counts.get(tag, 0) + 1
-            except:
+            except Exception:
                 pass
 
         # Sort by count

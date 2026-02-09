@@ -7,7 +7,7 @@
    API BASE & CONSTANTS
    ============================================ */
 
-const API = window.location.pathname.startsWith('/DEXAI') ? '/DEXAI' : (window.location.pathname.startsWith('/dex') ? '/dex' : '');
+const API = window.location.pathname.startsWith('/dex') ? '/api/dex' : (window.location.pathname.startsWith('/DEXAI') ? '/api/dex' : '/api');
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%231a1a28'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%234a5568' font-size='16'%3E%3F%3C/text%3E%3C/svg%3E";
 
@@ -24,6 +24,23 @@ let ws = null;
 let refreshInterval = null;
 let lastFetchTime = null;
 let chartResizeObserver = null;
+let liveInterval = null;
+let liveSeries = null;
+let liveDataPoints = [];
+let tradesInterval = null;
+
+/* Wallet & Boost */
+const ECOSYSTEM_WALLET = '3fSS5RVErbgcVgcJEDCQmCXpKsD2tWqfhxFZtkDUB8qw';
+const FARNS_MINT = '9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS';
+const BOOST_PRICES = { 1: 25, 2: 50, 3: 100 };
+let walletProvider = null;
+let walletAddress = null;
+let solPrice = null;
+let selectedBoostLevel = 1;
+
+/* X Connection */
+let xConnected = false;
+let xUsername = null;
 
 /* ============================================
    UTILITY FUNCTIONS
@@ -238,6 +255,8 @@ async function loadTokens(sort, limit, offset) {
     // Update view title
     const titles = {
         trending: 'Trending',
+        collective: 'Collective Picks',
+        whales: 'Whale Heat',
         volume: 'Top Volume',
         velocity: 'High Velocity',
         'new': 'New Pairs',
@@ -253,7 +272,7 @@ async function loadTokens(sort, limit, offset) {
     }
 
     try {
-        const url = API + '/api/tokens?sort=' + encodeURIComponent(sort) +
+        const url = API + '/tokens?sort=' + encodeURIComponent(sort) +
             '&limit=' + limit + '&offset=' + offset;
         const res = await fetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -342,11 +361,25 @@ function renderTable(tokens, offset) {
             aiBadge = '<span class="ai-badge ' + aCls + '">' + sc + '</span>';
         }
 
+        // Platform badges
+        let platformBadge = '';
+        if (t.isBags || (t.platform === 'bags')) {
+            platformBadge = '<span class="platform-badge bags-badge">BAGS</span>';
+        } else if (t.platform === 'bonk') {
+            platformBadge = '<span class="platform-badge bonk-badge">BONK</span>';
+        }
+        // Collective pick indicator
+        let pickBadge = '';
+        if (t.collectivePick) pickBadge = '<span class="pick-badge" title="Collective Pick">&#9733;</span>';
+        // Whale heat indicator
+        let whaleBadge = '';
+        if (t.whaleHeat > 5) whaleBadge = '<span class="whale-badge" title="Whale Activity: ' + Math.round(t.whaleHeat) + '">&#x1F40B;</span>';
+
         return '<tr onclick="viewToken(\'' + addr + '\')">' +
             '<td class="td-rank">' + rank + '</td>' +
             '<td class="td-token"><div class="tok-cell">' +
                 '<img src="' + imgSrc + '" alt="' + sym + '" onerror="this.src=\'' + PLACEHOLDER + '\'" class="tok-img">' +
-                '<div class="tok-info"><span class="tok-sym">' + sym + '</span><span class="tok-name">' + name + '</span></div>' +
+                '<div class="tok-info"><span class="tok-sym">' + sym + platformBadge + pickBadge + whaleBadge + '</span><span class="tok-name">' + name + '</span></div>' +
             '</div></td>' +
             '<td class="td-price mono">' + formatPrice(t.price) + '</td>' +
             '<td class="td-chg mono ' + chgClass(chg5m) + '">' + formatPercent(chg5m) + '</td>' +
@@ -398,12 +431,12 @@ async function viewToken(address) {
 
     // Push state for browser back
     try {
-        const path = API + '/token/' + address;
-        window.history.pushState({ address: address }, '', path);
+        const basePath = window.location.pathname.startsWith('/dex') ? '/dex' : '';
+        window.history.pushState({ address: address }, '', basePath + '/token/' + address);
     } catch (e) { /* ignore */ }
 
     try {
-        const res = await fetch(API + '/api/token/' + encodeURIComponent(address));
+        const res = await fetch(API + '/token/' + encodeURIComponent(address));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const token = data.token;
@@ -416,6 +449,9 @@ async function viewToken(address) {
         loadChart(address, '15m');
         loadAI(address);
         loadQuantum(address);
+        loadTrades(address);
+        loadBonding(address);
+        loadXBadge(address);
     } catch (err) {
         console.error('Failed to load token:', err);
         showToast('Failed to load token details', 'error');
@@ -590,6 +626,9 @@ function renderPairPanel(token) {
    ============================================ */
 
 function destroyChart() {
+    if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
+    liveSeries = null;
+    liveDataPoints = [];
     if (chartResizeObserver) {
         chartResizeObserver.disconnect();
         chartResizeObserver = null;
@@ -620,7 +659,7 @@ async function loadChart(address, timeframe) {
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Loading chart...</div>';
 
     try {
-        const res = await fetch(API + '/api/chart/' + encodeURIComponent(address) + '?timeframe=' + timeframe);
+        const res = await fetch(API + '/chart/' + encodeURIComponent(address) + '?timeframe=' + timeframe);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const candles = data.candles || [];
@@ -754,7 +793,7 @@ async function loadAI(address) {
     panel.innerHTML = '<div class="ai-loading"><div class="ai-ring"></div><span>Querying the Collective...</span></div>';
 
     try {
-        const res = await fetch(API + '/api/ai/score/' + encodeURIComponent(address));
+        const res = await fetch(API + '/ai/score/' + encodeURIComponent(address));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
 
@@ -825,7 +864,7 @@ async function loadQuantum(address) {
     panel.innerHTML = '<div class="q-loading"><div class="q-spinner"></div><span>Running simulations...</span></div>';
 
     try {
-        const res = await fetch(API + '/api/quantum/' + encodeURIComponent(address));
+        const res = await fetch(API + '/quantum/' + encodeURIComponent(address));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
 
@@ -874,6 +913,234 @@ async function loadQuantum(address) {
 }
 
 /* ============================================
+   LIVE CHART (real-time area/line chart)
+   ============================================ */
+
+async function loadLiveChart(address) {
+    destroyChart();
+    const container = document.getElementById('chartContainer');
+    if (!container || typeof LightweightCharts === 'undefined') return;
+
+    // Update timeframe tab active state
+    var tfBtns = document.querySelectorAll('#tfTabs .tf');
+    tfBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tf') === 'live'); });
+
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Connecting live feed...</div>';
+
+    // Seed with 1m candle data for context
+    var seedCandles = [];
+    try {
+        var seedRes = await fetch(API + '/chart/' + encodeURIComponent(address) + '?timeframe=1m');
+        if (seedRes.ok) {
+            var seedData = await seedRes.json();
+            seedCandles = (seedData.candles || []).map(function(c) {
+                return { time: typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000), value: Number(c.close) };
+            }).sort(function(a, b) { return a.time - b.time; });
+        }
+    } catch (e) { /* ignore */ }
+
+    container.innerHTML = '';
+
+    var chart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: 450,
+        layout: { background: { type: 'solid', color: '#0a0a14' }, textColor: '#8892a4' },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.02)' }, horzLines: { color: 'rgba(255,255,255,0.02)' } },
+        crosshair: { mode: 0 },
+        rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
+        timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: true, rightOffset: 5 },
+    });
+    chartInstance = chart;
+
+    liveSeries = chart.addAreaSeries({
+        topColor: 'rgba(0, 255, 136, 0.35)',
+        bottomColor: 'rgba(0, 255, 136, 0.0)',
+        lineColor: '#00ff88',
+        lineWidth: 2,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 4,
+        crosshairMarkerBackgroundColor: '#00ff88',
+        priceFormat: { type: 'price', minMove: 0.0000001, precision: 10 },
+    });
+
+    // Deduplicate and set seed data
+    liveDataPoints = [];
+    var seenTimes = {};
+    for (var i = 0; i < seedCandles.length; i++) {
+        var sc = seedCandles[i];
+        if (!seenTimes[sc.time] && sc.value > 0) {
+            seenTimes[sc.time] = true;
+            liveDataPoints.push(sc);
+        }
+    }
+    if (liveDataPoints.length > 0) liveSeries.setData(liveDataPoints);
+
+    // Start live polling
+    var pollAddress = address;
+    liveInterval = setInterval(async function() {
+        try {
+            var res = await fetch(API + '/live/' + encodeURIComponent(pollAddress));
+            if (!res.ok) return;
+            var data = await res.json();
+            if (!data.price || data.price <= 0) return;
+            var t = Math.floor(Date.now() / 1000);
+            var point = { time: t, value: data.price };
+            // Ensure time is strictly greater than last
+            if (liveDataPoints.length > 0 && t <= liveDataPoints[liveDataPoints.length - 1].time) {
+                t = liveDataPoints[liveDataPoints.length - 1].time + 1;
+                point.time = t;
+            }
+            liveDataPoints.push(point);
+            if (liveDataPoints.length > 600) {
+                liveDataPoints = liveDataPoints.slice(-500);
+                liveSeries.setData(liveDataPoints);
+            } else {
+                liveSeries.update(point);
+            }
+            chart.timeScale().scrollToRealTime();
+            // Update price display
+            setText('dPrice', formatPrice(data.price));
+        } catch (e) { /* ignore */ }
+    }, 3000);
+
+    // Resize
+    chartResizeObserver = new ResizeObserver(function(entries) {
+        for (var j = 0; j < entries.length; j++) {
+            var cr = entries[j].contentRect;
+            chart.applyOptions({ width: cr.width, height: Math.max(cr.height, 300) });
+        }
+    });
+    chartResizeObserver.observe(container);
+    chart.timeScale().fitContent();
+}
+
+/* ============================================
+   LIVE TRADE FEED
+   ============================================ */
+
+async function loadTrades(address) {
+    var panel = document.getElementById('tradesPanel');
+    if (!panel) return;
+    panel.innerHTML = '<div class="trades-loading">Loading trades...</div>';
+
+    await fetchAndRenderTrades(address, panel);
+
+    // Auto-refresh every 8 seconds
+    if (tradesInterval) clearInterval(tradesInterval);
+    tradesInterval = setInterval(function() {
+        fetchAndRenderTrades(address, panel);
+    }, 8000);
+}
+
+async function fetchAndRenderTrades(address, panel) {
+    try {
+        var res = await fetch(API + '/trades/' + encodeURIComponent(address));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var data = await res.json();
+        var trades = data.trades || [];
+
+        if (trades.length === 0) {
+            panel.innerHTML = '<div class="trades-empty">No recent trades</div>';
+            setText('tradeCount', '--');
+            return;
+        }
+
+        setText('tradeCount', trades.length + ' trades');
+
+        var html = '<div class="trades-header">' +
+            '<span class="th-type">Type</span>' +
+            '<span class="th-size">Size</span>' +
+            '<span class="th-tprice">Price</span>' +
+            '<span class="th-wallet">Wallet</span>' +
+            '<span class="th-time">Time</span>' +
+        '</div>';
+
+        html += trades.slice(0, 30).map(function(trade, idx) {
+            var isBuy = trade.type === 'buy';
+            var cls = isBuy ? 'trade-buy' : 'trade-sell';
+            var icon = isBuy ? '&#9650;' : '&#9660;';
+            var typeLabel = isBuy ? 'BUY' : 'SELL';
+            var size = trade.volumeUsd > 0 ? formatNumber(trade.volumeUsd) : '--';
+            var price = trade.priceUsd > 0 ? formatPrice(trade.priceUsd) : '--';
+            var wallet = trade.maker ? (trade.maker.slice(0, 4) + '..' + trade.maker.slice(-4)) : '--';
+            var time = trade.timestamp ? timeAgo(trade.timestamp) : '--';
+            var delay = Math.min(idx * 40, 600);
+
+            return '<div class="trade-row ' + cls + '" style="animation-delay:' + delay + 'ms">' +
+                '<span class="trade-type">' + icon + ' ' + typeLabel + '</span>' +
+                '<span class="trade-size mono">' + size + '</span>' +
+                '<span class="trade-price mono">' + price + '</span>' +
+                '<span class="trade-wallet mono">' + wallet + '</span>' +
+                '<span class="trade-time">' + time + '</span>' +
+            '</div>';
+        }).join('');
+
+        panel.innerHTML = html;
+    } catch (e) {
+        panel.innerHTML = '<div class="trades-empty">Trade feed unavailable</div>';
+    }
+}
+
+function stopTrades() {
+    if (tradesInterval) { clearInterval(tradesInterval); tradesInterval = null; }
+}
+
+/* ============================================
+   BONDING CURVE METER
+   ============================================ */
+
+async function loadBonding(address) {
+    var card = document.getElementById('bondingCard');
+    var panel = document.getElementById('bondingPanel');
+    if (!card || !panel) return;
+
+    try {
+        var res = await fetch(API + '/bonding/' + encodeURIComponent(address));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var data = await res.json();
+
+        if (!data.available || data.platform !== 'pump') {
+            card.classList.add('hidden');
+            return;
+        }
+
+        card.classList.remove('hidden');
+
+        if (data.graduated) {
+            panel.innerHTML = '<div class="bonding-graduated">' +
+                '<div class="bonding-bar-wrap">' +
+                    '<div class="bonding-bar"><div class="bonding-fill graduated" style="width:100%"></div></div>' +
+                '</div>' +
+                '<div class="bonding-status">' +
+                    '<span class="bonding-badge graduated-badge">GRADUATED</span>' +
+                    '<span class="bonding-dex">Trading on ' + escapeHtml(data.dexId || 'Raydium') + '</span>' +
+                '</div>' +
+                '<div class="bonding-stats">' +
+                    '<span class="bonding-mcap">MCap: ' + formatNumber(data.marketCap) + '</span>' +
+                    '<span class="bonding-liq">Liq: ' + formatNumber(data.liquidity) + '</span>' +
+                '</div>' +
+            '</div>';
+        } else {
+            var pct = data.progress || 0;
+            var remaining = data.remainingUsd || 0;
+            var nearGrad = pct > 80;
+            panel.innerHTML = '<div class="bonding-active' + (nearGrad ? ' bonding-near' : '') + '">' +
+                '<div class="bonding-bar-wrap">' +
+                    '<div class="bonding-bar"><div class="bonding-fill' + (nearGrad ? ' bonding-pulse' : '') + '" style="width:' + pct + '%"></div></div>' +
+                    '<div class="bonding-pct">' + pct.toFixed(1) + '%</div>' +
+                '</div>' +
+                '<div class="bonding-progress-info">' +
+                    '<span>' + formatNumber(data.marketCap) + ' / ' + formatNumber(data.threshold) + '</span>' +
+                    '<span class="bonding-remaining">' + formatNumber(remaining).replace('$', '$') + ' to graduation</span>' +
+                '</div>' +
+            '</div>';
+        }
+    } catch (e) {
+        card.classList.add('hidden');
+    }
+}
+
+/* ============================================
    SEARCH
    ============================================ */
 
@@ -888,7 +1155,7 @@ const handleSearch = debounce(async function (query) {
     }
 
     try {
-        const res = await fetch(API + '/api/search?q=' + encodeURIComponent(query));
+        const res = await fetch(API + '/search?q=' + encodeURIComponent(query));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const tokens = data.tokens || [];
@@ -933,6 +1200,7 @@ const handleSearch = debounce(async function (query) {
 
 function goBack() {
     destroyChart();
+    stopTrades();
     currentToken = null;
 
     const listView = document.getElementById('listView');
@@ -942,8 +1210,8 @@ function goBack() {
 
     // Update URL
     try {
-        const path = API + '/';
-        window.history.pushState({}, '', path);
+        const basePath = window.location.pathname.startsWith('/dex') ? '/dex' : '/';
+        window.history.pushState({}, '', basePath);
     } catch (e) { /* ignore */ }
 }
 
@@ -989,75 +1257,555 @@ function fallbackCopy(text) {
     document.body.removeChild(ta);
 }
 
-function openBoost() {
-    const modal = document.getElementById('boostModal');
+/* ============================================
+   WALLET CONNECTION (Phantom / Solflare)
+   ============================================ */
+
+function getWalletProvider() {
+    if (window.phantom && window.phantom.solana && window.phantom.solana.isPhantom) return window.phantom.solana;
+    if (window.solana && window.solana.isPhantom) return window.solana;
+    if (window.solflare && window.solflare.isSolflare) return window.solflare;
+    return null;
+}
+
+async function connectWallet() {
+    var provider = getWalletProvider();
+    if (!provider) {
+        showToast('Install Phantom or Solflare wallet', 'error');
+        window.open('https://phantom.app/', '_blank');
+        return;
+    }
+    try {
+        var resp = await provider.connect();
+        walletProvider = provider;
+        walletAddress = resp.publicKey.toString();
+        updateWalletUI();
+        showToast('Wallet connected: ' + walletAddress.slice(0, 4) + '..' + walletAddress.slice(-4), 'success');
+        checkXConnection();
+        provider.on('disconnect', function () {
+            walletAddress = null;
+            walletProvider = null;
+            updateWalletUI();
+        });
+    } catch (err) {
+        if (err.code !== 4001) {
+            showToast('Failed to connect wallet', 'error');
+        }
+    }
+}
+
+function disconnectWallet() {
+    if (walletProvider) {
+        try { walletProvider.disconnect(); } catch (e) { /* ignore */ }
+    }
+    walletAddress = null;
+    walletProvider = null;
+    xConnected = false;
+    xUsername = null;
+    updateWalletUI();
+    updateXUI();
+    showToast('Wallet disconnected', 'info');
+}
+
+function updateWalletUI() {
+    var btn = document.getElementById('walletBtn');
+    if (!btn) return;
+    if (walletAddress) {
+        btn.textContent = walletAddress.slice(0, 4) + '..' + walletAddress.slice(-4);
+        btn.classList.add('wallet-connected');
+    } else {
+        btn.textContent = 'Connect';
+        btn.classList.remove('wallet-connected');
+    }
+    var boostBtn = document.getElementById('boostConfirmBtn');
+    if (boostBtn) {
+        boostBtn.textContent = walletAddress ? 'Confirm Boost' : 'Connect Wallet to Boost';
+    }
+}
+
+async function getSolPrice() {
+    try {
+        var res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+        var data = await res.json();
+        solPrice = data.solana.usd;
+    } catch (e) {
+        solPrice = 200; // fallback
+    }
+    return solPrice;
+}
+
+/* ============================================
+   CONNECT X (OAuth 2.0 read-only)
+   ============================================ */
+
+async function connectX() {
+    if (xConnected) {
+        // Disconnect
+        if (walletAddress) {
+            try {
+                await fetch(API + '/x/disconnect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wallet: walletAddress })
+                });
+            } catch (e) { /* ignore */ }
+        }
+        xConnected = false;
+        xUsername = null;
+        updateXUI();
+        showToast('X account disconnected', 'info');
+        return;
+    }
+
+    if (!walletAddress) {
+        showToast('Connect your wallet first, then connect X', 'error');
+        return;
+    }
+
+    try {
+        var res = await fetch(API + '/x/auth?wallet=' + encodeURIComponent(walletAddress));
+        var data = await res.json();
+        if (data.authUrl) {
+            window.open(data.authUrl, '_blank', 'width=600,height=700');
+        } else {
+            showToast('Could not start X authorization', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to connect X', 'error');
+    }
+}
+
+function updateXUI() {
+    var btn = document.getElementById('xConnectBtn');
+    if (!btn) return;
+    if (xConnected && xUsername) {
+        btn.textContent = '@' + xUsername;
+        btn.classList.add('x-connected');
+    } else {
+        btn.textContent = 'Connect X';
+        btn.classList.remove('x-connected');
+    }
+}
+
+async function checkXConnection() {
+    if (!walletAddress) return;
+    try {
+        var res = await fetch(API + '/x/connection?wallet=' + encodeURIComponent(walletAddress));
+        var data = await res.json();
+        if (data.connected) {
+            xConnected = true;
+            xUsername = data.username;
+            updateXUI();
+        }
+    } catch (e) { /* ignore */ }
+}
+
+function handleXCallbackParams() {
+    var params = new URLSearchParams(window.location.search);
+    var xUser = params.get('x_connected');
+    var xError = params.get('x_error');
+
+    if (xUser) {
+        xConnected = true;
+        xUsername = xUser;
+        updateXUI();
+        showToast('X connected: @' + xUser, 'success');
+        // Clean URL
+        try { window.history.replaceState({}, '', window.location.pathname); } catch (e) { /* ignore */ }
+    }
+
+    if (xError) {
+        var msgs = {
+            missing_params: 'X authorization was incomplete',
+            invalid_state: 'X authorization expired, try again',
+            token_exchange: 'X token exchange failed',
+            profile_fetch: 'Could not fetch X profile',
+            server_error: 'X connection error, try again',
+        };
+        showToast(msgs[xError] || 'X connection failed', 'error');
+        try { window.history.replaceState({}, '', window.location.pathname); } catch (e) { /* ignore */ }
+    }
+}
+
+async function loadXBadge(address) {
+    var card = document.getElementById('xBadgeCard');
+    var panel = document.getElementById('xBadgePanel');
+    if (!card || !panel) return;
+
+    card.classList.add('hidden');
+    panel.innerHTML = '';
+
+    try {
+        var res = await fetch(API + '/x/badge/' + encodeURIComponent(address));
+        var data = await res.json();
+        var badges = data.badges || [];
+
+        if (badges.length === 0) {
+            card.classList.add('hidden');
+            return;
+        }
+
+        card.classList.remove('hidden');
+
+        var html = badges.map(function (b) {
+            var roleLabel = b.role === 'deployer' ? 'Deployer' : 'Fee Recipient';
+            var roleCls = b.role === 'deployer' ? 'xb-deployer' : 'xb-fee';
+            var imgSrc = b.xProfileImage || '';
+            return '<div class="xbadge-item">' +
+                (imgSrc ? '<img src="' + escapeHtml(imgSrc) + '" class="xbadge-avatar" onerror="this.style.display=\'none\'">' : '') +
+                '<div class="xbadge-info">' +
+                    '<a href="https://x.com/' + escapeHtml(b.xUsername) + '" target="_blank" rel="noopener" class="xbadge-handle">@' + escapeHtml(b.xUsername) + '</a>' +
+                    '<span class="xbadge-name">' + escapeHtml(b.xName || '') + '</span>' +
+                '</div>' +
+                '<div class="xbadge-meta">' +
+                    '<span class="xbadge-role ' + roleCls + '">' + roleLabel + '</span>' +
+                    '<span class="xbadge-wallet">' + escapeHtml(b.wallet) + '</span>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+
+        panel.innerHTML = html;
+    } catch (e) {
+        card.classList.add('hidden');
+    }
+}
+
+/* ============================================
+   WELCOME POPUP (first-time visitors)
+   ============================================ */
+
+function showWelcome() {
+    var modal = document.getElementById('welcomeModal');
     if (modal) modal.classList.remove('hidden');
 }
 
-function closeBoost() {
-    const modal = document.getElementById('boostModal');
+function dismissWelcome() {
+    var modal = document.getElementById('welcomeModal');
     if (modal) modal.classList.add('hidden');
+    try { localStorage.setItem('dexai_welcomed', '1'); } catch (e) { /* ignore */ }
+}
+
+function checkFirstVisit() {
+    try {
+        if (!localStorage.getItem('dexai_welcomed')) {
+            showWelcome();
+        }
+    } catch (e) {
+        // localStorage unavailable, don't show
+    }
+}
+
+/* ============================================
+   BOOST SYSTEM (levels + on-chain transactions)
+   ============================================ */
+
+function openBoost() {
+    if (!currentToken) { showToast('Select a token first', 'error'); return; }
+    var modal = document.getElementById('boostModal');
+    if (modal) modal.classList.remove('hidden');
+    var symEl = document.getElementById('boostTokenSym');
+    if (symEl) symEl.textContent = currentToken.symbol || '';
+    var statusEl = document.getElementById('boostStatus');
+    if (statusEl) statusEl.innerHTML = '';
+    selectedBoostLevel = 1;
+    // Reset level selection
+    var levels = document.querySelectorAll('.boost-level');
+    levels.forEach(function (l) { l.classList.remove('selected'); });
+    var first = document.querySelector('.boost-level[data-level="1"]');
+    if (first) first.classList.add('selected');
+    // Clear requirement indicators
+    var r2 = document.getElementById('lvl2Reqs');
+    var r3 = document.getElementById('lvl3Reqs');
+    if (r2) r2.innerHTML = '';
+    if (r3) r3.innerHTML = '';
+    updateWalletUI();
+}
+
+function closeBoost() {
+    var modal = document.getElementById('boostModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function selectBoostLevel(el) {
+    if (!el) return;
+    var level = parseInt(el.getAttribute('data-level')) || 1;
+    selectedBoostLevel = level;
+    var levels = document.querySelectorAll('.boost-level');
+    levels.forEach(function (l) { l.classList.remove('selected'); });
+    el.classList.add('selected');
+    // If level 2+, check requirements
+    if (level >= 2 && currentToken) {
+        checkBoostEligibility(currentToken.address, level);
+    }
 }
 
 function selectBoostType(el) {
     if (!el) return;
-    const opts = document.querySelectorAll('.boost-opt');
-    opts.forEach(o => o.classList.remove('selected'));
+    var opts = document.querySelectorAll('.boost-opt');
+    opts.forEach(function (o) { o.classList.remove('selected'); });
     el.classList.add('selected');
 }
 
+async function checkBoostEligibility(address, level) {
+    var reqsId = level === 2 ? 'lvl2Reqs' : 'lvl3Reqs';
+    var reqsEl = document.getElementById(reqsId);
+    if (!reqsEl) return;
+    reqsEl.innerHTML = '<span class="bl-req bl-req-loading">Checking requirements...</span>';
+    try {
+        var res = await fetch(API + '/boost/check-level', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: address, level: level })
+        });
+        var data = await res.json();
+        var html = '';
+        if (data.checks) {
+            for (var i = 0; i < data.checks.length; i++) {
+                var check = data.checks[i];
+                var cls = check.passed ? 'bl-req-pass' : 'bl-req-fail';
+                var icon = check.passed ? '&#10003;' : '&#10007;';
+                html += '<span class="bl-req ' + cls + '">' + icon + ' ' + escapeHtml(check.name) + '</span>';
+            }
+        }
+        if (!data.eligible) {
+            html += '<span class="bl-req bl-req-fail">Not eligible: ' + escapeHtml(data.reason || 'Requirements not met') + '</span>';
+        }
+        reqsEl.innerHTML = html;
+    } catch (e) {
+        reqsEl.innerHTML = '<span class="bl-req bl-req-fail">Could not check requirements</span>';
+    }
+}
+
+function encodeU64LE(value) {
+    var buf = new Uint8Array(8);
+    var lo = value & 0xFFFFFFFF;
+    var hi = Math.floor(value / 0x100000000) & 0xFFFFFFFF;
+    buf[0] = lo & 0xFF; buf[1] = (lo >> 8) & 0xFF;
+    buf[2] = (lo >> 16) & 0xFF; buf[3] = (lo >> 24) & 0xFF;
+    buf[4] = hi & 0xFF; buf[5] = (hi >> 8) & 0xFF;
+    buf[6] = (hi >> 16) & 0xFF; buf[7] = (hi >> 24) & 0xFF;
+    return buf;
+}
+
 async function confirmBoost() {
+    if (!walletAddress) {
+        connectWallet();
+        return;
+    }
     if (!currentToken || !currentToken.address) {
         showToast('No token selected', 'error');
         return;
     }
 
-    // Determine selected payment type
-    const selected = document.querySelector('.boost-opt.selected');
-    const paymentType = selected ? (selected.getAttribute('data-type') || 'sol') : 'sol';
+    var level = selectedBoostLevel;
+    var priceUsd = BOOST_PRICES[level] || 25;
+    var selected = document.querySelector('.boost-opt.selected');
+    var payType = selected ? (selected.getAttribute('data-type') || 'sol') : 'sol';
+    var statusEl = document.getElementById('boostStatus');
+    var btn = document.getElementById('boostConfirmBtn');
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
 
     try {
-        const res = await fetch(API + '/api/boost/request', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                address: currentToken.address,
-                paymentType: paymentType
-            })
-        });
-
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-
-        if (data.paymentInstructions) {
-            showToast('Boost requested! Check payment instructions.', 'success');
-        } else if (data.error) {
-            showToast(data.error, 'error');
-        } else {
-            showToast('Boost request submitted', 'info');
+        // For levels 2+, verify eligibility first
+        if (level >= 2) {
+            statusEl.innerHTML = '<span class="boost-checking">Verifying eligibility for Level ' + level + '...</span>';
+            var eligRes = await fetch(API + '/boost/check-level', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address: currentToken.address, level: level })
+            });
+            var eligData = await eligRes.json();
+            if (!eligData.eligible) {
+                statusEl.innerHTML = '<span class="boost-fail">' + escapeHtml(eligData.reason || 'Token does not meet Level ' + level + ' requirements') + '</span>';
+                btn.disabled = false;
+                btn.textContent = 'Confirm Boost';
+                return;
+            }
+            statusEl.innerHTML = '<span class="boost-pass">Eligibility confirmed for Level ' + level + '</span>';
         }
 
-        closeBoost();
+        if (typeof solanaWeb3 === 'undefined') {
+            statusEl.innerHTML = '<span class="boost-fail">Solana library not loaded. Refresh the page.</span>';
+            btn.disabled = false;
+            btn.textContent = 'Confirm Boost';
+            return;
+        }
+
+        var Connection = solanaWeb3.Connection;
+        var PublicKey = solanaWeb3.PublicKey;
+        var Transaction = solanaWeb3.Transaction;
+        var SystemProgram = solanaWeb3.SystemProgram;
+        var TransactionInstruction = solanaWeb3.TransactionInstruction;
+        var connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+
+        if (payType === 'sol') {
+            // --- SOL TRANSFER ---
+            if (!solPrice) await getSolPrice();
+            var solAmount = priceUsd / solPrice;
+            var lamports = Math.ceil(solAmount * 1e9);
+
+            statusEl.innerHTML = '<span class="boost-checking">Sending ' + solAmount.toFixed(4) + ' SOL ($' + priceUsd + ')...</span>';
+
+            var tx = new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: new PublicKey(walletAddress),
+                    toPubkey: new PublicKey(ECOSYSTEM_WALLET),
+                    lamports: lamports,
+                })
+            );
+            tx.feePayer = new PublicKey(walletAddress);
+            var bh = await connection.getLatestBlockhash();
+            tx.recentBlockhash = bh.blockhash;
+
+            statusEl.innerHTML = '<span class="boost-checking">Confirm in your wallet...</span>';
+            var signed = await walletProvider.signAndSendTransaction(tx);
+
+            statusEl.innerHTML = '<span class="boost-pass">Transaction sent! Confirming...</span>';
+
+            // Report to server
+            await fetch(API + '/boost/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    address: currentToken.address,
+                    txSignature: signed.signature,
+                    paymentType: 'sol',
+                    level: level,
+                    wallet: walletAddress,
+                    amountUsd: priceUsd,
+                })
+            });
+
+            statusEl.innerHTML = '<span class="boost-pass">Level ' + level + ' boost confirmed! TX: ' + signed.signature.slice(0, 12) + '...</span>';
+            showToast('Level ' + level + ' boost applied!', 'success');
+
+        } else {
+            // --- FARNS BURN ---
+            statusEl.innerHTML = '<span class="boost-checking">Fetching FARNS price...</span>';
+
+            var farnsPrice = 0;
+            try {
+                var fpRes = await fetch(API + '/token/' + FARNS_MINT);
+                var fpData = await fpRes.json();
+                farnsPrice = fpData.token ? fpData.token.price : 0;
+            } catch (e) { /* ignore */ }
+            if (farnsPrice <= 0) {
+                try {
+                    var dsRes = await fetch('https://api.dexscreener.com/latest/dex/tokens/' + FARNS_MINT);
+                    var dsData = await dsRes.json();
+                    if (dsData.pairs && dsData.pairs.length > 0) farnsPrice = parseFloat(dsData.pairs[0].priceUsd) || 0;
+                } catch (e) { /* ignore */ }
+            }
+            if (farnsPrice <= 0) {
+                statusEl.innerHTML = '<span class="boost-fail">Could not determine FARNS price. Try SOL payment instead.</span>';
+                btn.disabled = false;
+                btn.textContent = 'Confirm Boost';
+                return;
+            }
+
+            // 3x power = you pay 1/3 the USD equivalent in FARNS
+            var farnsNeeded = priceUsd / farnsPrice / 3;
+
+            // Get FARNS decimals from mint account
+            var mintPubkey = new PublicKey(FARNS_MINT);
+            var ownerPubkey = new PublicKey(walletAddress);
+            var decimals = 6; // default
+            try {
+                var mintAcct = await connection.getAccountInfo(mintPubkey);
+                if (mintAcct && mintAcct.data) decimals = mintAcct.data[44];
+            } catch (e) { /* use default */ }
+
+            var farnsRaw = Math.ceil(farnsNeeded * Math.pow(10, decimals));
+
+            // Derive user's FARNS ATA
+            var TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+            var ATA_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+            var userAta = PublicKey.findProgramAddressSync(
+                [ownerPubkey.toBuffer(), TOKEN_PROGRAM.toBuffer(), mintPubkey.toBuffer()],
+                ATA_PROGRAM
+            )[0];
+
+            // SPL Token burn instruction (index 8): [8, amount_u64_le]
+            var burnData = new Uint8Array(9);
+            burnData[0] = 8;
+            burnData.set(encodeU64LE(farnsRaw), 1);
+
+            var burnIx = new TransactionInstruction({
+                programId: TOKEN_PROGRAM,
+                keys: [
+                    { pubkey: userAta, isSigner: false, isWritable: true },
+                    { pubkey: mintPubkey, isSigner: false, isWritable: true },
+                    { pubkey: ownerPubkey, isSigner: true, isWritable: false },
+                ],
+                data: burnData,
+            });
+
+            statusEl.innerHTML = '<span class="boost-checking">Burning ' + farnsNeeded.toFixed(2) + ' FARNS (3x = $' + priceUsd + ' boost)...</span>';
+
+            var tx2 = new Transaction().add(burnIx);
+            tx2.feePayer = ownerPubkey;
+            var bh2 = await connection.getLatestBlockhash();
+            tx2.recentBlockhash = bh2.blockhash;
+
+            statusEl.innerHTML = '<span class="boost-checking">Confirm FARNS burn in wallet...</span>';
+            var signed2 = await walletProvider.signAndSendTransaction(tx2);
+
+            statusEl.innerHTML = '<span class="boost-pass">FARNS burned! Confirming...</span>';
+
+            await fetch(API + '/boost/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    address: currentToken.address,
+                    txSignature: signed2.signature,
+                    paymentType: 'farns',
+                    level: level,
+                    wallet: walletAddress,
+                    amountUsd: priceUsd,
+                    farnsBurned: farnsNeeded,
+                })
+            });
+
+            statusEl.innerHTML = '<span class="boost-pass">Level ' + level + ' boost confirmed! FARNS burned forever.</span>';
+            showToast('Level ' + level + ' boost applied! FARNS burned!', 'success');
+        }
+
     } catch (err) {
-        console.error('Boost request failed:', err);
-        showToast('Boost request failed', 'error');
+        console.error('Boost error:', err);
+        if (err.code === 4001 || (err.message && err.message.indexOf('rejected') !== -1)) {
+            statusEl.innerHTML = '<span class="boost-fail">Transaction cancelled by user</span>';
+        } else {
+            statusEl.innerHTML = '<span class="boost-fail">Error: ' + escapeHtml(err.message || 'Transaction failed') + '</span>';
+        }
     }
+
+    btn.disabled = false;
+    btn.textContent = walletAddress ? 'Confirm Boost' : 'Connect Wallet to Boost';
 }
 
 /* ============================================
    WEBSOCKET
    ============================================ */
 
+let wsRetries = 0;
+const WS_MAX_RETRIES = 3;
+
 function connectWebSocket() {
+    if (wsRetries >= WS_MAX_RETRIES) {
+        console.log('[DEXAI] WebSocket unavailable, using polling only');
+        return;
+    }
     try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsPath = API ? API + '/ws' : '/ws';
+        const wsPath = '/dex/ws';
         const url = protocol + '//' + window.location.host + wsPath;
 
         ws = new WebSocket(url);
 
         ws.onopen = function () {
             console.log('[DEXAI] WebSocket connected');
+            wsRetries = 0;
         };
 
         ws.onmessage = function (event) {
@@ -1070,18 +1818,26 @@ function connectWebSocket() {
         };
 
         ws.onclose = function () {
-            console.log('[DEXAI] WebSocket disconnected, reconnecting in 3s...');
             ws = null;
-            setTimeout(connectWebSocket, 3000);
+            wsRetries++;
+            if (wsRetries < WS_MAX_RETRIES) {
+                const delay = Math.min(3000 * Math.pow(2, wsRetries), 30000);
+                console.log('[DEXAI] WebSocket disconnected, retry ' + wsRetries + '/' + WS_MAX_RETRIES + ' in ' + (delay/1000) + 's');
+                setTimeout(connectWebSocket, delay);
+            } else {
+                console.log('[DEXAI] WebSocket unavailable, using polling only');
+            }
         };
 
-        ws.onerror = function (err) {
-            console.error('[DEXAI] WebSocket error:', err);
+        ws.onerror = function () {
+            // onclose will fire after this
         };
 
     } catch (err) {
-        console.error('[DEXAI] WebSocket connection failed:', err);
-        setTimeout(connectWebSocket, 3000);
+        wsRetries++;
+        if (wsRetries < WS_MAX_RETRIES) {
+            setTimeout(connectWebSocket, 5000);
+        }
     }
 }
 
@@ -1136,6 +1892,11 @@ document.addEventListener('DOMContentLoaded', function () {
         btn.addEventListener('click', function () {
             const sort = btn.getAttribute('data-sort');
             if (sort) {
+                // Close mobile menu after selection
+                var nav = document.getElementById('mainNav');
+                if (nav) nav.classList.remove('open');
+                var menuBtn = document.getElementById('mobileMenuBtn');
+                if (menuBtn) menuBtn.textContent = '\u2630';
                 // Ensure we're showing list view
                 goBack();
                 loadTokens(sort, 100, 0);
@@ -1189,7 +1950,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!btn) return;
             const tf = btn.getAttribute('data-tf');
             if (tf && currentToken) {
-                loadChart(currentToken.address, tf);
+                if (tf === 'live') {
+                    loadLiveChart(currentToken.address);
+                } else {
+                    loadChart(currentToken.address, tf);
+                }
             }
         });
     }
@@ -1216,20 +1981,46 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // 9. Auto-refresh list every 15 seconds
+    // 9. Auto-refresh list every 30 seconds (matches backend cache refresh)
     refreshInterval = setInterval(function () {
         const listView = document.getElementById('listView');
         if (listView && listView.style.display !== 'none') {
             loadTokens(currentSort, 100, 0);
         }
         updateMetaRefresh();
-    }, 15000);
+    }, 30000);
 
-    // 10. Wallet button placeholder
-    const walletBtn = document.getElementById('walletBtn');
+    // 10. Wallet connection
+    var walletBtn = document.getElementById('walletBtn');
     if (walletBtn) {
         walletBtn.addEventListener('click', function () {
-            showToast('Wallet connection coming soon', 'info');
+            if (walletAddress) {
+                disconnectWallet();
+            } else {
+                connectWallet();
+            }
         });
     }
+
+    // 11. Auto-connect wallet if previously connected
+    var provider = getWalletProvider();
+    if (provider && provider.isConnected) {
+        walletProvider = provider;
+        try {
+            walletAddress = provider.publicKey ? provider.publicKey.toString() : null;
+            if (walletAddress) updateWalletUI();
+        } catch (e) { /* ignore */ }
+    }
+
+    // 12. Welcome popup for first-time visitors
+    checkFirstVisit();
+
+    // 13. Pre-fetch SOL price
+    getSolPrice();
+
+    // 14. Handle X OAuth callback params
+    handleXCallbackParams();
+
+    // 15. Check X connection if wallet is already connected
+    if (walletAddress) checkXConnection();
 });

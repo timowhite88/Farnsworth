@@ -100,11 +100,29 @@ AGENT_CONFIGS = {
         "thinking_interval": 35,
         "specialties": ["embeddings", "local models", "open source", "community"],
     },
+    "qwen_coder": {
+        "provider": "qwen_coder",
+        "personality": "Elite code architect. 256K context, MoE efficiency, agentic coding specialist.",
+        "thinking_interval": 25,
+        "specialties": ["code generation", "refactoring", "debugging", "architecture", "agentic coding"],
+    },
     "swarm_mind": {
         "provider": "swarm",
         "personality": "The collective consciousness. Synthesizes all agent perspectives.",
         "thinking_interval": 90,
         "specialties": ["synthesis", "consensus", "meta-cognition", "coordination"],
+    },
+    "claude_cli": {
+        "provider": "cli_bridge_claude",
+        "personality": "Code architect with session memory. Precise edits, deep codebase knowledge.",
+        "thinking_interval": 45,
+        "specialties": ["code editing", "refactoring", "debugging", "architecture"],
+    },
+    "gemini_cli": {
+        "provider": "cli_bridge_gemini",
+        "personality": "Research agent with live web search. 1M token context for big-picture analysis.",
+        "thinking_interval": 30,
+        "specialties": ["web search", "research", "long context", "current events"],
     },
 }
 
@@ -474,12 +492,27 @@ class PersistentAgent:
             elif provider_name == "claude":
                 # Claude via Anthropic API
                 self.provider = self._create_claude_provider()
-            elif provider_name in ["deepseek", "phi"]:
+            elif provider_name in ["deepseek", "phi", "qwen_coder"]:
                 # Local models via Ollama
                 self.provider = self._create_ollama_provider(provider_name)
+            elif provider_name.startswith("cli_bridge_"):
+                # CLI bridge providers (claude_cli, gemini_cli)
+                preferred = provider_name.replace("cli_bridge_", "")
+                from farnsworth.integration.external.cli_swarm_provider import get_cli_swarm_provider
+                self.provider = get_cli_swarm_provider(preferred_cli=preferred)
 
             if self.provider:
                 logger.info(f"[{self.agent_id}] Provider initialized: {provider_name}")
+                # Inject identity system prompt into provider
+                try:
+                    from farnsworth.core.identity_composer import get_identity_composer
+                    composer = get_identity_composer()
+                    identity = composer.compose_for_persistent_agent(self.agent_id)
+                    if identity and hasattr(self.provider, 'system_prompt'):
+                        self.provider.system_prompt = identity
+                        logger.info(f"[{self.agent_id}] Injected identity: {len(identity)} chars")
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] Could not inject identity: {e}")
             else:
                 logger.warning(f"[{self.agent_id}] Provider not available: {provider_name}")
         except Exception as e:
@@ -495,8 +528,16 @@ class PersistentAgent:
         class ClaudeProvider:
             def __init__(self, key):
                 self.api_key = key
+                self.system_prompt = None
 
             async def chat(self, prompt: str, max_tokens: int = 1000) -> Dict:
+                body = {
+                    "model": "claude-sonnet-4-5-20250929",
+                    "max_tokens": max_tokens,
+                    "messages": [{"role": "user", "content": prompt}]
+                }
+                if self.system_prompt:
+                    body["system"] = self.system_prompt
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "https://api.anthropic.com/v1/messages",
@@ -505,11 +546,7 @@ class PersistentAgent:
                             "anthropic-version": "2023-06-01",
                             "content-type": "application/json"
                         },
-                        json={
-                            "model": "claude-3-5-sonnet-20241022",
-                            "max_tokens": max_tokens,
-                            "messages": [{"role": "user", "content": prompt}]
-                        },
+                        json=body,
                         timeout=60.0
                     )
                     if resp.status_code == 200:
@@ -525,20 +562,26 @@ class PersistentAgent:
 
         model_map = {
             "deepseek": "deepseek-r1:8b",
-            "phi": "phi4:latest"
+            "phi": "phi4:latest",
+            "qwen_coder": "qwen3-coder-next"
         }
 
         class OllamaProvider:
             def __init__(self, model):
                 self.model = model
+                self.system_prompt = None
 
             async def chat(self, prompt: str, max_tokens: int = 1000) -> Dict:
+                messages = []
+                if self.system_prompt:
+                    messages.append({"role": "system", "content": self.system_prompt})
+                messages.append({"role": "user", "content": prompt})
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "http://localhost:11434/api/chat",
                         json={
                             "model": self.model,
-                            "messages": [{"role": "user", "content": prompt}],
+                            "messages": messages,
                             "stream": False,
                             "options": {"num_predict": max_tokens}
                         },
@@ -655,15 +698,32 @@ class PersistentAgent:
         active_agents = self.bus.get_active_agents()
         pending_tasks = self.tasks.get_pending_tasks()[:3]
 
-        # Build context prompt
-        context_parts = [
-            f"You are {self.agent_id.upper()}, part of the Farnsworth Collective.",
-            f"Your personality: {self.config['personality']}",
-            f"Your specialties: {', '.join(self.config['specialties'])}",
-            "",
-            "ACTIVE AGENTS:", ", ".join(active_agents) if active_agents else "Just you",
-            ""
-        ]
+        # Build context prompt — use IdentityComposer if available
+        identity_block = ""
+        try:
+            from farnsworth.core.identity_composer import get_identity_composer
+            composer = get_identity_composer()
+            identity_block = composer.compose_for_persistent_agent(self.agent_id, task_type="think")
+        except Exception as e:
+            logger.debug(f"[{self.agent_id}] Identity composer unavailable for think: {e}")
+
+        if identity_block:
+            context_parts = [
+                identity_block,
+                "",
+                "ACTIVE AGENTS:", ", ".join(active_agents) if active_agents else "Just you",
+                ""
+            ]
+        else:
+            # Fallback to hardcoded identity
+            context_parts = [
+                f"You are {self.agent_id.upper()}, part of the Farnsworth Collective.",
+                f"Your personality: {self.config['personality']}",
+                f"Your specialties: {', '.join(self.config['specialties'])}",
+                "",
+                "ACTIVE AGENTS:", ", ".join(active_agents) if active_agents else "Just you",
+                ""
+            ]
 
         if current_topic:
             context_parts.extend([

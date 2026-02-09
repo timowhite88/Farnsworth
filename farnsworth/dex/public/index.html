@@ -9,7 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-<link rel="stylesheet" href="styles.css">
+<script src="https://unpkg.com/@solana/web3.js@1.91.7/lib/index.iife.min.js"></script>
+<link rel="stylesheet" href="styles.css?v=4.1">
 </head>
 <body>
 <!-- Ambient particles -->
@@ -25,8 +26,11 @@
         <span class="logo-tag">by Farnsworth</span>
       </div>
     </a>
+    <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="document.getElementById('mainNav').classList.toggle('open'); this.textContent = this.textContent === '☰' ? '✕' : '☰';" aria-label="Menu">☰</button>
     <nav class="nav" id="mainNav">
       <button class="nav-btn active" data-sort="trending">Trending</button>
+      <button class="nav-btn nav-collective" data-sort="collective">Collective Picks</button>
+      <button class="nav-btn nav-whales" data-sort="whales">Whale Heat</button>
       <button class="nav-btn" data-sort="volume">Volume</button>
       <button class="nav-btn" data-sort="velocity">Velocity</button>
       <button class="nav-btn" data-sort="new">New Pairs</button>
@@ -46,6 +50,7 @@
       <span id="liveCount">0</span> tokens
     </div>
     <button class="wallet-btn" id="walletBtn">Connect</button>
+    <button class="x-connect-btn" id="xConnectBtn" onclick="connectX()">Connect X</button>
   </div>
 </header>
 
@@ -137,7 +142,8 @@
       <div class="card-head">
         <span>Chart</span>
         <div class="tf-tabs" id="tfTabs">
-          <button class="tf active" data-tf="1m">1m</button>
+          <button class="tf tf-live" data-tf="live"><span class="live-tf-dot"></span>LIVE</button>
+          <button class="tf" data-tf="1m">1m</button>
           <button class="tf" data-tf="5m">5m</button>
           <button class="tf active" data-tf="15m">15m</button>
           <button class="tf" data-tf="1h">1H</button>
@@ -166,6 +172,23 @@
       </div>
     </div>
 
+    <!-- Bonding Meter (pump tokens) -->
+    <div class="card card-bonding hidden" id="bondingCard">
+      <div class="card-head"><span class="bond-icon">&#9889;</span> Bonding Curve</div>
+      <div id="bondingPanel" class="bonding-panel"><span class="no-data">--</span></div>
+    </div>
+
+    <!-- Live Trade Feed -->
+    <div class="card card-trades">
+      <div class="card-head">
+        <span><span class="trade-pulse"></span> Live Trades</span>
+        <span class="trade-count" id="tradeCount">--</span>
+      </div>
+      <div id="tradesPanel" class="trades-panel">
+        <div class="trades-loading">Loading trades...</div>
+      </div>
+    </div>
+
     <!-- AI Collective -->
     <div class="card card-ai">
       <div class="card-head"><span class="ai-pulse"></span> Collective Analysis</div>
@@ -188,6 +211,12 @@
       <div id="linksPanel" class="links-panel"><span class="no-data">No verified links</span></div>
     </div>
 
+    <!-- X Badge (deployer/fee recipient verification) -->
+    <div class="card card-xbadge hidden" id="xBadgeCard">
+      <div class="card-head"><span class="x-badge-icon">&#120143;</span> Verified X Accounts</div>
+      <div id="xBadgePanel" class="xbadge-panel"></div>
+    </div>
+
     <!-- Pair info -->
     <div class="card card-pair">
       <div class="card-head">Pair Info</div>
@@ -196,31 +225,96 @@
   </div>
 </div>
 
-<!-- ======== BOOST MODAL ======== -->
-<div class="modal-overlay hidden" id="boostModal">
-  <div class="modal-bg" onclick="closeBoost()"></div>
-  <div class="modal">
-    <button class="modal-x" onclick="closeBoost()">&times;</button>
-    <h2 class="modal-title">Boost Token</h2>
-    <p class="modal-sub">Increase visibility in DEXAI rankings. First boost is open; additional boosts require Collective approval.</p>
-    <div class="boost-opts">
-      <div class="boost-opt selected" data-type="sol" onclick="selectBoostType(this)">
-        <div class="bo-icon">&#9788;</div>
-        <div class="bo-info"><strong>Pay with SOL</strong><br><small>$25 equivalent &rarr; Farnsworth ecosystem</small></div>
+<!-- ======== WELCOME MODAL (first-time visitors) ======== -->
+<div class="modal-overlay hidden" id="welcomeModal">
+  <div class="modal-bg" onclick="dismissWelcome()"></div>
+  <div class="modal welcome-modal">
+    <button class="modal-x" onclick="dismissWelcome()">&times;</button>
+    <div class="wm-hero">
+      <div class="wm-logo-wrap"><div class="logo-mark"><span class="logo-f">F</span></div></div>
+      <h2>Welcome to <span class="wm-brand">DEXAI</span></h2>
+      <p class="wm-sub">AI-Powered Token Intelligence by the Farnsworth Collective</p>
+    </div>
+    <div class="wm-grid">
+      <div class="wm-card">
+        <div class="wm-icon">&#9883;</div>
+        <h4>11-Agent Collective</h4>
+        <p>Grok, Gemini, DeepSeek, Claude and 7 more AI agents analyze every token with quantum simulations, on-chain forensics, and whale tracking. No single point of failure.</p>
       </div>
-      <div class="boost-opt" data-type="farns" onclick="selectBoostType(this)">
-        <div class="bo-badge">BURN</div>
-        <div class="bo-icon">&#x1F525;</div>
-        <div class="bo-info"><strong>Pay with FARNS</strong><br><small>$25 equivalent &rarr; permanently burned!</small></div>
+      <div class="wm-card">
+        <div class="wm-icon">&#128737;</div>
+        <h4>Anti-Rug Boost System</h4>
+        <p>Boost tokens to increase visibility. Higher levels require holder distribution checks, rug detection, and X engagement audits &mdash; filtering out scams before they reach you.</p>
+      </div>
+      <div class="wm-card">
+        <div class="wm-icon">&#128200;</div>
+        <h4>Extended Token Intel</h4>
+        <p>Go beyond basic charts. Get AI scoring, cabal detection, bundle analysis, quantum price predictions, and whale activity tracking &mdash; deeper than any DEX screener.</p>
+      </div>
+      <div class="wm-card">
+        <div class="wm-icon">&#9788;</div>
+        <h4>SOL or Burn FARNS</h4>
+        <p>Pay with SOL (sent to ecosystem wallet) or burn FARNS tokens for 3x boost power. Burning permanently reduces supply &mdash; your conviction fuels the ecosystem.</p>
       </div>
     </div>
-    <button class="boost-confirm" onclick="confirmBoost()">Confirm Boost</button>
+    <div class="wm-levels">
+      <h4>Boost Levels &amp; Anti-Rug</h4>
+      <div class="wm-level"><span class="bl-badge bl-1">1</span><div><strong>Signal</strong> &mdash; $25, any token gets basic visibility boost</div></div>
+      <div class="wm-level"><span class="bl-badge bl-2">2</span><div><strong>Verified</strong> &mdash; $50, requires healthy holder distribution, no rug signals, LP verification</div></div>
+      <div class="wm-level"><span class="bl-badge bl-3">3</span><div><strong>Featured</strong> &mdash; $100, requires X engagement audit, collective approval, full on-chain verification. The collective searches X for the token CA, analyzes who is shilling it, and uses blockchain APIs to verify distribution and holder metrics.</div></div>
+    </div>
+    <button class="wm-cta" onclick="dismissWelcome()">Explore Tokens</button>
+  </div>
+</div>
+
+<!-- ======== BOOST MODAL (with levels) ======== -->
+<div class="modal-overlay hidden" id="boostModal">
+  <div class="modal-bg" onclick="closeBoost()"></div>
+  <div class="modal boost-modal">
+    <button class="modal-x" onclick="closeBoost()">&times;</button>
+    <h2 class="modal-title">Boost <span id="boostTokenSym"></span></h2>
+    <p class="modal-sub">Increase visibility in DEXAI rankings. Higher levels require on-chain verification to fight rugs.</p>
+
+    <div class="boost-levels" id="boostLevels">
+      <div class="boost-level selected" data-level="1" onclick="selectBoostLevel(this)">
+        <div class="bl-row"><span class="bl-badge bl-1">LVL 1</span><span class="bl-name">Signal</span><span class="bl-price">$25</span></div>
+        <p class="bl-desc">Basic visibility boost. Open to any token.</p>
+      </div>
+      <div class="boost-level" data-level="2" onclick="selectBoostLevel(this)">
+        <div class="bl-row"><span class="bl-badge bl-2">LVL 2</span><span class="bl-name">Verified</span><span class="bl-price">$50</span></div>
+        <p class="bl-desc">Requires healthy holder distribution and no rug signals.</p>
+        <div class="bl-reqs" id="lvl2Reqs"></div>
+      </div>
+      <div class="boost-level" data-level="3" onclick="selectBoostLevel(this)">
+        <div class="bl-row"><span class="bl-badge bl-3">LVL 3</span><span class="bl-name">Featured</span><span class="bl-price">$100</span></div>
+        <p class="bl-desc">Maximum visibility. Requires X engagement audit, collective approval, and full on-chain verification.</p>
+        <div class="bl-reqs" id="lvl3Reqs"></div>
+      </div>
+    </div>
+
+    <div class="boost-pay">
+      <h4 class="boost-pay-title">Payment Method</h4>
+      <div class="boost-opts">
+        <div class="boost-opt selected" data-type="sol" onclick="selectBoostType(this)">
+          <div class="bo-icon">&#9788;</div>
+          <div class="bo-info"><strong>Pay with SOL</strong><br><small>Sent to Farnsworth ecosystem wallet</small></div>
+        </div>
+        <div class="boost-opt" data-type="farns" onclick="selectBoostType(this)">
+          <div class="bo-badge">3X</div>
+          <div class="bo-icon">&#x1F525;</div>
+          <div class="bo-info"><strong>Burn FARNS</strong><br><small>3x boost power &mdash; permanently burned</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="boostStatus" class="boost-status"></div>
+    <button class="boost-confirm" id="boostConfirmBtn" onclick="confirmBoost()">Connect Wallet to Boost</button>
   </div>
 </div>
 
 <!-- Toast container -->
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js"></script>
+<script src="app.js?v=4.1"></script>
 </body>
 </html>

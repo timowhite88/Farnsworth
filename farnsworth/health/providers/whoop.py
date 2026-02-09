@@ -328,7 +328,7 @@ class WHOOPProvider(HealthProvider):
                         timestamp=ts,
                         source="whoop",
                     ))
-                except:
+                except Exception:
                     pass
 
             score = record.get("score", {})

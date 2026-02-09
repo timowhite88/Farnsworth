@@ -1151,7 +1151,7 @@ class FarnsworthCLI:
             p2p_status = "" if swarm_fabric.peers else ""
             print(f"\n{p2p_status} P2P Network")
             print(f"   Peers: {len(swarm_fabric.peers)}")
-        except:
+        except Exception:
             print(f"\n P2P Network (not running)")
 
         input("\nPress Enter to continue...")

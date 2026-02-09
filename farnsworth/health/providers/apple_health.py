@@ -246,7 +246,7 @@ class AppleHealthProvider(HealthProvider):
         except ValueError:
             try:
                 return datetime.fromisoformat(date_str.replace(" ", "T"))
-            except:
+            except Exception:
                 return None
 
     async def _fetch_daily_summary_impl(self, target_date: date) -> Optional[DailySummary]:

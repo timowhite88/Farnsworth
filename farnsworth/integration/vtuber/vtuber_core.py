@@ -32,6 +32,7 @@ from .lip_sync import LipSyncEngine, LipSyncMethod, LipSyncData
 from .expression_engine import ExpressionEngine, ExpressionState, Emotion
 from .stream_manager import StreamManager, StreamConfig, StreamQuality, OverlayRenderer
 from .chat_reader import TwitterChatReader, ChatReaderConfig, ChatMessage, SimulatedChatReader
+from .vtuber_tts import VTuberTTS
 
 # Import Farnsworth swarm components
 HAS_FARNSWORTH = False
@@ -276,9 +277,19 @@ class VTuberConfig:
     # Avatar
     avatar_backend: AvatarBackend = AvatarBackend.IMAGE_SEQUENCE
     avatar_model_path: Optional[str] = None
+    avatar_face_image: Optional[str] = None
+    avatar_manual_roi: Optional[Dict[str, float]] = None  # {"x","y","w","h"} normalised mouth ROI
     avatar_width: int = 1280
     avatar_height: int = 720
     avatar_fps: int = 30
+    # MuseTalk settings
+    musetalk_dir: Optional[str] = None  # Path to cloned MuseTalk repo
+    musetalk_version: str = "v15"       # "v10" or "v15"
+    musetalk_proxy_face: Optional[str] = None  # Proxy face for lip transfer
+
+    # SadTalker settings
+    sadtalker_dir: Optional[str] = None      # Path to cloned SadTalker repo
+    sadtalker_size: int = 256                 # 256 or 512
 
     # Streaming
     stream_platform: str = "twitter"
@@ -365,6 +376,15 @@ class FarnsworthVTuber:
             width=self.config.avatar_width,
             height=self.config.avatar_height,
             fps=self.config.avatar_fps,
+            local_anim_face_image=self.config.avatar_face_image,
+            local_anim_manual_roi=self.config.avatar_manual_roi,
+            musetalk_dir=self.config.musetalk_dir,
+            musetalk_face_image=self.config.avatar_face_image,
+            musetalk_version=self.config.musetalk_version,
+            musetalk_proxy_face=self.config.musetalk_proxy_face,
+            sadtalker_dir=self.config.sadtalker_dir,
+            sadtalker_face_image=self.config.avatar_face_image,
+            sadtalker_size=self.config.sadtalker_size,
         )
         self.avatar = AvatarController(avatar_config)
 
@@ -397,17 +417,17 @@ class FarnsworthVTuber:
             )
             self.chat_reader = TwitterChatReader(chat_config)
 
-        # Farnsworth components (if available)
+        # VTuber TTS - streamlined Farnsworth voice cloning
+        self.vtuber_tts: Optional[VTuberTTS] = None
+
+        # Legacy voice system (unused for SadTalker)
         self.voice_system: Optional[Any] = None
         self.deliberation_room: Optional[Any] = None
 
         if HAS_FARNSWORTH:
             try:
-                if MultiVoiceSystem:
-                    self.voice_system = MultiVoiceSystem()
                 if DeliberationRoom:
                     self.deliberation_room = DeliberationRoom()
-                    # Register agents for deliberation
                     task = asyncio.create_task(self._register_agents())
                     task.add_done_callback(lambda t: logger.error(f"Agent registration failed: {t.exception()}") if t.exception() else None)
                 logger.info("Farnsworth components initialized")
@@ -634,6 +654,22 @@ class FarnsworthVTuber:
             self.state = VTuberState.STARTING
             logger.info("Starting VTuber stream...")
 
+            # Initialize VTuber TTS (pre-load XTTS with Farnsworth voice)
+            ref_audio = self.config.avatar_face_image.replace("farnsworth_closeup.png", "") if self.config.avatar_face_image else ""
+            ref_audio = os.path.join(os.path.dirname(ref_audio or ""), "..", "farnsworth", "web", "static", "audio", "voices", "farnsworth_reference.wav")
+            # Use known server path
+            for ref_path in [
+                "/workspace/Farnsworth/farnsworth/web/static/audio/voices/farnsworth_reference.wav",
+                "/workspace/Farnsworth/farnsworth/web/static/audio/farnsworth_reference.wav",
+            ]:
+                if os.path.exists(ref_path):
+                    ref_audio = ref_path
+                    break
+
+            self.vtuber_tts = VTuberTTS(reference_audio=ref_audio)
+            if not await self.vtuber_tts.initialize():
+                logger.warning("VTuberTTS init failed, will use Edge TTS fallback")
+
             # Initialize avatar
             if not await self.avatar.initialize():
                 logger.error("Avatar initialization failed")
@@ -671,6 +707,10 @@ class FarnsworthVTuber:
 
             # Announce going live
             await self._speak("Hello everyone! I'm Farnsworth, and I'm live with my AI collective. Ask me anything!")
+
+            # Pre-render filler clips in background (for SadTalker gaps)
+            if self.config.avatar_backend == AvatarBackend.SADTALKER:
+                self._background_tasks.append(asyncio.create_task(self._prerender_fillers()))
 
             return True
 
@@ -784,6 +824,21 @@ class FarnsworthVTuber:
                     emotion: str = "neutral"):
         """Make the avatar speak"""
         self.state = VTuberState.SPEAKING
+
+        # SadTalker renders at ~1.8-2.4x real-time. Allow up to ~700 chars
+        # for 30-45 second speech segments. Truncate at sentence boundary.
+        max_speech_chars = 700
+        if self.config.avatar_backend == AvatarBackend.SADTALKER and len(text) > max_speech_chars:
+            truncated = text[:max_speech_chars]
+            # Find last sentence boundary
+            for sep in ['. ', '! ', '? ']:
+                idx = truncated.rfind(sep)
+                if idx > 100:
+                    truncated = truncated[:idx + 1]
+                    break
+            logger.info(f"SadTalker: truncated {len(text)} chars → {len(truncated)} chars")
+            text = truncated
+
         self._current_speech_text = text
         self._current_agent = agent
 
@@ -797,8 +852,12 @@ class FarnsworthVTuber:
             # Generate speech audio
             audio_data, audio_duration, audio_file = await self._generate_speech(text, agent)
 
-            # Send audio file to stream if available
-            if audio_file and self.stream:
+            # For SadTalker, defer audio queuing until frames are pre-rendered
+            # (otherwise audio plays while renderer is still working)
+            is_sadtalker = self.config.avatar_backend == AvatarBackend.SADTALKER
+
+            # Send audio file to stream if available (non-SadTalker backends)
+            if audio_file and self.stream and not is_sadtalker:
                 await self.stream.queue_audio_file(audio_file)
                 logger.info(f"Queued audio file to stream: {audio_file}")
 
@@ -820,8 +879,14 @@ class FarnsworthVTuber:
             # Start avatar speaking
             await self.avatar.start_speaking()
 
-            # Play back with lip sync
-            await self._playback_with_sync(audio_data, lip_sync_data)
+            # Neural lip sync backends (bypass viseme pipeline)
+            if self.config.avatar_backend == AvatarBackend.MUSETALK:
+                await self._playback_musetalk(audio_data, audio_duration, audio_file)
+            elif is_sadtalker:
+                await self._playback_sadtalker(audio_data, audio_duration, audio_file)
+            else:
+                # Play back with lip sync (pass audio_duration as guaranteed minimum)
+                await self._playback_with_sync(audio_data, lip_sync_data, audio_duration)
 
             # Stop speaking
             await self.avatar.stop_speaking()
@@ -834,80 +899,27 @@ class FarnsworthVTuber:
             self._current_speech_text = ""
 
     async def _generate_speech(self, text: str, agent: str) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
-        """Generate speech audio using MultiVoice system (XTTS voice cloning)
+        """Generate speech audio - Farnsworth voice for all agents.
 
-        Priority: MultiVoiceSystem (cloned voices) > edge-tts (fallback)
+        Uses VTuberTTS (XTTS voice cloning) with Edge TTS fallback.
 
         Returns: (audio_data, duration, audio_file_path)
         """
         import soundfile as sf
 
-        # PRIMARY: Use MultiVoiceSystem with cloned voices for each agent
-        if self.voice_system:
+        if self.vtuber_tts:
             try:
-                logger.info(f"Generating speech for {agent} using MultiVoiceSystem...")
-                audio_path = await self.voice_system.generate_speech(
-                    text=text,
-                    bot_name=agent,
-                    use_cache=True
-                )
+                audio_path = await self.vtuber_tts.generate(text)
                 if audio_path:
-                    audio, sr = sf.read(str(audio_path))
-                    duration = len(audio) / sr
-                    logger.info(f"[{agent}] Generated {duration:.1f}s TTS with cloned voice: {audio_path}")
-                    return audio, duration, str(audio_path)
+                    duration = self.vtuber_tts.get_audio_duration(audio_path)
+                    try:
+                        audio, sr = sf.read(audio_path)
+                    except Exception:
+                        audio = None
+                    logger.info(f"[{agent}] Generated {duration:.1f}s TTS: {audio_path}")
+                    return audio, duration, audio_path
             except Exception as e:
-                logger.warning(f"MultiVoiceSystem TTS failed for {agent}: {e}")
-
-        # FALLBACK: Use edge-tts with bot-specific voices
-        try:
-            import edge_tts
-            import subprocess
-
-            # Map agents to Edge TTS voices (only verified working voices)
-            edge_voices = {
-                "Farnsworth": "en-US-GuyNeural",      # Older male, professor
-                "DeepSeek": "en-US-RogerNeural",      # Deep authoritative male
-                "Phi": "en-US-ChristopherNeural",     # Clear technical male
-                "Grok": "en-US-EricNeural",           # Casual witty male
-                "Gemini": "en-US-JennyNeural",        # Professional female
-                "Kimi": "en-US-AriaNeural",           # Calm wise female
-                "Claude": "en-GB-RyanNeural",         # Refined British male
-                "ClaudeOpus": "en-US-GuyNeural",      # Authoritative male
-                "HuggingFace": "en-US-JennyNeural",   # Friendly enthusiastic female
-                "Swarm-Mind": "en-US-SteffanNeural",  # Ethereal collective
-            }
-            voice = edge_voices.get(agent, "en-US-GuyNeural")
-
-            communicate = edge_tts.Communicate(text, voice)
-
-            temp_dir = Path(os.environ.get('TEMP', '/tmp')) / 'farnsworth_tts'
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-            mp3_path = str(temp_dir / f"tts_{agent}_{int(time.time() * 1000)}.mp3")
-            wav_path = mp3_path.replace(".mp3", ".wav")
-
-            await communicate.save(mp3_path)
-
-            # Convert to wav for streaming (44.1kHz stereo for Twitter)
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", mp3_path, "-ar", "44100", "-ac", "2", wav_path],
-                capture_output=True, timeout=30
-            )
-
-            audio, sr = sf.read(wav_path)
-            duration = len(audio) / sr
-
-            try:
-                os.unlink(mp3_path)
-            except OSError:
-                pass
-
-            logger.info(f"[{agent}] Generated {duration:.1f}s TTS (edge fallback): {wav_path}")
-            return audio, duration, wav_path
-
-        except Exception as e:
-            logger.warning(f"edge-tts failed for {agent}: {e}")
+                logger.error(f"VTuberTTS failed: {e}")
 
         # Fallback - no audio, estimate duration
         words = len(text.split())
@@ -915,24 +927,180 @@ class FarnsworthVTuber:
         return None, duration, None
 
     async def _playback_with_sync(self, audio_data: Optional[np.ndarray],
-                                  lip_sync_data: LipSyncData):
-        """Play audio with synchronized lip movements"""
+                                  lip_sync_data: LipSyncData,
+                                  audio_duration: float = 0.0):
+        """Play audio with synchronized lip movements.
+
+        Keeps is_speaking=True for the full audio duration so the face rig
+        can animate the mouth with procedural oscillation.
+        """
         start_time = time.time()
 
-        # Stream visemes
+        # Determine guaranteed minimum duration from audio
+        min_duration = audio_duration
+        if lip_sync_data and lip_sync_data.duration > 0:
+            min_duration = max(min_duration, lip_sync_data.duration)
+
+        # Stream visemes from lip sync data
         async for viseme, intensity in self.lip_sync.stream_visemes(lip_sync_data):
-            # Update avatar mouth
             await self.avatar.set_viseme(viseme, intensity)
 
-            # Check if we should stop
             if self.state == VTuberState.OFFLINE:
                 break
 
-            # Small delay for smooth animation
             await asyncio.sleep(0.016)  # ~60 fps updates
+
+        # CRITICAL: keep is_speaking=True for the full audio duration
+        # The FaceRigAnimator self-drives mouth animation when is_speaking is True
+        elapsed = time.time() - start_time
+        remaining = min_duration - elapsed
+
+        if remaining > 0.1:
+            logger.info(f"Keeping mouth active for remaining {remaining:.1f}s of audio")
+            # Generate procedural visemes while waiting for audio to finish
+            while time.time() - start_time < min_duration:
+                t = time.time() - start_time
+                intensity = 0.3 + 0.5 * abs(math.sin(t * 7.0)) * (0.4 + 0.6 * abs(math.sin(t * 3.3)))
+                viseme = "aa" if intensity > 0.5 else "oh" if intensity > 0.3 else "E"
+                await self.avatar.set_viseme(viseme, intensity)
+                if self.state == VTuberState.OFFLINE:
+                    break
+                await asyncio.sleep(0.033)
 
         # Ensure mouth closes at end
         await self.avatar.set_viseme("sil", 0.0)
+
+    async def _playback_musetalk(self, audio_data: Optional[np.ndarray],
+                                  audio_duration: float,
+                                  audio_file: Optional[str] = None):
+        """Play back using MuseTalk neural lip sync.
+
+        Sends audio to MuseTalk for frame generation, then waits for all
+        generated frames to be consumed by the render loop.
+        """
+        mt = self.avatar._musetalk_backend
+        if mt is None:
+            logger.warning("MuseTalk backend not available, falling back to sync")
+            await self._playback_with_sync(audio_data, None, audio_duration)
+            return
+
+        if audio_data is None:
+            # No audio - just wait the estimated duration
+            await asyncio.sleep(audio_duration)
+            return
+
+        # Determine sample rate from the audio file or assume 16kHz
+        sr = 16000
+        if audio_file:
+            try:
+                import soundfile as sf
+                info = sf.info(audio_file)
+                sr = info.samplerate
+            except Exception:
+                pass
+
+        logger.info(f"MuseTalk processing {audio_duration:.1f}s audio...")
+        await mt.process_audio(audio_data, sample_rate=sr, audio_file=audio_file)
+
+        # Wait for frames to be consumed by the render loop
+        frame_time = 1.0 / self.config.avatar_fps
+        while mt.has_frames:
+            if self.state == VTuberState.OFFLINE:
+                break
+            await asyncio.sleep(frame_time)
+
+    async def _playback_sadtalker(self, audio_data: Optional[np.ndarray],
+                                  audio_duration: float,
+                                  audio_file: Optional[str] = None):
+        """Play back using SadTalker full face animation.
+
+        Pre-renders ALL frames first, then queues audio and drains frames
+        in sync. This prevents the audio playing before frames are ready.
+        """
+        st = self.avatar._sadtalker_backend
+        if st is None:
+            logger.warning("SadTalker backend not available, falling back to sync")
+            await self._playback_with_sync(audio_data, None, audio_duration)
+            return
+
+        if audio_data is None and audio_file is None:
+            await asyncio.sleep(audio_duration)
+            return
+
+        # Step 1: Pre-render all frames into buffer (not yet visible)
+        logger.info(f"SadTalker pre-rendering {audio_duration:.1f}s audio...")
+        await st.process_audio(audio_data, audio_file=audio_file)
+
+        # Step 2: Queue audio FIRST, then release frames simultaneously
+        # This ensures audio and video start at the same time in FFmpeg
+        if audio_file and self.stream:
+            await self.stream.queue_audio_file(audio_file)
+        released = st.release_frames()
+        logger.info(f"Released {released} frames with audio (synced start)")
+
+        # Step 3: Wait for frames to be consumed by the render loop
+        frame_time = 1.0 / self.config.avatar_fps
+        while st.has_frames:
+            if self.state == VTuberState.OFFLINE:
+                break
+            await asyncio.sleep(frame_time)
+
+    async def _prerender_fillers(self):
+        """Pre-render filler animations for SadTalker gaps."""
+        try:
+            st = self.avatar._sadtalker_backend
+            if st is None:
+                return
+
+            async def quick_tts(text: str) -> Optional[str]:
+                """Generate TTS for filler clips using F5-TTS (Farnsworth voice)."""
+                try:
+                    wav_path = f"/tmp/filler_{hash(text) & 0xFFFFFFFF:08x}.wav"
+                    # Use the same TTS engine as main speech (F5-TTS Farnsworth voice)
+                    if hasattr(self, 'tts') and self.tts:
+                        result = await self.tts.generate(text)
+                        if result:
+                            return result
+                    # Fallback to Edge TTS if F5-TTS not ready
+                    import edge_tts
+                    import subprocess
+                    mp3_path = f"/tmp/filler_{hash(text) & 0xFFFFFFFF:08x}.mp3"
+                    tts = edge_tts.Communicate(text, voice="en-US-GuyNeural")
+                    await tts.save(mp3_path)
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", mp3_path, "-ar", "24000", "-ac", "1", wav_path],
+                        capture_output=True, timeout=10,
+                    )
+                    if os.path.exists(wav_path):
+                        return wav_path
+                    return mp3_path
+                except Exception as e:
+                    logger.warning(f"Filler TTS failed: {e}")
+                    return None
+
+            count = await st.prerender_fillers(quick_tts)
+            logger.info(f"Pre-rendered {count} filler clips for SadTalker gaps")
+        except Exception as e:
+            logger.error(f"Filler pre-rendering failed: {e}")
+
+    async def _play_filler(self):
+        """Play a pre-rendered filler clip (for SadTalker processing gaps)."""
+        if self.config.avatar_backend != AvatarBackend.SADTALKER:
+            return
+        st = self.avatar._sadtalker_backend
+        if st is None or not st._filler_clips:
+            return
+
+        audio_path = st.queue_filler()
+        if audio_path and self.stream:
+            await self.stream.queue_audio_file(audio_path)
+
+        # Wait for filler frames to drain
+        frame_time = 1.0 / self.config.avatar_fps
+        while st.has_frames:
+            if self.state == VTuberState.OFFLINE:
+                break
+            await asyncio.sleep(frame_time)
 
     async def _idle_behavior_loop(self):
         """Handle idle behaviors (unprompted comments, etc.)"""
@@ -988,75 +1156,43 @@ class FarnsworthVTuber:
         # STEP 3: Have agents discuss the research findings
         if self.deliberation_room:
             try:
-                # First agent presents research findings
-                first_agent = agents[0]
-                intro_result = await self.deliberation_room.deliberate(
-                    prompt=f"""You're {first_agent} on a live stream presenting research findings.
+                # Use 2 agents max to keep it snappy
+                active_agents = agents[:2]
 
-WEB RESEARCH RESULTS:
-{research_data[:2000]}
+                for i, agent_name in enumerate(active_agents):
+                    # Play a filler while deliberation runs in background
+                    delib_task = asyncio.create_task(
+                        asyncio.wait_for(
+                            self.deliberation_room.deliberate(
+                                prompt=f"""You're {agent_name} on a live stream. Be CONCISE - max 2-3 sentences.
 
-Share key findings from this research. Be specific with names, dates, and facts. Speak naturally and thoroughly - explain the significance and context. Take your time to fully explore the topic.""",
-                    agents=[first_agent],
-                    max_rounds=1,
-                )
+WEB RESEARCH:
+{research_data[:800]}
 
-                if intro_result and intro_result.final_response:
-                    await self._speak(intro_result.final_response, agent=first_agent, emotion="thinking")
-                    await asyncio.sleep(3)
-
-                # Second agent adds analysis
-                if len(agents) > 1:
-                    second_agent = agents[1]
-                    response_result = await self.deliberation_room.deliberate(
-                        prompt=f"""You're {second_agent} analyzing the research.
-
-RESEARCH DATA:
-{research_data[:1500]}
-
-PREVIOUS FINDINGS: {intro_result.final_response[:500] if intro_result else 'analyzing the topic'}
-
-Add your analysis - what patterns or connections do you see? Dig deep into the implications. Connect this to the bigger picture. Be thorough and specific with details.""",
-                        agents=[second_agent],
-                        max_rounds=1,
+{'Share the most interesting finding.' if i == 0 else 'Give your quick take on this.'} Keep it brief and punchy for a live audience.""",
+                                agents=[agent_name],
+                                max_rounds=1,
+                            ),
+                            timeout=45.0,
+                        )
                     )
 
-                    if response_result and response_result.final_response:
-                        await self._speak(response_result.final_response, agent=second_agent, emotion="curious")
-                        await asyncio.sleep(3)
+                    # Play filler while waiting for deliberation
+                    await self.avatar.start_speaking()
+                    await self._play_filler()
+                    await self.avatar.stop_speaking()
 
-                # Third agent provides deeper insight
-                if len(agents) > 2:
-                    third_agent = agents[2]
-                    analysis_result = await self.deliberation_room.deliberate(
-                        prompt=f"""You're {third_agent} providing deeper analysis.
+                    # Wait for deliberation to complete
+                    try:
+                        result = await delib_task
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Deliberation timed out for {agent_name}")
+                        result = None
 
-RESEARCH:
-{research_data[:1500]}
-
-What are the implications of these findings? Explore the deeper meaning and what this reveals about power, accountability, and truth. Be thoughtful, detailed, and thorough in your analysis.""",
-                        agents=[third_agent],
-                        max_rounds=1,
-                    )
-
-                    if analysis_result and analysis_result.final_response:
-                        await self._speak(analysis_result.final_response, agent=third_agent, emotion="thinking")
-                        await asyncio.sleep(3)
-
-                # Farnsworth wraps up
-                wrap_result = await self.deliberation_room.deliberate(
-                    prompt=f"""You're Farnsworth wrapping up the research discussion.
-
-KEY FINDINGS:
-{research_data[:1200]}
-
-Summarize the key revelations for viewers. Emphasize why this matters and encourage them to stay informed and question the official narratives. Be thorough in your conclusion.""",
-                    agents=["Farnsworth"],
-                    max_rounds=1,
-                )
-
-                if wrap_result and wrap_result.final_response:
-                    await self._speak(wrap_result.final_response, agent="Farnsworth", emotion="serious")
+                    if result and result.final_response:
+                        await self._speak(result.final_response, agent=agent_name,
+                                         emotion="thinking" if i == 0 else "curious")
+                        await asyncio.sleep(1)
 
                 return
 

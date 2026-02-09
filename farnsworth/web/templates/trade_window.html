@@ -164,7 +164,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 /* ===== RESPONSIVE ===== */
 @media(max-width:1200px){.feed-grid{grid-template-columns:1.2fr 1fr 1fr!important}.feed-panel.sniper-panel{grid-row:1/2}}
 @media(max-width:1000px){.feed-grid{grid-template-columns:1fr 1fr!important}.feed-panel.sniper-panel{grid-row:auto;grid-column:1/3}}
-@media(max-width:768px){.stats-row{grid-template-columns:repeat(3,1fr)}.bottom{grid-template-columns:1fr}.bp:first-child{border-right:none;border-bottom:1px solid var(--border)}.topbar-center{display:none}.intel-bar{gap:8px}}
+@media(max-width:768px){.stats-row{grid-template-columns:repeat(4,1fr)!important}.bottom{grid-template-columns:1fr}.bp:first-child{border-right:none;border-bottom:1px solid var(--border)}.topbar-center{display:none}.intel-bar{gap:8px}}
 @media(max-width:600px){.feed-grid{grid-template-columns:1fr!important}.feed-panel{border-right:none!important}.feed-panel.sniper-panel{grid-column:auto}.swarm-wrap{height:140px}}
 </style>
 </head>
@@ -181,7 +181,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 <div class="topbar">
   <div class="topbar-left">
     <div class="topbar-title">Farnsworth Command Center</div>
-    <div class="topbar-version">v3.7 INSTANT SNIPE</div>
+    <div class="topbar-version">v4.1 WHALE HUNTER</div>
   </div>
   <div class="topbar-center">
     <div class="status-pill" id="statusPill">
@@ -196,9 +196,11 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
 </div>
 
 <!-- ===== STATS ROW ===== -->
-<div class="stats-row">
+<div class="stats-row" style="grid-template-columns:repeat(8,1fr)">
   <div class="stat-cell"><div class="stat-lbl">Balance</div><div class="stat-val" id="sBalance">--</div></div>
+  <div class="stat-cell"><div class="stat-lbl">Invested</div><div class="stat-val" id="sInvested" style="color:var(--cyan)">0</div></div>
   <div class="stat-cell"><div class="stat-lbl">Total PnL</div><div class="stat-val" id="sPnl">--</div></div>
+  <div class="stat-cell"><div class="stat-lbl">Lost</div><div class="stat-val neg" id="sLost">0</div></div>
   <div class="stat-cell"><div class="stat-lbl">Win Rate</div><div class="stat-val" id="sWinRate">--</div></div>
   <div class="stat-cell"><div class="stat-lbl">Positions</div><div class="stat-val" id="sPositions">0</div></div>
   <div class="stat-cell"><div class="stat-lbl">Trades</div><div class="stat-val" id="sTrades">0</div></div>
@@ -210,7 +212,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
   <div class="intel-chip" id="icPump"><span class="dot"></span>Pump.fun</div>
   <div class="intel-chip" id="icBonk"><span class="dot"></span>Bonk</div>
   <div class="intel-chip" id="icBags"><span class="dot"></span>BAGS</div>
-  <div class="intel-chip" id="icInstant"><span class="dot"></span>Instant Snipe</div>
+  <div class="intel-chip" id="icInstant"><span class="dot"></span>Scalper</div>
   <div class="intel-chip" id="icSniper"><span class="dot"></span>Sniper</div>
   <div class="intel-chip" id="icCabal"><span class="dot"></span>Cabal Follow</div>
   <div class="intel-chip" id="icCopy"><span class="dot"></span>Copy Trade</div>
@@ -218,6 +220,10 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
   <div class="intel-chip" id="icQuantum"><span class="dot"></span>Quantum Oracle</div>
   <div class="intel-chip" id="icSwarm"><span class="dot"></span>Swarm Intel</div>
   <div class="intel-chip" id="icMemory"><span class="dot"></span>Memory</div>
+  <div class="intel-chip on" id="icHolder" style="color:var(--yellow)"><span class="dot" style="background:var(--yellow);box-shadow:0 0 6px rgba(234,179,8,0.4)"></span>Holder Watch</div>
+  <div class="intel-chip on" id="icBurn" style="color:var(--orange)"><span class="dot" style="background:var(--orange);box-shadow:0 0 6px rgba(249,115,22,0.4)"></span>Burn Watch</div>
+  <div class="intel-chip on" id="icLearner" style="color:var(--teal)"><span class="dot" style="background:var(--teal);box-shadow:0 0 6px rgba(20,184,166,0.4)"></span>Adaptive Learner</div>
+  <div class="intel-chip" id="icWhale"><span class="dot"></span>Whale Hunter</div>
 </div>
 
 <!-- ===== MAIN ===== -->
@@ -260,16 +266,25 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);over
   <div class="bp"><div class="bp-title">Recent Trades</div><div id="bpTrades"><div class="bp-empty">Awaiting signals...</div></div></div>
 </div>
 
+<!-- ===== LEARNER BAR ===== -->
+<div class="membar" style="background:rgba(20,184,166,0.04);border-top:1px solid rgba(20,184,166,0.15)">
+  <span class="ml" style="color:var(--teal)">ADAPTIVE LEARNER</span>
+  <span class="ms">Summary: <span class="mv" id="learnerSummary" style="color:var(--teal)">Initializing...</span></span>
+  <span class="ms">Failures: <span class="mv" id="learnerFailures">--</span></span>
+  <span class="ms">Insights: <span class="mv" id="learnerInsights">0</span></span>
+</div>
+
 <!-- ===== MEMORY BAR ===== -->
 <div class="membar">
-  <span class="ml">Instant Snipe + Quantum</span>
-  <span class="ms">Max Age: <span class="mv" id="mAge">15m</span></span>
-  <span class="ms">FDV Cap: <span class="mv" id="mFdv">$500k</span></span>
-  <span class="ms">Dev Buy Min: <span class="mv" id="mDevBuy">0.3 SOL</span></span>
-  <span class="ms">Cabal Signals: <span class="mv" id="mCabal">0</span></span>
-  <span class="ms">Wallets Tracked: <span class="mv" id="mWalTrack">0</span></span>
+  <span class="ml">Adaptive Learner v4.0</span>
+  <span class="ms">TP: <span class="mv" id="mTp">1.4x/1.5x</span></span>
+  <span class="ms">Score: <span class="mv" id="mScore">40</span></span>
+  <span class="ms">MaxHold: <span class="mv" id="mHold">30m</span></span>
+  <span class="ms">Dev Min: <span class="mv" id="mDevBuy">2.0 SOL</span></span>
+  <span class="ms">Adapt: <span class="mv" id="mAdapt">0</span></span>
+  <span class="ms">Cabal: <span class="mv" id="mCabal">0</span></span>
+  <span class="ms">Wallets: <span class="mv" id="mWalTrack">0</span></span>
   <span class="ms">Sniped: <span class="mv" id="mSnipe">0</span></span>
-  <span class="ms">WS Reconnects: <span class="mv" id="mWsRecon">0</span></span>
   <span class="ms">Hot: <span class="mv" id="mHot">0</span></span>
   <span class="ms">RPC: <span class="mv" id="mRpc">--</span></span>
   <a href="/demo" class="back-link">&larr; Back to Demo</a>
@@ -597,6 +612,8 @@ async function poll(){
       // Stats
       const pnl=d.total_pnl_sol||0;const pe=document.getElementById('sPnl');
       pe.textContent=`${pnl>=0?'+':''}${pnl.toFixed(4)} SOL`;pe.className=`stat-val ${pnl>=0?'pos':'neg'}`;
+      const inv=d.total_invested_sol||0;document.getElementById('sInvested').textContent=inv.toFixed(4)+' SOL';
+      const lost=d.total_lost_sol||0;document.getElementById('sLost').textContent=lost.toFixed(4)+' SOL';
       document.getElementById('sWinRate').textContent=`${d.win_rate||0}%`;
       document.getElementById('sPositions').textContent=d.open_positions||0;
       document.getElementById('sTrades').textContent=d.total_trades||0;
@@ -648,17 +665,64 @@ async function poll(){
         document.getElementById('fcSniper').textContent=sniperFeed.length+'+'+scanFeed.length;
       }
 
-      // Memory bar
+      // Memory bar (v3.8)
       const cfg=d.config||{};
-      document.getElementById('mAge').textContent=(cfg.max_age_minutes||15)+'m';
-      document.getElementById('mFdv').textContent='$'+(cfg.max_fdv?Math.round(cfg.max_fdv/1000)+'k':'500k');
+      document.getElementById('mTp').textContent=(cfg.quick_take_profit||1.4)+'x/'+(cfg.quick_take_profit_2||1.5)+'x';
+      document.getElementById('mScore').textContent=(cfg.effective_min_score||40)+(cfg.adapt_score_offset?` (${cfg.adapt_score_offset>0?'+':''}${cfg.adapt_score_offset})`:'');
+      document.getElementById('mHold').textContent=(cfg.max_hold_minutes||30)+'m';
+      document.getElementById('mDevBuy').textContent=(cfg.instant_snipe_min_dev_sol||2.0)+' SOL';
+      document.getElementById('mAdapt').textContent=cfg.adapt_score_offset||0;
       document.getElementById('mCabal').textContent=intel.cabal_signals_seen||0;
       document.getElementById('mWalTrack').textContent=intel.wallets_tracked||0;
-      document.getElementById('mRpc').textContent=intel.fast_rpc?'ALCHEMY':'DEFAULT';
       document.getElementById('mSnipe').textContent=intel.sniper_buys||0;
       document.getElementById('mHot').textContent=intel.hot_tokens_tracked||0;
-      document.getElementById('mDevBuy').textContent=(cfg.instant_snipe_min_dev_sol||0.3)+' SOL';
-      document.getElementById('mWsRecon').textContent=intel.ws_reconnects||0;
+      document.getElementById('mRpc').textContent=intel.fast_rpc?'ALCHEMY':'DEFAULT';
+      // Holder watcher status
+      const hw=intel.holder_watcher||{};
+      const hwEl=document.getElementById('icHolder');
+      if(hwEl){if(hw.watching>0){hwEl.classList.add('on');hwEl.querySelector('.dot').style.background='var(--yellow)'}}
+
+      // v4.0: Adaptive Learner status
+      const learner=d.learner||{};
+      const lSummary=d.learner_summary||'';
+      if(lSummary){
+        document.getElementById('learnerSummary').textContent=lSummary;
+      }
+      const fails=learner.failure_breakdown||{};
+      const failStr=Object.entries(fails).filter(([k,v])=>v>0).map(([k,v])=>k+'('+v+')').join(', ');
+      document.getElementById('learnerFailures').textContent=failStr||'none';
+      document.getElementById('learnerInsights').textContent=learner.collective_insights||0;
+      // Show learner config in memory bar
+      if(cfg.bonding_curve_min_velocity!=null)document.getElementById('mScore').textContent=(cfg.effective_min_score||40)+' (vel>'+cfg.bonding_curve_min_velocity+')';
+
+      // Learner intel chip
+      const lcEl=document.getElementById('icLearner');
+      if(lcEl&&learner.total_trades>0){
+        lcEl.classList.add('on');
+        lcEl.querySelector('.dot').style.boxShadow='0 0 6px rgba(20,184,166,0.6)';
+      }
+
+      // v4.1: Whale hunter intel chip + feed
+      const whaleStatus=intel.whale_hunter||{};
+      const whEl=document.getElementById('icWhale');
+      if(whEl&&whaleStatus.tracked_wallets>0){
+        whEl.classList.add('on');
+        whEl.style.color='var(--orange)';
+        whEl.querySelector('.dot').style.background='var(--orange)';
+        whEl.querySelector('.dot').style.boxShadow='0 0 6px rgba(249,115,22,0.5)';
+      }
+      // Whale feed items
+      const whaleFeed=d.whale_feed||[];
+      if(whaleFeed.length>0){
+        const wEl=document.getElementById('fW');
+        wEl.querySelectorAll('.live-whale').forEach(e=>e.remove());
+        whaleFeed.slice(0,10).forEach(w=>{
+          const html=`<span class="fi-t">${ts()}</span><span class="fi-c"><span class="tag t-whale">WHALE</span> ${w.whale} <span class="tag t-fresh">${w.label||'tracked'}</span> bought ${w.mint?.slice(0,8)||'?'}...</span>`;
+          const div=document.createElement('div');div.className='fi live-whale';div.innerHTML=html;
+          wEl.appendChild(div);
+        });
+        document.getElementById('fcW').textContent=whaleFeed.length;
+      }
 
       // Live cabal feed
       const cabalFeed=d.cabal_feed||[];
@@ -708,7 +772,7 @@ async function poll(){
         }
       }
 
-      // Positions with velocity tracking
+      // Positions with velocity tracking + live PnL
       const pe2=document.getElementById('bpPos');const positions=d.positions||{};
       if(Object.keys(positions).length>0){
         pe2.innerHTML=Object.entries(positions).map(([a,p])=>{
@@ -716,14 +780,26 @@ async function poll(){
           const velPct=pv>0?Math.round(cv/pv*100):0;
           const velCls=velPct>70?'hot':velPct>40?'warm':'cold';
           const velHtml=pv>0?` | vel:${cv}/${pv}<div class="vel-bar"><div class="vel-fill ${velCls}" style="width:${Math.min(100,velPct)}%"></div></div>`:'';
-          return `<div class="bp-row"><span class="bp-sym">${p.symbol}</span><span class="bp-det">${p.sol_spent} SOL | ${p.hold_minutes}m | ${p.source||'--'}${velHtml}</span></div>`;
+          const curveTag=p.on_curve?'<span class="tag t-fresh" style="font-size:0.5rem;margin-left:4px">CURVE</span>':'';
+          // v4.1: Live PnL per position
+          let pnlHtml='';
+          if(p.unrealized_pnl_sol!=null&&p.unrealized_pnl_sol!==0){
+            const pnlColor=p.unrealized_pnl_sol>=0?'var(--green)':'var(--red)';
+            const pnlSign=p.unrealized_pnl_sol>=0?'+':'';
+            pnlHtml=` <span style="color:${pnlColor};font-weight:700;font-size:0.6rem">${pnlSign}${p.unrealized_pnl_sol.toFixed(4)} SOL (${pnlSign}${(p.unrealized_pnl_pct||0).toFixed(1)}%)</span>`;
+          }
+          return `<div class="bp-row"><span class="bp-sym">${p.symbol}${curveTag}</span><span class="bp-det">${p.sol_spent} SOL | ${p.hold_minutes}m | ${p.source||'--'}${pnlHtml}${velHtml}</span></div>`;
         }).join('');
       }else pe2.innerHTML='<div class="bp-empty">Scanning fresh launches...</div>';
 
       // Trades
       const te=document.getElementById('bpTrades');const trades=d.recent_trades||[];
       if(trades.length>0){
-        te.innerHTML=trades.slice(-8).reverse().map(t=>`<div class="bp-row"><span class="bp-act ${t.action}">${t.action.toUpperCase()}</span><span class="bp-sym">${t.symbol}</span><span class="bp-det">${t.sol} SOL</span><span class="bp-reason">${t.reason||''}</span></div>`).join('');
+        te.innerHTML=trades.slice(-8).reverse().map(t=>{
+          const pnlTag=t.action==='sell'&&t.pnl_sol!=null?` <span style="color:${t.pnl_sol>=0?'var(--green)':'var(--red)'}; font-weight:700">${t.pnl_sol>=0?'+':''}${t.pnl_sol.toFixed(4)}</span>`:'';
+          const curveTag=t.reason&&t.reason.includes('curve')?'<span class="tag t-fresh" style="font-size:0.5rem;margin-left:4px">CURVE</span>':'';
+          return `<div class="bp-row"><span class="bp-act ${t.action}">${t.action.toUpperCase()}</span><span class="bp-sym">${t.symbol}${curveTag}</span><span class="bp-det">${t.sol} SOL${pnlTag}</span><span class="bp-reason">${t.reason||''}</span></div>`;
+        }).join('');
       }else te.innerHTML='<div class="bp-empty">Awaiting signals...</div>';
 
     }else throw 0;
@@ -736,8 +812,9 @@ async function poll(){
       // Intel all on for sim
       ['Pump','Bonk','Bags','Sniper','Cabal','Copy','X','Quantum','Swarm','Memory'].forEach(n=>{const el=document.getElementById('ic'+n);if(el)el.classList.add('on')});
       document.getElementById('mRpc').textContent='ALCHEMY';
-      document.getElementById('mAge').textContent='15m';
-      document.getElementById('mFdv').textContent='$500k';
+      document.getElementById('mTp').textContent='1.4x/1.5x';
+      document.getElementById('mScore').textContent='40';
+      document.getElementById('mHold').textContent='30m';
       document.getElementById('mCabal').textContent='0';
       document.getElementById('mWalTrack').textContent='0';
       document.getElementById('mSnipe').textContent='0';
@@ -756,7 +833,7 @@ document.getElementById('walletAddr').addEventListener('click',function(){
 });
 
 // Start
-poll();setInterval(poll,3000);
+poll();setInterval(poll,2000);
 
 // Kick off simulation immediately (will be replaced by live data if available)
 setTimeout(()=>{if(!isLive)startSim()},1500);

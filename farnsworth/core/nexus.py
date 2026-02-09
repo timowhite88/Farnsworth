@@ -286,6 +286,33 @@ class SignalType(Enum):
     EVOLUTION_PERSONALITY_EVOLVED = "evolution.personality_evolved"  # Bot personality evolved
     EVOLUTION_PATTERN_LEARNED = "evolution.pattern_learned"          # New pattern learned
 
+    # =========================================================================
+    # Security & Gateway Signals (AGI v2.0)
+    # =========================================================================
+
+    # Injection Defense
+    SECURITY_THREAT_DETECTED = "security.threat_detected"            # Threat detected by defense
+    SECURITY_CANARY_TRIGGERED = "security.canary_triggered"          # Canary token found in input
+    SECURITY_COLLECTIVE_REVIEW = "security.collective_review"        # Collective verification triggered
+
+    # External Gateway
+    GATEWAY_REQUEST_RECEIVED = "gateway.request_received"            # External request received
+    GATEWAY_REQUEST_BLOCKED = "gateway.request_blocked"              # Request blocked by defense
+    GATEWAY_RESPONSE_SENT = "gateway.response_sent"                  # Response sent to external
+    GATEWAY_CLIENT_BLOCKED = "gateway.client_blocked"                # Client permanently blocked
+    GATEWAY_SHUTDOWN = "gateway.shutdown"                             # Gateway emergency shutdown
+    GATEWAY_ENABLED = "gateway.enabled"                              # Gateway re-enabled
+
+    # Token Orchestrator
+    ORCHESTRATOR_ALLOCATION_REQUESTED = "orchestrator.allocation_requested"  # Token allocation requested
+    ORCHESTRATOR_ALLOCATION_DENIED = "orchestrator.allocation_denied"        # Allocation denied
+    ORCHESTRATOR_USAGE_RECORDED = "orchestrator.usage_recorded"              # Usage recorded
+    ORCHESTRATOR_REBALANCED = "orchestrator.rebalanced"                      # Budgets rebalanced
+    ORCHESTRATOR_TANDEM_STARTED = "orchestrator.tandem_started"              # Grok+Kimi tandem started
+    ORCHESTRATOR_TANDEM_HANDOFF = "orchestrator.tandem_handoff"              # Tandem handoff occurred
+    ORCHESTRATOR_TANDEM_COMPLETED = "orchestrator.tandem_completed"          # Tandem session completed
+    ORCHESTRATOR_BUDGET_WARNING = "orchestrator.budget_warning"              # Budget threshold warning
+
 
 # =============================================================================
 # NEURAL ROUTING DATASTRUCTURES (AGI Upgrade)

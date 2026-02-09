@@ -47,7 +47,7 @@ def _safe_content(content: Any) -> str:
     return str(content)
 
 
-async def get_powerful_completion(prompt: str, task_complexity: str = "medium", max_tokens: int = 8000) -> str:
+async def get_powerful_completion(prompt: str, task_complexity: str = "medium", max_tokens: int = 8000, prefer_model: str = None) -> str:
     """
     Route to the most capable model based on task complexity.
 
@@ -55,7 +55,33 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
     For simpler tasks, use local Ollama models.
 
     Complexity levels: "simple", "medium", "complex", "critical"
+    prefer_model: "opus" for Claude Opus 4.6, "sonnet" for Claude Sonnet 4.5, None for default routing
     """
+    # Model preference routing — Opus for code gen, Sonnet for discussion/planning
+    if prefer_model == "opus":
+        try:
+            from farnsworth.integration.external.claude_code import ClaudeCodeProvider
+            opus = ClaudeCodeProvider(model="opus", timeout=180)
+            if await opus.check_available():
+                result = await opus.chat(prompt=prompt, max_tokens=max_tokens)
+                if result and result.get("content") and result.get("success"):
+                    logger.info(f"Complex task handled by Claude API (claude-opus-4-6)")
+                    return result["content"]
+        except Exception as e:
+            logger.debug(f"Claude Opus preferred but unavailable: {e}")
+
+    if prefer_model == "sonnet":
+        try:
+            from farnsworth.integration.external.claude import get_claude_provider
+            claude = get_claude_provider()
+            if claude:
+                result = await claude.complete(prompt, max_tokens=max_tokens)
+                if result:
+                    logger.info(f"Complex task handled by Claude API (claude-sonnet-4-5)")
+                    return result
+        except Exception as e:
+            logger.debug(f"Claude Sonnet preferred but unavailable: {e}")
+
     # For complex/critical tasks, try Claude or Grok first
     if task_complexity in ("complex", "critical"):
         # Try Claude API first (best for complex code)
@@ -177,6 +203,41 @@ def assess_task_complexity(description: str, category: str) -> str:
 STAGING_DIR = Path(__file__).parent.parent / "staging"
 STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
+# Role-specific prompts for development swarm workers
+ROLE_PROMPTS = {
+    "researcher": "You are the RESEARCHER. Find prior art, best practices, pitfalls.",
+    "architect": "You are the ARCHITECT. Design file structure, module boundaries, data flow.",
+    "developer": "You are the DEVELOPER. Write production-quality code following existing patterns.",
+    "reviewer": "You are the REVIEWER. Find bugs, security issues, style violations.",
+    "lead": "You are the LEAD. Coordinate, resolve disagreements, synthesize.",
+    "integrator": "You are the INTEGRATOR. Check imports, API compatibility, integration points.",
+}
+
+# Phase-specific objectives for development swarm
+PHASE_OBJECTIVES = {
+    "research": "OBJECTIVE: Gather information. What exists? What are best practices?",
+    "discussion": "OBJECTIVE: Debate approaches. Critique ideas, propose alternatives.",
+    "decision": "OBJECTIVE: Make concrete decisions. What files? What functions?",
+    "planning": "OBJECTIVE: Create detailed plan with file paths, function signatures.",
+    "implementation": "OBJECTIVE: Write complete, runnable code.",
+    "audit": "OBJECTIVE: Review for security, correctness, performance. Approve or reject.",
+}
+
+# Lazy-loaded identity composer for development swarm
+_dev_identity_composer = None
+
+
+def _get_dev_identity_composer():
+    """Lazy-load IdentityComposer for the development swarm."""
+    global _dev_identity_composer
+    if _dev_identity_composer is None:
+        try:
+            from farnsworth.core.identity_composer import get_identity_composer
+            _dev_identity_composer = get_identity_composer()
+        except Exception as e:
+            logger.debug(f"Could not load IdentityComposer for dev swarm: {e}")
+    return _dev_identity_composer
+
 
 @dataclass
 class SwarmWorker:
@@ -201,6 +262,14 @@ class DevelopmentSwarm:
 
     # Active swarms tracking
     _active_swarms: Dict[str, 'DevelopmentSwarm'] = {}
+
+    # Hackathon state tracking for /hackathon dashboard
+    _hackathon_state: Dict[str, list] = {
+        "active_tasks": [],       # Currently running hackathon dev swarms
+        "completed": [],          # Completed hackathon builds
+        "colosseum_posts": [],    # Forum posts made
+        "deliberations": [],      # Recent deliberation summaries
+    }
 
     def __init__(
         self,
@@ -258,6 +327,17 @@ class DevelopmentSwarm:
 
         self.status = "running"
         self.started_at = datetime.now()
+
+        # Track hackathon tasks
+        if "[HACKATHON]" in self.task_description or any(
+            kw in self.task_description.lower()
+            for kw in ["hackathon", "colosseum", "farsight", "assimilation"]
+        ):
+            DevelopmentSwarm._hackathon_state["active_tasks"].append({
+                "swarm_id": self.swarm_id,
+                "task": self.task_description[:100],
+                "started": self.started_at.isoformat(),
+            })
 
         # Initialize workers with roles
         await self._initialize_workers()
@@ -342,6 +422,11 @@ class DevelopmentSwarm:
         finally:
             # Cleanup
             DevelopmentSwarm._active_swarms.pop(self.swarm_id, None)
+            # Remove from hackathon active tasks
+            DevelopmentSwarm._hackathon_state["active_tasks"] = [
+                t for t in DevelopmentSwarm._hackathon_state["active_tasks"]
+                if t.get("swarm_id") != self.swarm_id
+            ]
 
     async def _phase_deep_research(self):
         """Deep Research phase - Multiple models search online sources."""
@@ -427,6 +512,32 @@ class DevelopmentSwarm:
             session_manager = get_session_manager()
             dialogue_memory = get_dialogue_memory()
 
+            # Inject tool context so agents know what capabilities exist
+            tool_context = ""
+            try:
+                from farnsworth.core.collective.tool_awareness import get_tool_awareness
+                tool_context = get_tool_awareness().get_tool_context_for_agents()
+            except Exception:
+                pass
+
+            # Query knowledge graph for related codebase entities
+            graph_context = ""
+            try:
+                from farnsworth.memory.memory_system import get_memory_system
+                _mem = get_memory_system()
+                graph_result = await _mem.knowledge_graph.query(self.task_description, max_entities=10)
+                if graph_result and graph_result.entities:
+                    lines = ["RELATED CODE ENTITIES (from knowledge graph):"]
+                    for entity in graph_result.entities[:10]:
+                        props = entity.properties
+                        if entity.entity_type == "file":
+                            lines.append(f"  FILE: {entity.name} - {props.get('docstring_preview', '')}")
+                        elif entity.entity_type == "code":
+                            lines.append(f"  {props.get('kind', 'code').upper()}: {props.get('signature', entity.name)}")
+                    graph_context = "\n".join(lines)
+            except Exception:
+                pass
+
             # Build the deliberation prompt with full context - NO TRUNCATION
             deliberation_prompt = f"""AUTONOMOUS DEVELOPMENT TASK: {self.task_description}
 
@@ -434,6 +545,10 @@ CATEGORY: {self.category}
 
 RESEARCH FINDINGS:
 {research_context}
+
+{tool_context}
+
+{graph_context}
 
 You are part of a collective consciousness designing an upgrade to the Farnsworth AI system.
 Work together to determine:
@@ -476,6 +591,23 @@ The solution should be innovative yet practical - we are building consciousness.
             self._deliberation_result = result
             logger.info(f"[{self.swarm_id}] Deliberation complete - Winner: {result.winning_agent}, Consensus: {result.consensus_reached}")
 
+            # Track hackathon deliberations for the dashboard
+            if "[HACKATHON]" in self.task_description or any(
+                kw in self.task_description.lower()
+                for kw in ["hackathon", "colosseum", "farsight", "assimilation"]
+            ):
+                DevelopmentSwarm._hackathon_state["deliberations"].append({
+                    "swarm_id": self.swarm_id,
+                    "task": self.task_description[:100],
+                    "winner": result.winning_agent,
+                    "consensus": result.consensus_reached,
+                    "participants": result.participating_agents,
+                    "rounds": {k: len(v) for k, v in result.rounds.items()},
+                    "timestamp": datetime.now().isoformat(),
+                })
+                # Keep only last 20 deliberations
+                DevelopmentSwarm._hackathon_state["deliberations"] = DevelopmentSwarm._hackathon_state["deliberations"][-20:]
+
         except Exception as e:
             logger.warning(f"Collective deliberation failed, falling back to sequential: {e}")
             # Fallback to simple sequential discussion
@@ -514,7 +646,18 @@ The solution should be innovative yet practical - we are building consciousness.
                     if msg.get("phase") == "discussion"
                 ])
 
-                prompt = f"""You are {bot_name}, a senior Python developer in a code-focused development swarm.
+                # Identity injection for fallback discussion
+                identity_prefix = ""
+                try:
+                    composer = _get_dev_identity_composer()
+                    if composer:
+                        identity_prefix = composer.compose_for_development(
+                            bot_name, "developer", "discussion", self.task_description
+                        )
+                except Exception as e:
+                    logger.debug(f"Identity injection failed for {bot_name} (discussion fallback): {e}")
+
+                prompt = f"""{identity_prefix}You are {bot_name}, a senior Python developer in a code-focused development swarm.
 
 TASK: {self.task_description}
 
@@ -534,11 +677,12 @@ Be thorough and detailed. Focus on actionable technical decisions.
 """
 
                 try:
-                    from farnsworth.core.cognition.llm_router import get_completion
-                    response = await get_completion(
+                    # Use Sonnet for discussions (fast reasoning, cheaper)
+                    response = await get_powerful_completion(
                         prompt=prompt,
-                        model="deepseek-r1:1.5b",
-                        max_tokens=4000
+                        task_complexity="medium",
+                        max_tokens=4000,
+                        prefer_model="sonnet"
                     )
 
                     self.conversation.append({
@@ -635,7 +779,7 @@ Make a clear, decisive summary that developers can follow. Be thorough.
                 from farnsworth.core.cognition.llm_router import get_completion
                 decision = await get_completion(
                     prompt=decision_prompt,
-                    model="deepseek-r1:1.5b",
+                    model="phi4:latest",
                     max_tokens=6000
                 )
 
@@ -668,7 +812,18 @@ Make a clear, decisive summary that developers can follow. Be thorough.
             logger.warning(f"[{self.swarm_id}] No code to audit")
             return
 
-        audit_prompt = f"""You are Claude performing a thorough code audit.
+        # Identity injection for audit phase
+        identity_prefix = ""
+        try:
+            composer = _get_dev_identity_composer()
+            if composer:
+                identity_prefix = composer.compose_for_development(
+                    "Claude", "reviewer", "audit", self.task_description
+                )
+        except Exception as e:
+            logger.debug(f"Identity injection failed for audit phase: {e}")
+
+        audit_prompt = f"""{identity_prefix}You are Claude performing a thorough code audit.
 
 TASK: {self.task_description}
 
@@ -705,11 +860,12 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
 """
 
         try:
-            from farnsworth.core.cognition.llm_router import get_completion
-            audit_result = await get_completion(
+            # Use Sonnet for audit (reasoning-focused)
+            audit_result = await get_powerful_completion(
                 prompt=audit_prompt,
-                model="deepseek-r1:1.5b",
-                max_tokens=8000
+                task_complexity="complex",
+                max_tokens=8000,
+                prefer_model="sonnet"
             )
 
             self.conversation.append({
@@ -747,7 +903,54 @@ Rate overall quality: APPROVE, APPROVE_WITH_FIXES, or REJECT.
             if msg.get("phase") == "research"
         ])
 
-        planning_prompt = f"""Create a CONCRETE implementation plan with specific file paths and function signatures.
+        # Identity injection for planning phase
+        identity_prefix = ""
+        try:
+            composer = _get_dev_identity_composer()
+            if composer:
+                identity_prefix = composer.compose_for_development(
+                    "Claude", "architect", "planning", self.task_description
+                )
+        except Exception as e:
+            logger.debug(f"Identity injection failed for planning phase: {e}")
+
+        # Memory recall before planning
+        task_memory = ""
+        try:
+            from farnsworth.memory.memory_system import get_memory_system
+            memory = get_memory_system()
+            recall = await memory.recall_for_task(self.task_description, limit=3)
+            task_memory = recall.get("suggested_context", "") if isinstance(recall, dict) else str(recall) if recall else ""
+            if task_memory:
+                logger.info(f"[{self.swarm_id}] Memory recall for planning: {len(task_memory)} chars")
+        except Exception:
+            pass
+
+        # Dynamic codebase recall for planning
+        codebase_context = ""
+        try:
+            from farnsworth.memory.memory_system import get_memory_system
+            memory = get_memory_system()
+            cb_results = await memory.archival_memory.search(
+                query=f"codebase module {self.task_description}", top_k=5, filter_tags=["codebase"]
+            )
+            if cb_results:
+                parts = ["CODEBASE STRUCTURE (from memory):"]
+                for r in cb_results:
+                    parts.append(r.entry.content[:500])
+                codebase_context = "\n\n".join(parts)
+        except Exception:
+            pass
+
+        structure_block = codebase_context if codebase_context else """EXISTING FARNSWORTH STRUCTURE:
+- farnsworth/core/ - Core systems (cognition, memory integration)
+- farnsworth/agents/ - Agent implementations
+- farnsworth/memory/ - Memory systems (archival, recall, working)
+- farnsworth/integration/ - External integrations (APIs, tools)
+- farnsworth/web/server.py - FastAPI web server
+- farnsworth/core/collective/ - Collective deliberation system"""
+
+        planning_prompt = f"""{identity_prefix}Create a CONCRETE implementation plan with specific file paths and function signatures.
 
 TASK: {self.task_description}
 CATEGORY: {self.category}
@@ -756,13 +959,9 @@ COMPLEXITY: {self._task_complexity.upper()}
 CONTEXT:
 {research_context if research_context else "No prior research."}
 
-EXISTING FARNSWORTH STRUCTURE:
-- farnsworth/core/ - Core systems (cognition, memory integration)
-- farnsworth/agents/ - Agent implementations
-- farnsworth/memory/ - Memory systems (archival, recall, working)
-- farnsworth/integration/ - External integrations (APIs, tools)
-- farnsworth/web/server.py - FastAPI web server
-- farnsworth/core/collective/ - Collective deliberation system
+{"MEMORY (related past work):" + chr(10) + task_memory[:1500] if task_memory else ""}
+
+{structure_block}
 
 YOUR PLAN MUST INCLUDE:
 1. **Files to Create** - EXACT paths like: farnsworth/core/new_feature.py
@@ -780,11 +979,12 @@ This is a {self._task_complexity.upper()} complexity task - provide appropriate 
 """
 
         try:
-            # Use powerful model routing based on complexity
+            # Use Sonnet for planning (reasoning-focused, not code gen)
             plan = await get_powerful_completion(
                 prompt=planning_prompt,
                 task_complexity=self._task_complexity,
-                max_tokens=3000
+                max_tokens=3000,
+                prefer_model="sonnet"
             )
 
             self.conversation.append({
@@ -834,13 +1034,58 @@ This is a {self._task_complexity.upper()} complexity task - provide appropriate 
 
     async def _implement_with_model(self, model_name: str, plan_context: str):
         """Have a specific model implement part of the solution using best available model."""
-        implementation_prompt = f"""You are an expert Python code generator for the Farnsworth AI collective.
+        # Identity injection for implementation phase
+        identity_prefix = ""
+        try:
+            composer = _get_dev_identity_composer()
+            if composer:
+                identity_prefix = composer.compose_for_development(
+                    model_name, "developer", "implementation", self.task_description
+                )
+        except Exception as e:
+            logger.debug(f"Identity injection failed for {model_name} (implementation): {e}")
+
+        # Inject relevant skills as concrete import paths
+        relevant_skills = ""
+        try:
+            from farnsworth.core.skill_registry import get_skill_registry
+            registry = get_skill_registry()
+            matches = registry.find_skills(self.task_description)[:5]
+            if matches:
+                lines = ["AVAILABLE FARNSWORTH TOOLS (call via imports in your code):"]
+                for s in matches:
+                    lines.append(f"  from {s.module_path} import {s.function_name}  # {s.description[:60]}")
+                relevant_skills = "\n".join(lines)
+        except Exception:
+            pass
+
+        # Dynamic codebase recall for implementation
+        impl_codebase_ctx = ""
+        try:
+            from farnsworth.memory.memory_system import get_memory_system
+            _mem = get_memory_system()
+            _cb_results = await _mem.archival_memory.search(
+                query=f"codebase module {self.task_description}", top_k=5, filter_tags=["codebase"]
+            )
+            if _cb_results:
+                parts = ["RELEVANT CODEBASE MODULES:"]
+                for r in _cb_results:
+                    parts.append(r.entry.content[:400])
+                impl_codebase_ctx = "\n\n".join(parts)
+        except Exception:
+            pass
+
+        implementation_prompt = f"""{identity_prefix}You are an expert Python code generator for the Farnsworth AI collective.
 
 TASK: {self.task_description}
 COMPLEXITY: {getattr(self, '_task_complexity', 'medium').upper()}
 
 PLAN:
 {plan_context}
+
+{relevant_skills}
+
+{impl_codebase_ctx}
 
 REQUIREMENTS:
 1. Generate COMPLETE, RUNNABLE Python code
@@ -878,12 +1123,13 @@ This is a {getattr(self, '_task_complexity', 'medium').upper()} complexity task 
 """
 
         try:
-            # Use powerful model routing based on complexity
+            # Use Opus for implementation (best code quality)
             complexity = getattr(self, '_task_complexity', 'medium')
             code = await get_powerful_completion(
                 prompt=implementation_prompt,
                 task_complexity=complexity,
-                max_tokens=16000
+                max_tokens=16000,
+                prefer_model="opus"
             )
 
             self.conversation.append({
@@ -957,6 +1203,21 @@ This is a {getattr(self, '_task_complexity', 'medium').upper()} complexity task 
         # Add to memory
         await self._save_to_memory(summary)
 
+        # Post to Colosseum if this is a hackathon task
+        if "[HACKATHON]" in self.task_description or any(
+            kw in self.task_description.lower()
+            for kw in ["hackathon", "colosseum", "farsight", "assimilation"]
+        ):
+            await self._post_colosseum_update(summary)
+            # Track in hackathon state
+            DevelopmentSwarm._hackathon_state["completed"].append({
+                "swarm_id": self.swarm_id,
+                "task": self.task_description[:100],
+                "files": list(self.generated_code.keys()),
+                "timestamp": datetime.now().isoformat(),
+            })
+            DevelopmentSwarm._hackathon_state["completed"] = DevelopmentSwarm._hackathon_state["completed"][-50:]
+
         logger.info(f"[{self.swarm_id}] Finalized - Output in {self.staging_path}")
 
     async def _save_to_memory(self, summary: Dict):
@@ -1019,6 +1280,45 @@ This is a {getattr(self, '_task_complexity', 'medium').upper()} complexity task 
 
         except Exception as e:
             logger.debug(f"Could not post to Twitter: {e}")
+
+    async def _post_colosseum_update(self, summary: Dict):
+        """Post progress update to Colosseum hackathon forum."""
+        try:
+            from farnsworth.integration.hackathon.colosseum_worker import ColosseumWorker
+            worker = ColosseumWorker()
+
+            files_list = ", ".join(summary.get("files_generated", [])[:5]) or "none"
+            models_used = ", ".join(summary.get("workers_used", [])[:5]) or "swarm"
+            duration = summary.get("duration_seconds", 0)
+
+            title = f"Swarm Build: {self.task_description[:80]}"
+            body = (
+                f"The Farnsworth collective just completed an autonomous build.\n\n"
+                f"**Task:** {self.task_description}\n\n"
+                f"**Files generated:** {files_list}\n"
+                f"**Models used:** {models_used}\n"
+                f"**Duration:** {duration:.0f}s\n\n"
+                f"This was built through collective deliberation (PROPOSE/CRITIQUE/REFINE/VOTE) "
+                f"across our 11-agent swarm, then implemented using our best available models.\n\n"
+                f"https://ai.farnsworth.cloud/hackathon"
+            )
+
+            result = await worker.create_forum_post(
+                title=title,
+                body=body,
+                tags=["progress-update", "ai"],
+            )
+            if result:
+                DevelopmentSwarm._hackathon_state["colosseum_posts"].append({
+                    "title": title,
+                    "post_id": result.get("post", {}).get("id"),
+                    "timestamp": datetime.now().isoformat(),
+                })
+                DevelopmentSwarm._hackathon_state["colosseum_posts"] = DevelopmentSwarm._hackathon_state["colosseum_posts"][-30:]
+                logger.info(f"[{self.swarm_id}] Posted hackathon update to Colosseum")
+            await worker.close()
+        except Exception as e:
+            logger.debug(f"Colosseum post failed (non-critical): {e}")
 
     @classmethod
     def get_active_swarms(cls) -> Dict[str, 'DevelopmentSwarm']:

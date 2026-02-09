@@ -39,6 +39,9 @@ class AvatarBackend(Enum):
     NEURAL = "neural"              # MuseTalk/StyleAvatar neural rendering
     WEBGL = "webgl"                # Three.js/WebGL (browser-based)
     IMAGE_SEQUENCE = "image_seq"   # Simple image-based (fallback)
+    LOCAL_ANIM = "local_anim"      # Local Wav2Lip/OpenCV animation
+    MUSETALK = "musetalk"          # MuseTalk neural lip sync (30+ FPS)
+    SADTALKER = "sadtalker"        # SadTalker full face animation (D-ID quality)
 
 
 @dataclass
@@ -125,6 +128,22 @@ class AvatarConfig:
     blink_duration: float = 0.15
     idle_motion_scale: float = 0.3
 
+    # Local animation settings
+    local_anim_face_image: Optional[str] = None
+    local_anim_manual_roi: Optional[Dict] = None
+    local_anim_wav2lip_model: Optional[str] = None
+
+    # MuseTalk settings
+    musetalk_dir: Optional[str] = None
+    musetalk_face_image: Optional[str] = None
+    musetalk_version: str = "v15"
+    musetalk_proxy_face: Optional[str] = None
+
+    # SadTalker settings
+    sadtalker_dir: Optional[str] = None
+    sadtalker_face_image: Optional[str] = None
+    sadtalker_size: int = 256
+
     # Expression mappings
     expression_map: Dict[str, str] = field(default_factory=dict)
 
@@ -162,6 +181,15 @@ class AvatarController:
         # Live2D model
         self._live2d_model = None
 
+        # Local animation backend
+        self._local_anim_backend = None
+
+        # MuseTalk backend
+        self._musetalk_backend = None
+
+        # SadTalker backend
+        self._sadtalker_backend = None
+
         # Image sequence fallback
         self._image_frames: Dict[str, np.ndarray] = {}
         self._base_image: Optional[np.ndarray] = None
@@ -179,6 +207,12 @@ class AvatarController:
                 return await self._init_image_sequence()
             elif self.config.backend == AvatarBackend.NEURAL:
                 return await self._init_neural()
+            elif self.config.backend == AvatarBackend.LOCAL_ANIM:
+                return await self._init_local_animation()
+            elif self.config.backend == AvatarBackend.MUSETALK:
+                return await self._init_musetalk()
+            elif self.config.backend == AvatarBackend.SADTALKER:
+                return await self._init_sadtalker()
             else:
                 logger.warning(f"Unknown backend: {self.config.backend}, using image sequence")
                 return await self._init_image_sequence()
@@ -413,6 +447,72 @@ class AvatarController:
         logger.warning("Neural avatar backend not implemented, falling back to image sequence")
         return await self._init_image_sequence()
 
+    async def _init_local_animation(self) -> bool:
+        """Initialize local animation backend (Wav2Lip + OpenCV warper)"""
+        try:
+            from .local_animation import LocalAnimationBackend, LocalAnimationConfig
+
+            la_config = LocalAnimationConfig(
+                face_image_path=self.config.local_anim_face_image or "",
+                output_width=self.config.width,
+                output_height=self.config.height,
+                wav2lip_model_path=self.config.local_anim_wav2lip_model,
+                manual_mouth_roi=self.config.local_anim_manual_roi,
+            )
+            self._local_anim_backend = LocalAnimationBackend(la_config)
+            success = await self._local_anim_backend.initialize()
+            if success:
+                logger.info("Local animation backend initialized")
+            return success
+        except Exception as e:
+            logger.error(f"Local animation init failed: {e}")
+            return False
+
+    async def _init_musetalk(self) -> bool:
+        """Initialize MuseTalk neural lip sync backend"""
+        try:
+            from .musetalk_backend import MuseTalkBackend, MuseTalkConfig
+
+            mt_config = MuseTalkConfig(
+                musetalk_dir=self.config.musetalk_dir or "/workspace/MuseTalk",
+                model_version=self.config.musetalk_version,
+                face_image_path=self.config.musetalk_face_image or "",
+                proxy_face_path=self.config.musetalk_proxy_face or "",
+                output_width=self.config.width,
+                output_height=self.config.height,
+                fps=self.config.fps,
+            )
+            self._musetalk_backend = MuseTalkBackend(mt_config)
+            success = await self._musetalk_backend.initialize()
+            if success:
+                logger.info("MuseTalk backend initialized")
+            return success
+        except Exception as e:
+            logger.error(f"MuseTalk init failed: {e}")
+            return False
+
+    async def _init_sadtalker(self) -> bool:
+        """Initialize SadTalker full face animation backend"""
+        try:
+            from .sadtalker_backend import SadTalkerBackend, SadTalkerConfig
+
+            st_config = SadTalkerConfig(
+                sadtalker_dir=self.config.sadtalker_dir or "/workspace/SadTalker",
+                face_image_path=self.config.sadtalker_face_image or "",
+                output_width=self.config.width,
+                output_height=self.config.height,
+                fps=self.config.fps,
+                size=self.config.sadtalker_size,
+            )
+            self._sadtalker_backend = SadTalkerBackend(st_config)
+            success = await self._sadtalker_backend.initialize()
+            if success:
+                logger.info("SadTalker backend initialized")
+            return success
+        except Exception as e:
+            logger.error(f"SadTalker init failed: {e}")
+            return False
+
     def _create_placeholder_avatar(self) -> np.ndarray:
         """Create a placeholder Farnsworth avatar image"""
         img = np.zeros((self.config.height, self.config.width, 4), dtype=np.uint8)
@@ -613,6 +713,12 @@ class AvatarController:
                 return await self._render_vtube_studio()
             elif self.config.backend == AvatarBackend.LIVE2D_PY:
                 return await self._render_live2d()
+            elif self.config.backend == AvatarBackend.LOCAL_ANIM:
+                return await self._render_local_animation()
+            elif self.config.backend == AvatarBackend.MUSETALK:
+                return await self._render_musetalk()
+            elif self.config.backend == AvatarBackend.SADTALKER:
+                return await self._render_sadtalker()
             else:
                 return await self._render_image_sequence()
         except Exception as e:
@@ -693,6 +799,27 @@ class AvatarController:
         except Exception as e:
             logger.error(f"Live2D render failed: {e}")
             return None
+
+    async def _render_local_animation(self) -> Optional[np.ndarray]:
+        """Render frame using local animation backend"""
+        if self._local_anim_backend is None:
+            return None
+        return await self._local_anim_backend.render_frame(self.state)
+
+    async def _render_musetalk(self) -> Optional[np.ndarray]:
+        """Render frame using MuseTalk backend (pops from generated queue)"""
+        if self._musetalk_backend is None:
+            return None
+        return self._musetalk_backend.get_frame()
+
+    async def _render_sadtalker(self) -> Optional[np.ndarray]:
+        """Render frame using SadTalker backend (pops from generated queue)"""
+        if self._sadtalker_backend is None:
+            return None
+        frame = self._sadtalker_backend.get_next_frame()
+        if frame is not None:
+            return frame
+        return self._sadtalker_backend.idle_frame
 
     async def _render_image_sequence(self) -> Optional[np.ndarray]:
         """Render using pre-generated image frames with viseme support"""
@@ -790,6 +917,24 @@ class AvatarController:
         if self._live2d_model:
             try:
                 live2d.dispose()
+            except Exception:
+                pass
+
+        if self._local_anim_backend:
+            try:
+                await self._local_anim_backend.cleanup()
+            except Exception:
+                pass
+
+        if self._musetalk_backend:
+            try:
+                await self._musetalk_backend.cleanup()
+            except Exception:
+                pass
+
+        if self._sadtalker_backend:
+            try:
+                await self._sadtalker_backend.cleanup()
             except Exception:
                 pass
 

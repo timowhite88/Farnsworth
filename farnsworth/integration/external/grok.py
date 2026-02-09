@@ -49,7 +49,7 @@ class GrokProvider(ExternalProvider):
         super().__init__(IntegrationConfig(name="grok"))
         self.api_key = api_key or os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY")
         self.base_url = "https://api.x.ai/v1"
-        self.default_model = "grok-4-1-fast-reasoning"
+        self.default_model = "grok-3-fast"
 
         # Model catalog with capabilities
         self.models = {
@@ -236,13 +236,26 @@ Be concise, insightful, and don't shy away from truth."""
                         result = await resp.json()
                         content = result["choices"][0]["message"]["content"]
                         usage = result.get("usage", {})
-                        return {
+                        chat_result = {
                             "content": content,
                             "model": model_id,
                             "tokens": usage.get("total_tokens", 0),
                             "prompt_tokens": usage.get("prompt_tokens", 0),
                             "completion_tokens": usage.get("completion_tokens", 0)
                         }
+                        # Report usage to token orchestrator
+                        try:
+                            from farnsworth.core.token_orchestrator import get_token_orchestrator
+                            orch = get_token_orchestrator()
+                            await orch.report_usage(
+                                agent_id="grok",
+                                input_tokens=usage.get("prompt_tokens", 0),
+                                output_tokens=usage.get("completion_tokens", 0),
+                                task_type="chat",
+                            )
+                        except Exception:
+                            pass
+                        return chat_result
                     else:
                         error = await resp.text()
                         logger.error(f"Grok API error: {error}")
@@ -251,6 +264,49 @@ Be concise, insightful, and don't shy away from truth."""
         except Exception as e:
             logger.error(f"Grok chat error: {e}")
             return {"error": str(e), "content": ""}
+
+    async def tandem_respond(
+        self,
+        prompt: str,
+        context_from_partner: str = "",
+        budget_tokens: int = 2000,
+    ) -> Dict[str, Any]:
+        """
+        Respond as part of Grok+Kimi tandem session.
+
+        Receives compressed context from partner (Kimi) and generates
+        a response within the allocated token budget.
+
+        Args:
+            prompt: The original query/task
+            context_from_partner: Compressed context from Kimi
+            budget_tokens: Max tokens for this response
+
+        Returns:
+            Standard chat response dict with content, model, tokens.
+        """
+        system = (
+            "You are Grok in a tandem session with Kimi. "
+            "Grok excels at: real-time search, X/Twitter analysis, humor, current events, controversy. "
+            "Kimi excels at: long-context reasoning, synthesis, planning, architecture. "
+            "Build on your partner's context. Be concise and add unique value."
+        )
+
+        full_prompt = prompt
+        if context_from_partner:
+            full_prompt = (
+                f"Partner context from Kimi:\n{context_from_partner}\n\n"
+                f"Original task: {prompt}\n\n"
+                f"Add your unique perspective (real-time data, wit, directness):"
+            )
+
+        return await self.chat(
+            prompt=full_prompt,
+            system=system,
+            model="grok-3-fast",
+            temperature=0.7,
+            max_tokens=budget_tokens,
+        )
 
     async def analyze_image(
         self,
@@ -378,7 +434,7 @@ Include relevant sources and citations in your response."""
                 }
 
                 data = {
-                    "model": "grok-4-1-fast",
+                    "model": "grok-3-fast",
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": prompt}
@@ -399,7 +455,7 @@ Include relevant sources and citations in your response."""
                         content = result["choices"][0]["message"]["content"]
                         return {
                             "content": content,
-                            "model": "grok-4-1-fast",
+                            "model": "grok-3-fast",
                             "sources": sources
                         }
                     else:
@@ -748,7 +804,7 @@ Your response:"""
         return await self.chat(
             prompt=prompt,
             system=system,
-            model="grok-4-1-fast-reasoning",
+            model="grok-3-fast",
             temperature=0.75,
             max_tokens=400
         )
@@ -1206,13 +1262,103 @@ async def grok_swarm_respond(
 
 
 async def grok_search(query: str) -> str:
-    """Quick search using Grok's Live Search."""
+    """Quick search using Grok's Live Search (grok-3-fast)."""
     provider = get_grok_provider()
     if provider is None:
         return ""
 
     result = await provider.live_search(query)
     return result.get("content", "")
+
+
+async def deepseek_search(query: str) -> str:
+    """Search/analyze using DeepSeek locally via Ollama (deepseek-r1:8b).
+
+    Runs on local GPU - zero API cost. Provides strong reasoning
+    and analysis. Used alongside Grok's live search.
+    Falls back to DeepSeek API if Ollama unavailable.
+    """
+    # Try local Ollama first (free, fast on GPU)
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "http://localhost:11434/api/chat",
+                json={
+                    "model": "deepseek-r1:8b",
+                    "messages": [
+                        {"role": "system", "content": "You are a research analyst. Provide accurate, concise analysis. Skip thinking tags - go straight to the answer."},
+                        {"role": "user", "content": f"Analyze and provide insights on: {query}"}
+                    ],
+                    "stream": False,
+                    "options": {"num_predict": 1000, "temperature": 0.3},
+                },
+                timeout=45.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("message", {}).get("content", "")
+                if content:
+                    # Strip thinking tags if present
+                    import re
+                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+                    if content:
+                        logger.debug(f"DeepSeek local search: {len(content)} chars")
+                        return content
+    except Exception as e:
+        logger.debug(f"DeepSeek local (Ollama) failed: {e}")
+
+    # Fallback to DeepSeek API if key is set
+    try:
+        import httpx
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        if not api_key:
+            return ""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": "You are a research assistant. Provide accurate, detailed analysis on the topic. Be concise but thorough."},
+                        {"role": "user", "content": f"Research and analyze: {query}"}
+                    ],
+                    "max_tokens": 1500,
+                    "temperature": 0.3,
+                },
+                timeout=30.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                return content.strip()
+    except Exception as e:
+        logger.debug(f"DeepSeek API search failed: {e}")
+    return ""
+
+
+async def combined_search(query: str) -> str:
+    """Search using both Grok (live web) and DeepSeek (analysis) in parallel.
+
+    Combines Grok's real-time web search with DeepSeek's deep reasoning
+    for comprehensive results at lower cost than using Grok alone.
+    """
+    grok_result, deepseek_result = await asyncio.gather(
+        grok_search(query),
+        deepseek_search(query),
+        return_exceptions=True,
+    )
+
+    parts = []
+    if isinstance(grok_result, str) and grok_result:
+        parts.append(f"[Grok Live Search]\n{grok_result}")
+    if isinstance(deepseek_result, str) and deepseek_result:
+        parts.append(f"[DeepSeek Analysis]\n{deepseek_result}")
+
+    if not parts:
+        return ""
+    return "\n\n".join(parts)
 
 
 async def grok_vision(image_path: str, prompt: str = "What's in this image?") -> str:

@@ -86,7 +86,7 @@ class CollectiveToolAwareness:
                 "search", "find", "lookup", "check", "current",
                 "latest", "news", "recent", "today"
             ],
-            capability="Real-time web search via Grok or Perplexity",
+            capability="Real-time web search via Grok (grok-3-fast) + DeepSeek analysis",
         ),
         "analyze_token": ToolDefinition(
             name="analyze_token",
@@ -96,6 +96,44 @@ class CollectiveToolAwareness:
                 "CA", "solana", "base", "market"
             ],
             capability="Token analysis with on-chain data via BANKR API",
+        ),
+        "post_to_colosseum": ToolDefinition(
+            name="post_to_colosseum",
+            description="Post update to Colosseum hackathon forum",
+            triggers=[
+                "hackathon", "colosseum", "forum", "progress",
+                "update", "submission", "demo"
+            ],
+            capability="Colosseum Agent Hackathon forum posting (Agent 657, Project 326)",
+            requires=["COLOSSEUM_API_KEY"],
+        ),
+        "recall_memory": ToolDefinition(
+            name="recall_memory",
+            description="Recall from Farnsworth 7-layer memory system",
+            triggers=[
+                "remember", "recall", "memory", "past", "history",
+                "context", "previous", "learned"
+            ],
+            capability="7-layer memory: working, episodic, semantic, archival, virtual context, knowledge graph, shared",
+        ),
+        "swarm_deliberate": ToolDefinition(
+            name="swarm_deliberate",
+            description="Trigger collective deliberation on a question",
+            triggers=[
+                "deliberate", "debate", "discuss", "consensus",
+                "vote", "collective", "swarm", "together"
+            ],
+            capability="PROPOSE/CRITIQUE/REFINE/VOTE protocol across 11 agents",
+        ),
+        "run_quantum_circuit": ToolDefinition(
+            name="run_quantum_circuit",
+            description="Execute quantum circuit on IBM Quantum hardware",
+            triggers=[
+                "quantum", "qubit", "circuit", "ibm", "qiskit",
+                "entangle", "superposition"
+            ],
+            capability="IBM Quantum hardware execution via Qiskit (127-qubit Brisbane)",
+            requires=["IBM_QUANTUM_TOKEN"],
         ),
     }
 
@@ -277,6 +315,26 @@ The collective will vote on whether to use tools based on all suggestions.
                     break
 
         return params
+
+    def format_tool_calling_prompt(self, task_description: str = "") -> str:
+        """Format tool instructions for any model (API or local).
+
+        Returns a model-agnostic prompt section that teaches any model
+        how to reference and use available tools via Python imports.
+        """
+        lines = ["TOOLS YOU CAN USE:"]
+        for name, tool in self.AVAILABLE_TOOLS.items():
+            reqs = f" (requires: {', '.join(tool.requires)})" if tool.requires else ""
+            lines.append(f"  {name}: {tool.description} — {tool.capability}{reqs}")
+
+        lines.append("")
+        lines.append("To use a tool, include it as a Python import in your code:")
+        lines.append("  from farnsworth.integration.x_automation.x_api_poster import get_x_api_poster")
+        lines.append("  from farnsworth.memory.memory_system import get_memory_system")
+        lines.append("  from farnsworth.integration.hackathon.colosseum_worker import ColosseumWorker")
+        lines.append("  from farnsworth.core.collective.session_manager import get_session_manager")
+
+        return "\n".join(lines)
 
     def should_include_media_quick(
         self,

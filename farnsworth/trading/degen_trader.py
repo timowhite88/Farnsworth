@@ -1,5 +1,5 @@
 """
-Farnsworth Degen Trader v3.7 - Instant Snipe + Quantum Analysis Edition
+Farnsworth Degen Trader v4.1 - Whale Hunter + Tightened Loss Prevention
 
 High-frequency Solana memecoin trader powered by the Farnsworth swarm.
 - DIRECT Pump.fun bonding curve buys (no Jupiter needed pre-graduation)
@@ -38,6 +38,77 @@ import aiohttp
 
 logger = logging.getLogger("farnsworth.trading")
 
+
+# ============================================================
+# FARNSWORTH AUTH LOCK — Trader will NOT run without the swarm
+# ============================================================
+class _FarnsworthAuthLock:
+    """Validates this trader is running inside the Farnsworth ecosystem.
+
+    Without a valid session token from the Farnsworth server,
+    the trading engine refuses to start. Prevents standalone use.
+    """
+    _SESSION_SALT = b"farnsworth_swarm_v3"
+    _valid_token: Optional[str] = None
+
+    @classmethod
+    def generate_session_token(cls) -> str:
+        """Called by server.py at startup — generates a one-time session token
+        derived from the Farnsworth Nexus state + current process."""
+        try:
+            from farnsworth.core.nexus import Nexus
+            nexus_exists = Nexus._instance is not None
+        except ImportError:
+            nexus_exists = False
+
+        # Token = HMAC(salt, pid + boot_time + nexus_state)
+        import hmac
+        payload = f"{os.getpid()}:{time.monotonic():.0f}:{nexus_exists}:{id(cls)}".encode()
+        token = hmac.new(cls._SESSION_SALT, payload, hashlib.sha256).hexdigest()[:32]
+        cls._valid_token = token
+        logger.debug(f"Auth lock: session token generated")
+        return token
+
+    @classmethod
+    def validate(cls, token: Optional[str] = None) -> bool:
+        """Validate the trader is authorized to run."""
+        # Check 1: Must be running inside Farnsworth process (Nexus importable)
+        try:
+            from farnsworth.core.nexus import Nexus
+            from farnsworth.memory.memory_system import MemorySystem
+        except ImportError:
+            logger.error("AUTH LOCK: Farnsworth core not found. Trader requires the full swarm.")
+            return False
+
+        # Check 2: Server must have generated a session token
+        if cls._valid_token is None:
+            # Allow if Nexus singleton exists (running inside full server)
+            if Nexus._instance is not None:
+                return True
+            logger.error("AUTH LOCK: No session token. Start via Farnsworth server, not standalone.")
+            return False
+
+        # Check 3: Token must match
+        if token and token == cls._valid_token:
+            return True
+
+        # Check 4: Running in same process as server (token set in-process)
+        if cls._valid_token is not None:
+            return True
+
+        logger.error("AUTH LOCK: Invalid session token. Trader locked to Farnsworth swarm.")
+        return False
+
+    @classmethod
+    def lock_check(cls):
+        """Hard check — raises if not authorized."""
+        if not cls.validate():
+            raise RuntimeError(
+                "Farnsworth Degen Trader is locked to the Farnsworth AI Swarm. "
+                "It cannot run standalone. Deploy the full Farnsworth system."
+            )
+
+
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -45,9 +116,14 @@ SOL_MINT = "So11111111111111111111111111111111111111112"
 USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 LAMPORTS_PER_SOL = 1_000_000_000
 
-JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap"
+# v3.8: Jupiter migrated from quote-api.jup.ag (DEAD) → lite-api.jup.ag → api.jup.ag
+# Using lite-api (no key needed, still works) with api.jup.ag (key needed) as upgrade path
+JUPITER_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote"
+JUPITER_SWAP_URL = "https://lite-api.jup.ag/swap/v1/swap"
 JUPITER_PRICE_URL = "https://api.jup.ag/price/v2"
+# Raydium Trade API fallback (no key needed)
+RAYDIUM_QUOTE_URL = "https://transaction-v1.raydium.io/compute/swap-base-in"
+RAYDIUM_SWAP_URL = "https://transaction-v1.raydium.io/transaction/swap-base-in"
 
 DEXSCREENER_TOKENS = "https://api.dexscreener.com/latest/dex/tokens"
 DEXSCREENER_BOOSTS = "https://api.dexscreener.com/token-boosts/latest/v1"
@@ -208,12 +284,13 @@ class Position:
     amount_tokens: float
     amount_sol_spent: float
     entry_time: float
-    take_profit_levels: List[float] = field(default_factory=lambda: [2.0, 5.0, 10.0])
-    stop_loss: float = 0.5
+    take_profit_levels: List[float] = field(default_factory=lambda: [1.12, 1.20, 1.35])  # v4.1: even tighter scalp
+    stop_loss: float = 0.80  # v4.1: tighter stop — cut at 20% loss, preserve capital (was 30%)
     partial_sells: int = 0
     source: str = ""  # what detected it
     entry_velocity: float = 0.0    # buys/min at time of entry
     peak_velocity: float = 0.0     # highest velocity seen since entry
+    on_bonding_curve: bool = False  # v3.9: still on pump.fun bonding curve (no DEX pool yet)
 
 
 @dataclass
@@ -273,21 +350,34 @@ class TradeMemoryEntry:
     liquidity_at_entry: float
     age_at_entry: float
     timestamp: float = 0.0
+    # v4.0: Rich context for adaptive learning
+    entry_velocity: float = 0.0       # buys/min at time of entry
+    entry_buys: int = 0               # total buys at entry
+    entry_unique_buyers: int = 0      # unique buyer wallets at entry
+    entry_curve_progress: float = 0.0 # bonding curve % at entry (0-100)
+    on_bonding_curve: bool = False     # was on bonding curve at entry
+    sell_reason: str = ""             # detailed sell reason (creator_rug, velocity_death, etc.)
+    sol_spent: float = 0.0            # actual SOL spent
+    sol_received: float = 0.0         # actual SOL received on sell
+    holder_concentration: float = 0.0 # top holder % at entry
+    fdv_at_entry: float = 0.0        # FDV at entry
 
 
 @dataclass
 class TraderConfig:
     rpc_url: str = DEFAULT_RPC
-    fast_rpc_url: str = ""          # Alchemy/Helius for speed-critical calls
-    max_position_sol: float = 0.1
-    max_positions: int = 10
-    min_liquidity: float = 1000.0
-    max_liquidity: float = 200000.0
-    max_fdv: float = 500000.0       # low cap only - skip anything above 500k FDV
+    fast_rpc_url: str = ""          # Alchemy for high-volume reads
+    helius_rpc_url: str = ""        # v4.2: Helius staked RPC for sendTransaction (better landing)
+    helius_api_key: str = ""        # v4.2: Helius API key for priority fee estimation + webhooks
+    max_position_sol: float = 0.02   # v4.1: conservative 0.02 SOL until profitable
+    max_positions: int = 8           # v4.0: tighter — fewer positions, higher quality
+    min_liquidity: float = 2000.0    # v4.0: raised from 1000 — skip ultra-thin pools
+    max_liquidity: float = 150000.0  # v4.0: tightened from 200k
+    max_fdv: float = 300000.0        # v4.0: tightened from 500k — focus on true low caps
     min_age_minutes: float = 0.5
-    max_age_minutes: float = 15.0   # FRESH LAUNCHES ONLY - under 15 minutes
-    min_score: float = 60.0
-    scan_interval: int = 5          # faster scanning for fresh launches
+    max_age_minutes: float = 12.0    # v4.0: tighter from 15 — only ultra-fresh
+    min_score: float = 50.0          # v4.1: raised from 45 — only buy strong setups
+    scan_interval: int = 3           # v4.0: 3s scan — max rate without hitting limits
     slippage_bps: int = 500
     priority_fee_lamports: int = 100000
     reserve_sol: float = 0.05
@@ -297,43 +387,56 @@ class TraderConfig:
     use_pumpfun: bool = True        # pump.fun WebSocket monitoring
     use_wallet_analysis: bool = True  # wallet graph/cabal detection
     cabal_is_bullish: bool = True   # treat coordinated wallets as positive signal
-    max_rug_probability: float = 0.6  # skip tokens above this rug score
+    max_rug_probability: float = 0.35  # v4.1: tighter from 0.45 — skip anything > 35% rug chance
     # v3: Copy trading
     use_copy_trading: bool = True   # track and copy top wallets
-    copy_trade_max_sol: float = 0.05  # smaller size for copy trades
+    copy_trade_max_sol: float = 0.02  # v4.1: 0.02 SOL for copy trades
     # v3: X sentinel
     use_x_sentinel: bool = True    # monitor X for cabal signals via Grok
     # v3: Trading memory
     use_trading_memory: bool = True  # learn from past trades
     # v3.5: Bonding curve sniper
     use_bonding_curve: bool = True     # direct pump.fun bonding curve buys
-    bonding_curve_max_sol: float = 0.08  # max SOL per bonding curve buy
-    bonding_curve_min_buys: int = 3    # min buy count before we ape in
-    bonding_curve_max_progress: float = 50.0  # max % curve progress (get in early)
-    bonding_curve_min_velocity: float = 2.0  # min buys/min momentum
+    bonding_curve_max_sol: float = 0.02  # v4.1: 0.02 SOL for sniper buys
+    bonding_curve_min_buys: int = 3    # v4.0: raised from 2 — need 3 buys for confirmation
+    bonding_curve_max_progress: float = 40.0  # v4.0: tighter from 50 — get in earlier
+    bonding_curve_min_velocity: float = 1.5  # v4.0: raised from 1.0 — need real momentum
     use_pumpportal: bool = True        # use PumpPortal API for faster execution
     graduation_sell_pct: float = 0.5   # sell 50% at graduation for guaranteed profit
     sniper_mode: bool = True           # ultra-fast path: skip deep analysis for hot launches
     # v3.6: Cabal coordination tracking
     use_cabal_follow: bool = True       # follow connected wallets into low-cap tokens
-    cabal_follow_max_fdv: float = 100000.0  # only follow cabal into sub-100k FDV
-    cabal_follow_min_wallets: int = 2   # min connected wallets buying same token
-    cabal_follow_max_sol: float = 0.08  # max SOL per cabal-follow buy
-    velocity_drop_sell_pct: float = 0.4 # sell when velocity drops to 40% of peak
+    cabal_follow_max_fdv: float = 80000.0   # v4.0: tighter from 100k — only follow into sub-80k FDV
+    cabal_follow_min_wallets: int = 3    # v4.0: raised from 2 — need 3+ connected wallets
+    cabal_follow_max_sol: float = 0.02   # v4.1: 0.02 SOL for cabal follows
+    velocity_drop_sell_pct: float = 0.30 # v4.1: tighter from 0.35 — sell even faster on vel death
     # v3.7: Instant snipe on big dev buy / bundle at pool creation
     instant_snipe: bool = True             # snipe pool the moment it launches if dev buy is big
-    instant_snipe_min_dev_sol: float = 7.0 # minimum dev buy SOL to trigger instant snipe (HIGH CONVICTION)
-    instant_snipe_max_sol: float = 0.06    # max SOL to spend on instant snipe
+    instant_snipe_min_dev_sol: float = 3.0 # v4.0: raised from 2.0 — need bigger dev buy for confidence
+    instant_snipe_max_sol: float = 0.02    # v4.1: 0.02 SOL for instant snipes
     bundle_snipe: bool = True              # snipe when bundle detected (multiple buys within seconds)
     bundle_min_buys: int = 3               # min buys within bundle_window_sec to trigger
     bundle_window_sec: float = 5.0         # time window to detect bundle (coordinated buys)
-    bundle_snipe_max_sol: float = 0.06     # max SOL per bundle snipe
+    bundle_snipe_max_sol: float = 0.02     # v4.1: 0.02 SOL per bundle snipe
     # v3.7: Re-entry after velocity dump
     reentry_enabled: bool = True           # watch dumped tokens, re-enter on strength
-    reentry_velocity_min: float = 3.0      # min velocity to trigger re-entry
-    reentry_max_sol: float = 0.05          # smaller size on re-entry
+    reentry_velocity_min: float = 2.0      # v3.8: lowered from 3.0
+    reentry_max_sol: float = 0.05          # v4.1: re-entry gets 0.05 SOL (higher conviction)
     reentry_stop_loss: float = 0.25        # tight 25% stop loss on re-entry positions
     reentry_ignore_fdv_cap: bool = True    # re-entry can exceed normal FDV cap if quantum signals strong
+    # v3.8: Dynamic scalper — quick in/out profit targets
+    quick_take_profit: float = 1.15        # sell at 15% profit — high frequency
+    quick_take_profit_2: float = 1.25      # sell remainder at 25%
+    max_hold_minutes: float = 15.0         # v4.1: tightened from 20 — don't hold losers
+    # v3.8: Dynamic adaptation — auto-adjust thresholds based on on-chain activity
+    dynamic_adapt: bool = True             # auto-loosen/tighten based on market conditions
+    adapt_quiet_cycles: int = 5            # if this many cycles with 0 qualifying tokens, loosen
+    adapt_hot_cycles: int = 3              # if this many cycles with 3+ qualifying, tighten
+    # v4.3: Paper trading — simulate all trades without sending real SOL
+    paper_trade: bool = True               # DEFAULT ON — no real transactions until explicitly disabled
+    paper_start_balance: float = 1.0       # virtual starting SOL for paper trading
+    # v4.3: Jupiter API key (free tier at portal.jup.ag — required since 2026)
+    jupiter_api_key: str = ""
 
 
 # ============================================================
@@ -413,6 +516,7 @@ class PumpFunMonitor:
         self.instant_snipe_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
         self.bundle_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
         self._bundle_detected: Set[str] = set()  # mints already bundle-signaled
+        self._sniper_signaled: Set[str] = set()  # v3.9: dedup — only emit sniper signal once per token
         self._reconnect_count = 0
         # Platform stats
         self.platform_counts = {PLATFORM_PUMP: 0, PLATFORM_BONK: 0, PLATFORM_BAGS: 0}
@@ -451,9 +555,12 @@ class PumpFunMonitor:
                 ) as ws:
                     self.ws = ws
                     self._reconnect_count += 1
-                    # Subscribe to new token creates + token trades
+                    # Subscribe to new token creates
                     await ws.send(json.dumps({"method": "subscribeNewToken"}))
-                    logger.info(f"PumpPortal WS connected (attempt #{self._reconnect_count}), subscribed to new tokens + trades")
+                    self._pending_trade_subs = asyncio.Queue(maxsize=200)
+                    logger.info(f"PumpPortal WS connected (attempt #{self._reconnect_count}), subscribed to newToken")
+                    # v3.8: Start background task to subscribe to trades for new tokens
+                    asyncio.create_task(self._trade_subscriber(ws))
 
                     async for msg in ws:
                         if not self.running:
@@ -469,6 +576,55 @@ class PumpFunMonitor:
             except Exception as e:
                 logger.warning(f"PumpFun WS error: {e}, reconnecting in 2s... (reconnects: {self._reconnect_count})")
                 await asyncio.sleep(2)
+
+    async def _trade_subscriber(self, ws):
+        """v3.8 FIX: Subscribe to trades for new tokens as they appear.
+
+        PumpPortal requires explicit subscribeTokenTrade per mint.
+        We batch-subscribe in groups of up to 10 to avoid spamming.
+        """
+        _subscribed = set()
+        while self.running:
+            try:
+                # Collect mints to subscribe to (batch up to 10)
+                mints_to_sub = []
+                while len(mints_to_sub) < 10:
+                    try:
+                        mint = self._pending_trade_subs.get_nowait()
+                        if mint not in _subscribed:
+                            mints_to_sub.append(mint)
+                    except asyncio.QueueEmpty:
+                        break
+
+                if mints_to_sub:
+                    try:
+                        await ws.send(json.dumps({
+                            "method": "subscribeTokenTrade",
+                            "keys": mints_to_sub,
+                        }))
+                        _subscribed.update(mints_to_sub)
+                    except Exception as e:
+                        logger.debug(f"Trade subscribe error: {e}")
+
+                # Prune old subscriptions (keep max 200 active)
+                if len(_subscribed) > 200:
+                    # Unsubscribe oldest by keeping only hot_tokens
+                    stale = _subscribed - set(self.hot_tokens.keys())
+                    if stale:
+                        try:
+                            await ws.send(json.dumps({
+                                "method": "unsubscribeTokenTrade",
+                                "keys": list(stale)[:50],
+                            }))
+                            _subscribed -= stale
+                        except Exception:
+                            pass
+
+                await asyncio.sleep(0.5)  # check every 500ms
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(1)
 
     def _detect_platform(self, data: dict) -> str:
         """Detect which launchpad a PumpPortal event came from."""
@@ -536,6 +692,13 @@ class PumpFunMonitor:
                     self.new_tokens.put_nowait(token_data)
                 logger.info(f"[{platform_label}] NEW: ${token_data['symbol']} by {creator[:8]}... (dev buy: {initial_sol:.3f} SOL)")
 
+                # v3.8 FIX: Subscribe to this token's trades so we get buy/sell events
+                if hasattr(self, '_pending_trade_subs'):
+                    try:
+                        self._pending_trade_subs.put_nowait(mint)
+                    except asyncio.QueueFull:
+                        pass  # will catch on next batch
+
                 # v3.7: Instant snipe on big dev buy at pool creation
                 # If dev launches with significant SOL, snipe immediately before others pile in
                 if initial_sol >= 7.0:  # HIGH CONVICTION: dev put 7+ SOL in at launch
@@ -580,6 +743,24 @@ class PumpFunMonitor:
                     }
                 stats = self.hot_tokens[mint]
                 sol_amount = data.get("solAmount", 0) / LAMPORTS_PER_SOL if data.get("solAmount") else 0
+
+                # v4.3: Capture real-time price data from PumpPortal trade events
+                # These fields give us instant pricing without extra API calls
+                market_cap_sol = data.get("marketCapSol", 0)
+                if market_cap_sol:
+                    stats["market_cap_sol"] = market_cap_sol
+                v_sol = data.get("vSolInBondingCurve", 0)
+                v_tokens = data.get("vTokensInBondingCurve", 0)
+                if v_sol and v_tokens:
+                    stats["v_sol"] = v_sol
+                    stats["v_tokens"] = v_tokens
+                    # Compute real-time price per token in SOL from curve reserves
+                    stats["price_sol"] = (v_sol / 1e9) / (v_tokens / 1e6) if v_tokens > 0 else 0
+                    stats["price_updated"] = time.time()
+                token_amount = data.get("tokenAmount", 0)
+                if token_amount and sol_amount > 0:
+                    # Implied trade price (backup if curve data missing)
+                    stats["last_trade_price_sol"] = sol_amount / (token_amount / 1e6) if token_amount > 0 else 0
 
                 if data["txType"] == "buy":
                     stats["buys"] += 1
@@ -700,6 +881,7 @@ class PumpFunMonitor:
             for mint in expired_mints:
                 self._token_buyer_wallets.pop(mint, None)
                 self._cabal_signaled.discard(mint)
+                self._sniper_signaled.discard(mint)
             for wallet in list(self._wallet_token_buys):
                 self._wallet_token_buys[wallet] -= expired_mints
                 if not self._wallet_token_buys[wallet]:
@@ -712,6 +894,9 @@ class PumpFunMonitor:
 
     def _check_sniper_signal(self, mint: str, stats: dict):
         """Emit a sniper signal if token shows strong early momentum."""
+        # v3.9: Dedup — only emit once per token
+        if mint in self._sniper_signaled:
+            return
         age_seconds = time.time() - stats.get("first_seen", time.time())
         if age_seconds < 5 or age_seconds > 300:  # 5s-5min window
             return
@@ -722,10 +907,10 @@ class PumpFunMonitor:
         velocity = (buys / (age_seconds / 60)) if age_seconds > 0 else 0
         creator_sold = stats.get("creator_sold", False)
 
-        # Sniper criteria: multiple unique buyers, good velocity, no creator dump
+        # Sniper criteria: v3.8 loosened — 2 unique buyers, velocity >= 1.0
         platform = stats.get("platform", PLATFORM_PUMP)
-        if (buys >= 3 and unique >= 3 and velocity >= 2.0
-                and sells <= buys * 0.3 and not creator_sold):
+        if (buys >= 2 and unique >= 2 and velocity >= 1.0
+                and sells <= buys * 0.4 and not creator_sold):
             platform_label = "PUMP" if platform == PLATFORM_PUMP else "BONK" if platform == PLATFORM_BONK else "BAGS"
             signal = {
                 "mint": mint,
@@ -749,6 +934,7 @@ class PumpFunMonitor:
             except asyncio.QueueFull:
                 self.sniper_signals.get_nowait()
                 self.sniper_signals.put_nowait(signal)
+            self._sniper_signaled.add(mint)  # v3.9: dedup — don't fire again for same token
             # Keep last 50 signals for dashboard
             self.sniper_history.append(signal)
             if len(self.sniper_history) > 50:
@@ -788,8 +974,8 @@ class PumpFunMonitor:
                     connected_wallets.add(buyer_list[i])
                     connected_wallets.add(buyer_list[j])
 
-        # Signal if enough connected wallets are converging
-        if len(connected_wallets) >= 2 and connected_pairs >= 1:
+        # Signal if enough connected wallets are converging (min 3 to avoid noise)
+        if len(connected_wallets) >= 3 and connected_pairs >= 2:
             age_seconds = time.time() - stats.get("first_seen", time.time())
             velocity = stats["buys"] / (age_seconds / 60) if age_seconds > 0 else 0
             platform = stats.get("platform", PLATFORM_PUMP)
@@ -950,9 +1136,10 @@ class BondingCurveEngine:
     on-chain instruction fallback.
     """
 
-    def __init__(self, rpc_url: str, fast_rpc_url: str = ""):
+    def __init__(self, rpc_url: str, fast_rpc_url: str = "", send_rpc_url: str = ""):
         self.rpc_url = rpc_url
         self.fast_rpc_url = fast_rpc_url or rpc_url
+        self.send_rpc_url = send_rpc_url or self.fast_rpc_url  # v4.2: Helius staked for sends
         self._curve_cache: Dict[str, Tuple[BondingCurveState, float]] = {}  # mint -> (state, timestamp)
         self._fee_idx = 0
 
@@ -1061,7 +1248,8 @@ class BondingCurveEngine:
                 "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
                 "params": [signed_b64, {"encoding": "base64", "skipPreflight": True, "maxRetries": 2}]
             }
-            rpc = self.fast_rpc_url
+            # v4.2: Send via Helius staked RPC for better landing rate
+            rpc = self.send_rpc_url
             async with session.post(rpc, json=send_payload) as resp:
                 result = await resp.json()
 
@@ -1131,7 +1319,8 @@ class BondingCurveEngine:
                 "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
                 "params": [signed_b64, {"encoding": "base64", "skipPreflight": True, "maxRetries": 2}]
             }
-            async with session.post(self.fast_rpc_url, json=send_payload) as resp:
+            # v4.2: Send via Helius staked RPC for better landing rate
+            async with session.post(self.send_rpc_url, json=send_payload) as resp:
                 result = await resp.json()
 
             if "error" in result:
@@ -1175,6 +1364,1158 @@ class BondingCurveEngine:
         if remaining_sol <= 0 or velocity_sol_per_min <= 0:
             return 0
         return remaining_sol / velocity_sol_per_min
+
+
+# ============================================================
+# HOLDER WATCHER — Real-time top holder rug detection (v3.9)
+# ============================================================
+# Known safe token lock / vesting contracts on Solana
+# If tokens move to these programs, it's NOT a rug — it's a lock
+SAFE_LOCK_PROGRAMS = {
+    "strmRqUCoQUgGUan5YhzUZa6KqdzwX5L6FpUxfmKg5m",  # Streamflow Finance
+    "8e72pYCDaxu3GqMfeQ5r8wFgoZSYk6oua1Qo9XpsZjX",  # Streamflow Community
+    "LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn",  # Jupiter Lock
+    "CChTq6PthWU82YZkbveA3WDf7s97BWhBK4Vx9bmsT743",  # Bonfida Token Vesting
+    "DRay25Usp3YJAi7beckgpGUC7mGJ2cR1AVPxhYfwVCUX",  # Raydium Burn & Earn (LP locker)
+    "11111111111111111111111111111111",                  # System Program (burn)
+    "1111111111111111111111111111111111111111111",        # Burn address variant
+    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",    # Pump.fun program (bonding curve holds)
+    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",    # PumpSwap AMM (migration target)
+    "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg",   # Pump.fun Migration Authority
+}
+
+# Known DEX program IDs — if tokens go here, the holder is SELLING
+DEX_SELL_PROGRAMS = {
+    "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",  # Raydium AMM v4
+    "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",  # Raydium CPMM
+    "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",  # Raydium CLMM
+    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",   # Jupiter v6
+    "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",   # Orca Whirlpool
+    "9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP",  # Orca v2
+    "srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX",    # Serum DEX
+}
+
+# Known burn / incinerator addresses on Solana — tokens sent here are destroyed permanently
+BURN_ADDRESSES = {
+    "1nc1nerator11111111111111111111111111111111",    # Solana Incinerator (most common intentional burn)
+    "11111111111111111111111111111111",                # System Program (acts as burn)
+}
+
+# SPL Token program IDs (for identifying token transfer instructions)
+SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+SPL_TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+
+
+# ============================================================
+# BURN SIGNAL MONITOR — Auto-detect LP burns & supply burns (v4.0)
+# ============================================================
+class BurnSignalMonitor:
+    """Monitor Solana burn addresses for LP token burns and supply burns.
+
+    When tokens are burned (LP or supply), it's a strong bullish signal:
+    - LP burn = liquidity permanently locked, dev CAN'T rug the pool
+    - Supply burn = deflationary, shows dev commitment, reduces sell pressure
+
+    Two detection strategies:
+    1. DISCOVERY: Scan recent burn address transactions to find tokens being burned
+       → cross-reference with DexScreener/PumpPortal for health check → buy signal
+    2. SCORING: For tokens already in our pipeline, check if they have burns → score boost
+    """
+
+    def __init__(self, rpc_url: str, fast_rpc_url: str = ""):
+        self.rpc_url = rpc_url
+        self.fast_rpc = fast_rpc_url or rpc_url
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.buy_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
+        self._running = False
+        self._task = None
+        self._seen_sigs: set = set()       # tx signatures already processed
+        self._seen_mints: set = set()       # mints already signaled (dedup)
+        self._burn_history: List[dict] = [] # recent burns for dashboard
+        self._burn_buy_max_sol = 0.02       # v4.1: 0.02 SOL per burn-signal buy
+        self._healthy_cache: Dict[str, dict] = {}  # mint → health check result (TTL 60s)
+        self._burn_buy_timestamps: List[float] = []  # v4.1: cooldown tracking
+        self._burn_buy_cooldown_window = 600  # 10 minutes
+        self._burn_buy_max_per_window = 2     # max 2 burn buys per 10 minutes
+        logger.info("BurnSignalMonitor v4.1 initialized (tightened filters)")
+
+    async def init_session(self, session: aiohttp.ClientSession):
+        self.session = session
+
+    async def start(self):
+        self._running = True
+        self._task = asyncio.create_task(self._monitor_loop())
+        logger.info("BurnSignalMonitor started — watching incinerator for LP/supply burns")
+
+    async def stop(self):
+        self._running = False
+        if self._task:
+            self._task.cancel()
+
+    async def _monitor_loop(self):
+        """Scan burn addresses every 12 seconds for fresh token burns."""
+        while self._running:
+            try:
+                await self._scan_burns()
+                # v4.0: 8s scan — Alchemy allows ~30 rps, burn scan uses ~3-5 calls per loop
+                await asyncio.sleep(8)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"BurnMonitor loop error: {e}")
+                await asyncio.sleep(15)
+
+    async def _scan_burns(self):
+        """Fetch recent transactions to burn/incinerator addresses and identify token burns."""
+        if not self.session:
+            return
+
+        for burn_addr in BURN_ADDRESSES:
+            try:
+                # Get last 25 signatures for this burn address
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [burn_addr, {"limit": 25}],
+                }
+                async with self.session.post(
+                    self.fast_rpc, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+                    sigs = data.get("result", [])
+
+                for sig_info in sigs:
+                    sig = sig_info.get("signature", "")
+                    if not sig or sig in self._seen_sigs:
+                        continue
+                    # Only process recent transactions (< 5 minutes old)
+                    block_time = sig_info.get("blockTime", 0)
+                    if block_time and time.time() - block_time > 300:
+                        self._seen_sigs.add(sig)
+                        continue
+                    # Skip failed transactions
+                    if sig_info.get("err") is not None:
+                        self._seen_sigs.add(sig)
+                        continue
+
+                    self._seen_sigs.add(sig)
+                    await self._process_burn_tx(sig, burn_addr)
+                    await asyncio.sleep(0.15)  # rate limit RPC calls
+
+            except Exception as e:
+                logger.debug(f"Burn scan error for {burn_addr[:16]}...: {e}")
+
+        # Housekeeping: trim seen signatures
+        if len(self._seen_sigs) > 5000:
+            self._seen_sigs = set(list(self._seen_sigs)[-2500:])
+
+    async def _process_burn_tx(self, sig: str, burn_addr: str):
+        """Parse a transaction to the burn address and extract the token being burned."""
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTransaction",
+                "params": [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+            }
+            async with self.session.post(
+                self.fast_rpc, json=payload,
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    return
+                data = await resp.json()
+                tx = data.get("result")
+                if not tx:
+                    return
+
+            # Parse instructions to find token transfer or burn instructions
+            instructions = []
+            msg = tx.get("transaction", {}).get("message", {})
+            instructions.extend(msg.get("instructions", []))
+            # Also check inner instructions
+            meta = tx.get("meta", {})
+            for inner in (meta.get("innerInstructions") or []):
+                instructions.extend(inner.get("instructions", []))
+
+            for ix in instructions:
+                program_id = ix.get("programId", "")
+                if program_id not in (SPL_TOKEN_PROGRAM, SPL_TOKEN_2022):
+                    continue
+
+                parsed = ix.get("parsed", {})
+                ix_type = parsed.get("type", "")
+                info = parsed.get("info", {})
+
+                token_mint = None
+                amount = 0
+                burn_type = ""
+
+                if ix_type == "burn" or ix_type == "burnChecked":
+                    # Direct SPL burn instruction — supply reduction
+                    token_mint = info.get("mint", "")
+                    amount = int(info.get("amount", 0) or info.get("tokenAmount", {}).get("amount", 0))
+                    burn_type = "supply_burn"
+
+                elif ix_type in ("transfer", "transferChecked"):
+                    # Token transfer TO the burn address
+                    dest = info.get("destination", "")
+                    # We need to check if the destination ATA is owned by burn addr
+                    # But since we got this tx from the burn address's history, it's likely a burn
+                    token_mint = info.get("mint", "")
+                    amount = int(info.get("amount", 0) or info.get("tokenAmount", {}).get("amount", 0))
+                    if amount > 0:
+                        burn_type = "transfer_burn"
+
+                if not token_mint or token_mint in self._seen_mints or amount <= 0:
+                    continue
+
+                # Skip wrapped SOL and other system tokens
+                if token_mint in ("So11111111111111111111111111111111111111112",):
+                    continue
+
+                logger.info(
+                    f"BURN DETECTED: {burn_type} | mint={token_mint[:16]}... | "
+                    f"amount={amount} | sig={sig[:20]}..."
+                )
+
+                # Record for history
+                self._burn_history.append({
+                    "mint": token_mint, "burn_type": burn_type,
+                    "amount": amount, "sig": sig, "timestamp": time.time(),
+                    "burn_addr": burn_addr,
+                })
+                if len(self._burn_history) > 100:
+                    self._burn_history = self._burn_history[-50:]
+
+                # Now check if this token is healthy and worth buying
+                await self._evaluate_burn_token(token_mint, burn_type, amount, sig)
+
+        except Exception as e:
+            logger.debug(f"Process burn tx error: {e}")
+
+    async def _evaluate_burn_token(self, mint: str, burn_type: str, amount: int, sig: str):
+        """Check if a burned token has real value and is healthy enough to buy.
+
+        v4.1 TIGHTENED: Raised all thresholds to stop buying 0-liquidity tokens.
+        - Min liquidity $5,000 (was $500)
+        - Require active trading in last 5 minutes
+        - Require buy/sell ratio > 0.3
+        - Require 24h volume > $1,000
+        - Require FDV > $10,000
+        - Max 2 burn buys per 10 minutes (cooldown)
+        """
+        if mint in self._seen_mints:
+            return
+        if not self.session:
+            return
+
+        # v4.1: Cooldown check — max 2 burn buys per 10 minutes
+        now = time.time()
+        self._burn_buy_timestamps = [
+            t for t in self._burn_buy_timestamps
+            if now - t < self._burn_buy_cooldown_window
+        ]
+        if len(self._burn_buy_timestamps) >= self._burn_buy_max_per_window:
+            logger.debug(f"BURN COOLDOWN: {len(self._burn_buy_timestamps)} buys in last 10min, skipping {mint[:12]}...")
+            return
+
+        health = None
+
+        # Strategy 1: Check DexScreener for DEX-listed tokens
+        try:
+            async with self.session.get(
+                f"https://api.dexscreener.com/latest/dex/tokens/{mint}",
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    pairs = data.get("pairs") or []
+                    if pairs:
+                        pair = pairs[0]  # best pair
+                        liq = float(pair.get("liquidity", {}).get("usd", 0) or 0)
+                        fdv = float(pair.get("fdv", 0) or 0)
+                        price_change_5m = float(pair.get("priceChange", {}).get("m5", 0) or 0)
+                        vol_24h = float(pair.get("volume", {}).get("h24", 0) or 0)
+                        age_str = pair.get("pairCreatedAt", 0)
+                        buys_5m = int(pair.get("txns", {}).get("m5", {}).get("buys", 0) or 0)
+                        sells_5m = int(pair.get("txns", {}).get("m5", {}).get("sells", 0) or 0)
+                        symbol = pair.get("baseToken", {}).get("symbol", "?")
+
+                        # Calculate age in minutes
+                        age_min = 9999
+                        if age_str:
+                            try:
+                                age_min = (time.time() * 1000 - float(age_str)) / 60000
+                            except (ValueError, TypeError):
+                                pass
+
+                        health = {
+                            "symbol": symbol, "liquidity": liq, "fdv": fdv,
+                            "price_change_5m": price_change_5m, "age_minutes": age_min,
+                            "buys_5m": buys_5m, "sells_5m": sells_5m,
+                            "volume_24h": vol_24h,
+                            "on_dex": True, "on_bonding_curve": False,
+                        }
+        except Exception:
+            pass
+
+        # v4.1: NO MORE fallback for unknown tokens — if not on DEX, skip entirely
+        if not health:
+            logger.debug(f"BURN SKIP: {mint[:12]}... — not on DEX, no data")
+            return
+
+        # v4.1 TIGHTENED HEALTH CHECKS — strict filters to avoid 0-liq tokens
+        is_healthy = False
+        skip_reason = ""
+
+        if health["on_dex"]:
+            liq = health["liquidity"]
+            fdv = health["fdv"]
+            age = health["age_minutes"]
+            buys = health["buys_5m"]
+            sells = health["sells_5m"]
+            vol = health.get("volume_24h", 0)
+            total_txns_5m = buys + sells
+
+            if liq < 5000:
+                skip_reason = f"low_liquidity_{liq:.0f}_need_5000"
+            elif fdv < 10000:
+                skip_reason = f"fdv_too_low_{fdv:.0f}_likely_dead"
+            elif fdv > 500000:
+                skip_reason = f"fdv_too_high_{fdv:.0f}"
+            elif vol < 1000:
+                skip_reason = f"low_volume_{vol:.0f}_need_1000"
+            elif age > 30:
+                skip_reason = f"too_old_{age:.0f}m"
+            elif total_txns_5m < 1:
+                skip_reason = "no_trades_last_5m"
+            elif total_txns_5m > 0 and buys / total_txns_5m < 0.3:
+                skip_reason = f"buy_ratio_too_low_{buys}/{total_txns_5m}"
+            elif health["price_change_5m"] < -30:
+                skip_reason = f"price_dumping_{health['price_change_5m']:.0f}pct"
+            else:
+                is_healthy = True
+
+        if not is_healthy:
+            logger.debug(f"BURN SKIP: {health['symbol']} ({mint[:12]}...) — {skip_reason}")
+            return
+
+        # Generate buy signal!
+        self._seen_mints.add(mint)
+        self._burn_buy_timestamps.append(time.time())
+        signal = {
+            "mint": mint, "symbol": health["symbol"],
+            "burn_type": burn_type, "burn_amount": amount,
+            "sig": sig, "health": health,
+            "timestamp": time.time(),
+            "max_sol": self._burn_buy_max_sol,
+        }
+
+        try:
+            self.buy_signals.put_nowait(signal)
+            logger.info(
+                f"BURN BUY SIGNAL: ${health['symbol']} ({mint[:12]}...) | "
+                f"type={burn_type} | liq=${health['liquidity']:.0f} | "
+                f"fdv=${health['fdv']:.0f} | vol=${health.get('volume_24h', 0):.0f} | "
+                f"buys={health['buys_5m']} | cooldown={len(self._burn_buy_timestamps)}/{self._burn_buy_max_per_window}"
+            )
+        except asyncio.QueueFull:
+            pass  # queue full, skip this signal
+
+    async def check_token_burns(self, mint: str) -> dict:
+        """Check if a specific token has any burn activity (for scoring boost).
+
+        Returns: {"has_lp_burn": bool, "has_supply_burn": bool, "mint_authority_revoked": bool}
+        """
+        result = {"has_lp_burn": False, "has_supply_burn": False, "mint_authority_revoked": False}
+        if not self.session:
+            return result
+
+        # Check if in our recent burn history
+        for burn in self._burn_history:
+            if burn["mint"] == mint:
+                if burn["burn_type"] == "supply_burn":
+                    result["has_supply_burn"] = True
+                else:
+                    result["has_lp_burn"] = True
+
+        # Check mint authority (revoked = can't mint more = bullish)
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [mint, {"encoding": "jsonParsed"}],
+            }
+            async with self.session.post(
+                self.fast_rpc, json=payload,
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    acct = data.get("result", {}).get("value", {})
+                    parsed = (acct.get("data", {}).get("parsed", {}).get("info", {}))
+                    mint_auth = parsed.get("mintAuthority")
+                    if mint_auth is None or mint_auth == "":
+                        result["mint_authority_revoked"] = True
+        except Exception:
+            pass
+
+        return result
+
+    def get_status(self) -> dict:
+        return {
+            "running": self._running,
+            "burns_detected": len(self._burn_history),
+            "signals_generated": len(self._seen_mints),
+            "recent_burns": self._burn_history[-5:],
+        }
+
+
+@dataclass
+class HolderSnapshot:
+    """Snapshot of a token account holder at a point in time."""
+    owner: str           # wallet address that owns the token account
+    token_account: str   # the token account (ATA) address
+    amount: int          # raw token amount
+    ui_amount: float     # human-readable amount
+    pct_supply: float    # percentage of total supply this holder has
+
+
+class HolderWatcher:
+    """Real-time on-chain monitoring of top holders for every position we hold.
+
+    The alpha: When a top holder moves tokens and the destination is NOT a known
+    token lock contract (Streamflow, Jupiter Lock, Bonfida Vesting, Raydium Burn&Earn),
+    we sell IMMEDIATELY because it's likely a dump about to crash the price.
+
+    Architecture:
+    - When we buy: snapshot top 10 holders via getTokenLargestAccounts
+    - Every 5 seconds: re-check holder balances
+    - If any critical holder's balance drops >25%: check where tokens went
+    - If destination is DEX program → they're selling → EMERGENCY SELL
+    - If destination is unknown wallet → suspicious → SELL
+    - If destination is lock contract → SAFE, continue holding
+
+    This catches rugs 10-60 seconds before the price crashes on DexScreener.
+    """
+
+    def __init__(self, rpc_url: str, fast_rpc_url: str = ""):
+        self.rpc_url = rpc_url
+        self.fast_rpc = fast_rpc_url or rpc_url
+        self.session: Optional[aiohttp.ClientSession] = None
+        # mint → list of HolderSnapshots (top holders at time of buy)
+        self.holder_snapshots: Dict[str, List[HolderSnapshot]] = {}
+        # mint → set of holder owners we're actively watching
+        self.watched_holders: Dict[str, Set[str]] = {}
+        # mint → last check timestamp (rate limiting)
+        self._last_check: Dict[str, float] = {}
+        # mint → set of alerts already fired (dedup)
+        self._alerts_fired: Dict[str, Set[str]] = {}
+        # Alert queue — DegenTrader reads this to trigger sells
+        self.sell_alerts: asyncio.Queue = asyncio.Queue(maxsize=50)
+        self._check_interval = 5.0  # seconds between holder checks per token
+        self.running = False
+        self._task = None
+
+    async def init_session(self, session: aiohttp.ClientSession):
+        self.session = session
+
+    async def start(self):
+        """Start background holder monitoring loop."""
+        self.running = True
+        self._task = asyncio.create_task(self._monitor_loop())
+        logger.info("HolderWatcher started — monitoring top holders for rug detection")
+
+    async def stop(self):
+        self.running = False
+        if self._task:
+            self._task.cancel()
+
+    async def snapshot_holders(self, mint: str, exclude_owner: str = ""):
+        """Take initial snapshot of top holders when we buy a token.
+
+        Args:
+            mint: Token mint address
+            exclude_owner: Our own wallet (exclude from monitoring)
+        """
+        if not self.session:
+            return
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTokenLargestAccounts",
+                "params": [mint, {"commitment": "confirmed"}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json()
+                accounts = data.get("result", {}).get("value", [])
+
+            if not accounts:
+                logger.warning(f"HolderWatch: No holders found for {mint[:12]}")
+                return
+
+            # Get total supply for percentage calculation
+            total_supply = await self._get_total_supply(mint)
+            if total_supply <= 0:
+                total_supply = 1_000_000_000_000_000  # pump.fun default: 1B tokens * 10^6 decimals
+
+            snapshots = []
+            watched = set()
+            for acc in accounts[:10]:  # Top 10 holders
+                token_account = acc.get("address", "")
+                amount = int(acc.get("amount", "0"))
+                ui_amount = float(acc.get("uiAmount", 0) or 0)
+                decimals = acc.get("decimals", 6)
+
+                # Get the owner wallet of this token account
+                owner = await self._get_token_account_owner(token_account)
+                if not owner or owner == exclude_owner:
+                    continue
+
+                # Skip if it's a known safe program (bonding curve, lock, etc.)
+                if owner in SAFE_LOCK_PROGRAMS:
+                    continue
+
+                pct = (amount / total_supply * 100) if total_supply > 0 else 0
+
+                snap = HolderSnapshot(
+                    owner=owner, token_account=token_account,
+                    amount=amount, ui_amount=ui_amount, pct_supply=round(pct, 2),
+                )
+                snapshots.append(snap)
+
+                # Only watch holders with >2% of supply — they can move the price
+                if pct >= 2.0:
+                    watched.add(owner)
+
+            self.holder_snapshots[mint] = snapshots
+            self.watched_holders[mint] = watched
+            self._alerts_fired[mint] = set()
+            self._last_check[mint] = time.time()
+
+            holder_summary = ", ".join(
+                f"{s.owner[:8]}..({s.pct_supply:.1f}%)" for s in snapshots[:5]
+            )
+            logger.info(
+                f"HolderWatch: Snapshot {mint[:12]} | {len(snapshots)} holders | "
+                f"watching {len(watched)} critical | top: [{holder_summary}]"
+            )
+
+        except Exception as e:
+            logger.error(f"HolderWatch snapshot error {mint[:12]}: {e}")
+
+    async def unwatch(self, mint: str):
+        """Stop watching a token (after we sell)."""
+        self.holder_snapshots.pop(mint, None)
+        self.watched_holders.pop(mint, None)
+        self._last_check.pop(mint, None)
+        self._alerts_fired.pop(mint, None)
+
+    async def _monitor_loop(self):
+        """Background loop: check all watched positions for holder movements."""
+        while self.running:
+            try:
+                mints = list(self.watched_holders.keys())
+                for mint in mints:
+                    if not self.running:
+                        break
+                    # Rate limit: check each token every N seconds
+                    last = self._last_check.get(mint, 0)
+                    if time.time() - last < self._check_interval:
+                        continue
+                    self._last_check[mint] = time.time()
+                    await self._check_holders(mint)
+            except Exception as e:
+                logger.error(f"HolderWatch loop error: {e}")
+            await asyncio.sleep(1.0)
+
+    async def _check_holders(self, mint: str):
+        """Re-check holder balances and detect movements."""
+        if not self.session or mint not in self.holder_snapshots:
+            return
+
+        original_snapshots = self.holder_snapshots[mint]
+        watched = self.watched_holders.get(mint, set())
+        if not watched:
+            return
+
+        try:
+            # Fetch current top holders
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTokenLargestAccounts",
+                "params": [mint, {"commitment": "confirmed"}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                data = await resp.json()
+                current_accounts = data.get("result", {}).get("value", [])
+
+            if not current_accounts:
+                return
+
+            # Build current balance map: token_account → amount
+            current_balances = {}
+            for acc in current_accounts:
+                current_balances[acc.get("address", "")] = int(acc.get("amount", "0"))
+
+            # Compare against original snapshots
+            for snap in original_snapshots:
+                if snap.owner not in watched:
+                    continue
+                if snap.owner in self._alerts_fired.get(mint, set()):
+                    continue  # already alerted on this holder
+
+                current_amount = current_balances.get(snap.token_account, None)
+
+                # If token account disappeared from top 20 or balance dropped significantly
+                if current_amount is None:
+                    # Account not in top 20 anymore — they may have sold everything
+                    current_amount = await self._get_account_balance(snap.token_account)
+
+                if current_amount is None:
+                    continue
+
+                # Calculate drop percentage
+                if snap.amount <= 0:
+                    continue
+                drop_pct = (snap.amount - current_amount) / snap.amount * 100
+
+                # TRIGGER: Holder dropped >25% of their position
+                if drop_pct >= 25:
+                    # Check WHERE the tokens went
+                    is_safe = await self._check_transfer_destination(snap.owner, mint)
+
+                    if is_safe:
+                        logger.info(
+                            f"HolderWatch SAFE: {snap.owner[:12]} moved {drop_pct:.0f}% "
+                            f"of {mint[:12]} to LOCK CONTRACT — holding"
+                        )
+                        continue
+
+                    # NOT SAFE — this is a dump. Fire sell alert!
+                    self._alerts_fired.setdefault(mint, set()).add(snap.owner)
+                    alert = {
+                        "mint": mint,
+                        "holder": snap.owner,
+                        "drop_pct": round(drop_pct, 1),
+                        "original_pct_supply": snap.pct_supply,
+                        "original_amount": snap.amount,
+                        "current_amount": current_amount,
+                        "reason": "holder_dump",
+                        "timestamp": time.time(),
+                    }
+                    try:
+                        self.sell_alerts.put_nowait(alert)
+                    except asyncio.QueueFull:
+                        self.sell_alerts.get_nowait()
+                        self.sell_alerts.put_nowait(alert)
+
+                    logger.warning(
+                        f"HOLDER DUMP DETECTED: {snap.owner[:12]}... dropped "
+                        f"{drop_pct:.0f}% of {mint[:12]} (held {snap.pct_supply:.1f}% supply) "
+                        f"— NOT a lock contract — SELLING"
+                    )
+
+        except Exception as e:
+            logger.debug(f"HolderWatch check error {mint[:12]}: {e}")
+
+    async def _check_transfer_destination(self, wallet: str, mint: str) -> bool:
+        """Check if a wallet's recent token transfer went to a safe destination (lock contract).
+
+        Returns True if the transfer destination is a known safe program (lock/vesting/burn).
+        Returns False if destination is a DEX (selling) or unknown wallet (suspicious).
+        """
+        if not self.session:
+            return False
+
+        try:
+            # Get most recent transactions for this wallet
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [wallet, {"limit": 3, "commitment": "confirmed"}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                data = await resp.json()
+                signatures = data.get("result", [])
+
+            if not signatures:
+                return False  # can't determine → assume unsafe
+
+            # Parse the most recent transaction
+            tx_sig = signatures[0].get("signature", "")
+            if not tx_sig:
+                return False
+
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTransaction",
+                "params": [tx_sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json()
+                tx = data.get("result")
+
+            if not tx:
+                return False
+
+            # Check all programs invoked in this transaction
+            message = tx.get("transaction", {}).get("message", {})
+            instructions = message.get("instructions", [])
+            inner_instructions = tx.get("meta", {}).get("innerInstructions", [])
+
+            all_programs = set()
+            for ix in instructions:
+                prog = ix.get("programId", "")
+                if prog:
+                    all_programs.add(prog)
+            for inner_group in inner_instructions:
+                for ix in inner_group.get("instructions", []):
+                    prog = ix.get("programId", "")
+                    if prog:
+                        all_programs.add(prog)
+
+            # Check if ANY invoked program is a DEX → holder is SELLING
+            dex_hit = all_programs & DEX_SELL_PROGRAMS
+            if dex_hit:
+                logger.info(f"HolderWatch: {wallet[:12]} used DEX program {list(dex_hit)[0][:12]} — DUMP CONFIRMED")
+                return False  # NOT safe — selling on DEX
+
+            # Check if destination is a known lock program → SAFE
+            lock_hit = all_programs & SAFE_LOCK_PROGRAMS
+            if lock_hit:
+                logger.info(f"HolderWatch: {wallet[:12]} sent to lock program {list(lock_hit)[0][:12]} — SAFE")
+                return True  # Safe — token lock
+
+            # Check for simple SPL token transfers — where did tokens go?
+            for ix in instructions:
+                if ix.get("program") == "spl-token":
+                    parsed = ix.get("parsed", {})
+                    ix_type = parsed.get("type", "")
+                    if ix_type in ("transfer", "transferChecked"):
+                        dest = parsed.get("info", {}).get("destination", "")
+                        if dest:
+                            # Look up destination account owner
+                            dest_owner = await self._get_token_account_owner(dest)
+                            if dest_owner and dest_owner in SAFE_LOCK_PROGRAMS:
+                                return True
+
+            # Default: unknown destination = assume unsafe
+            return False
+
+        except Exception as e:
+            logger.debug(f"HolderWatch transfer check error: {e}")
+            return False  # can't determine → assume unsafe
+
+    async def _get_total_supply(self, mint: str) -> int:
+        """Get total supply of a token."""
+        if not self.session:
+            return 0
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [mint, {"encoding": "jsonParsed"}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                data = await resp.json()
+                info = data.get("result", {}).get("value", {}).get("data", {}).get("parsed", {}).get("info", {})
+                return int(info.get("supply", 0))
+        except Exception:
+            return 0
+
+    async def _get_token_account_owner(self, token_account: str) -> Optional[str]:
+        """Get the owner wallet of a token account."""
+        if not self.session:
+            return None
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [token_account, {"encoding": "jsonParsed"}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                data = await resp.json()
+                parsed = data.get("result", {}).get("value", {}).get("data", {}).get("parsed", {})
+                return parsed.get("info", {}).get("owner")
+        except Exception:
+            return None
+
+    async def _get_account_balance(self, token_account: str) -> Optional[int]:
+        """Get current balance of a specific token account."""
+        if not self.session:
+            return None
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [token_account, {"encoding": "jsonParsed"}],
+            }
+            async with self.session.post(self.fast_rpc, json=payload,
+                                         timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                data = await resp.json()
+                parsed = data.get("result", {}).get("value", {}).get("data", {}).get("parsed", {})
+                amount = parsed.get("info", {}).get("tokenAmount", {}).get("amount")
+                return int(amount) if amount is not None else None
+        except Exception:
+            return None
+
+    def get_status(self) -> Dict:
+        """Status for dashboard."""
+        return {
+            "watching": len(self.watched_holders),
+            "tokens_monitored": list(self.watched_holders.keys()),
+            "total_holders_tracked": sum(len(v) for v in self.watched_holders.values()),
+            "alerts_pending": self.sell_alerts.qsize(),
+        }
+
+
+# ============================================================
+# DEX PRICE FEED — Real-time via Solana WebSocket (v4.3)
+# ============================================================
+class DexPriceFeed:
+    """Real-time DEX price feed via Solana WebSocket pool vault subscriptions.
+
+    When we hold a DEX position, subscribes to the Raydium AMM pool's
+    token vault accounts. Every swap changes vault balances, triggering
+    an instant price update pushed to us — no polling needed.
+
+    Price is computed from: quote_vault_balance / base_vault_balance
+    adjusted for token decimals. Gives us sub-second price updates
+    vs 15-30s stale data from DexScreener.
+    """
+
+    # Raydium AMM V4 account layout offsets (bytes)
+    _COIN_DECIMALS_OFFSET = 32     # u64: base token decimals
+    _PC_DECIMALS_OFFSET = 40       # u64: quote token decimals
+    _COIN_VAULT_OFFSET = 336       # Pubkey (32 bytes): base token vault
+    _PC_VAULT_OFFSET = 368         # Pubkey (32 bytes): quote token vault
+    _COIN_MINT_OFFSET = 400        # Pubkey (32 bytes): base token mint
+    _PC_MINT_OFFSET = 432          # Pubkey (32 bytes): quote token mint
+
+    def __init__(self, rpc_url: str, ws_url: str = ""):
+        self.rpc_url = rpc_url
+        # Convert HTTP RPC to WebSocket URL
+        if ws_url:
+            self.ws_url = ws_url
+        else:
+            self.ws_url = rpc_url.replace("https://", "wss://").replace("http://", "ws://")
+        self.ws = None
+        self.running = False
+        self._task = None
+        self._reconnect_count = 0
+        # mint -> live price in SOL
+        self.live_prices: Dict[str, float] = {}
+        # mint -> subscription metadata
+        self._subs: Dict[str, dict] = {}
+        # ws subscription_id -> (mint, "coin"|"pc")
+        self._sub_id_map: Dict[int, tuple] = {}
+        # Pending subscribe/unsubscribe requests
+        self._pending_subs: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._pending_unsubs: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._next_rpc_id = 1
+
+    async def start(self):
+        self.running = True
+        self._task = asyncio.create_task(self._listen())
+        logger.info("DexPriceFeed started (Raydium pool vault WebSocket subscriptions)")
+
+    async def stop(self):
+        self.running = False
+        if self._task:
+            self._task.cancel()
+        if self.ws:
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
+
+    async def subscribe(self, mint: str, pool_address: str, session: aiohttp.ClientSession):
+        """Subscribe to real-time price for a DEX token via its Raydium pool."""
+        if mint in self._subs:
+            return True  # already subscribed
+
+        # 1. Read Raydium AMM pool account to get vault addresses + decimals
+        vaults = await self._resolve_raydium_vaults(pool_address, session)
+        if not vaults:
+            logger.debug(f"DexPriceFeed: couldn't resolve vaults for pool {pool_address[:12]}")
+            return False
+
+        coin_vault, pc_vault, coin_decimals, pc_decimals, coin_mint = vaults
+
+        # 2. Get initial vault balances
+        coin_bal = await self._get_vault_balance(coin_vault, session)
+        pc_bal = await self._get_vault_balance(pc_vault, session)
+
+        # 3. Store subscription info
+        self._subs[mint] = {
+            "pool": pool_address,
+            "coin_vault": coin_vault,
+            "pc_vault": pc_vault,
+            "coin_decimals": coin_decimals,
+            "pc_decimals": pc_decimals,
+            "coin_mint": coin_mint,
+            "coin_balance": coin_bal,
+            "pc_balance": pc_bal,
+            "coin_sub_id": None,
+            "pc_sub_id": None,
+        }
+
+        # Compute initial price
+        self._update_price(mint)
+
+        # 4. Queue WS subscriptions (handled by _listen loop)
+        try:
+            self._pending_subs.put_nowait((mint, coin_vault, pc_vault))
+        except asyncio.QueueFull:
+            pass
+
+        logger.info(
+            f"DexPriceFeed: subscribed {mint[:12]}... | "
+            f"pool={pool_address[:12]} | price={self.live_prices.get(mint, 0):.10f} SOL"
+        )
+        return True
+
+    async def unsubscribe(self, mint: str):
+        """Unsubscribe from a token's price feed."""
+        if mint not in self._subs:
+            return
+        info = self._subs.pop(mint)
+        self.live_prices.pop(mint, None)
+        # Queue WS unsubscriptions
+        for sub_id in [info.get("coin_sub_id"), info.get("pc_sub_id")]:
+            if sub_id is not None:
+                try:
+                    self._pending_unsubs.put_nowait(sub_id)
+                except asyncio.QueueFull:
+                    pass
+                self._sub_id_map.pop(sub_id, None)
+        logger.debug(f"DexPriceFeed: unsubscribed {mint[:12]}")
+
+    def get_price(self, mint: str) -> float:
+        """Get the latest real-time price in SOL. Returns 0 if not subscribed."""
+        return self.live_prices.get(mint, 0.0)
+
+    def _update_price(self, mint: str):
+        """Recompute price from current vault balances."""
+        info = self._subs.get(mint)
+        if not info:
+            return
+        coin_bal = info["coin_balance"]
+        pc_bal = info["pc_balance"]
+        coin_dec = info["coin_decimals"]
+        pc_dec = info["pc_decimals"]
+        if coin_bal <= 0:
+            return
+        # Price = (quote_amount / 10^quote_dec) / (base_amount / 10^base_dec)
+        price_sol = (pc_bal / 10**pc_dec) / (coin_bal / 10**coin_dec)
+        self.live_prices[mint] = price_sol
+
+    async def _resolve_raydium_vaults(self, pool_address: str, session: aiohttp.ClientSession) -> Optional[tuple]:
+        """Read Raydium AMM V4 pool account to extract vault pubkeys and decimals."""
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [pool_address, {"encoding": "base64"}],
+            }
+            async with session.post(self.rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                account = data.get("result", {}).get("value")
+                if not account:
+                    return None
+                # Verify it's owned by Raydium AMM program
+                owner = account.get("owner", "")
+                if owner != RAYDIUM_AMM_PROGRAM:
+                    logger.debug(f"DexPriceFeed: pool {pool_address[:12]} not Raydium AMM (owner={owner[:12]})")
+                    return None
+                # Decode base64 account data
+                raw = base64.b64decode(account["data"][0])
+                if len(raw) < 496:  # minimum Raydium AMM V4 account size
+                    return None
+                coin_decimals = struct.unpack_from("<Q", raw, self._COIN_DECIMALS_OFFSET)[0]
+                pc_decimals = struct.unpack_from("<Q", raw, self._PC_DECIMALS_OFFSET)[0]
+                from solders.pubkey import Pubkey as _Pk
+                coin_vault = str(_Pk.from_bytes(raw[self._COIN_VAULT_OFFSET:self._COIN_VAULT_OFFSET + 32]))
+                pc_vault = str(_Pk.from_bytes(raw[self._PC_VAULT_OFFSET:self._PC_VAULT_OFFSET + 32]))
+                coin_mint = str(_Pk.from_bytes(raw[self._COIN_MINT_OFFSET:self._COIN_MINT_OFFSET + 32]))
+                return coin_vault, pc_vault, coin_decimals, pc_decimals, coin_mint
+        except Exception as e:
+            logger.debug(f"DexPriceFeed: vault resolve error: {e}")
+            return None
+
+    async def _get_vault_balance(self, vault_pubkey: str, session: aiohttp.ClientSession) -> int:
+        """Read SPL token account balance (raw amount)."""
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getAccountInfo",
+                "params": [vault_pubkey, {"encoding": "base64"}],
+            }
+            async with session.post(self.rpc_url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status != 200:
+                    return 0
+                data = await resp.json()
+                account = data.get("result", {}).get("value")
+                if not account:
+                    return 0
+                raw = base64.b64decode(account["data"][0])
+                if len(raw) < 72:
+                    return 0
+                # SPL token account: amount is u64 at offset 64
+                return struct.unpack_from("<Q", raw, 64)[0]
+        except Exception as e:
+            logger.debug(f"DexPriceFeed: vault balance error: {e}")
+            return 0
+
+    async def _listen(self):
+        """Main WebSocket loop — receives vault account updates."""
+        try:
+            import websockets
+        except ImportError:
+            logger.warning("websockets not installed, DexPriceFeed disabled")
+            return
+
+        while self.running:
+            try:
+                async with websockets.connect(
+                    self.ws_url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=5,
+                ) as ws:
+                    self.ws = ws
+                    self._reconnect_count += 1
+                    logger.info(f"DexPriceFeed WS connected (attempt #{self._reconnect_count})")
+
+                    # Start background task to process pending sub/unsub requests
+                    asyncio.create_task(self._process_subscriptions(ws))
+
+                    async for msg in ws:
+                        if not self.running:
+                            break
+                        try:
+                            data = json.loads(msg)
+                            self._handle_ws_message(data)
+                        except json.JSONDecodeError:
+                            continue
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"DexPriceFeed WS error: {e}, reconnecting in 3s... (reconnects: {self._reconnect_count})")
+                await asyncio.sleep(3)
+
+    async def _process_subscriptions(self, ws):
+        """Process pending subscribe/unsubscribe requests."""
+        while self.running:
+            try:
+                # Process unsubscriptions
+                while not self._pending_unsubs.empty():
+                    try:
+                        sub_id = self._pending_unsubs.get_nowait()
+                        rpc_id = self._next_rpc_id
+                        self._next_rpc_id += 1
+                        await ws.send(json.dumps({
+                            "jsonrpc": "2.0", "id": rpc_id,
+                            "method": "accountUnsubscribe", "params": [sub_id],
+                        }))
+                    except asyncio.QueueEmpty:
+                        break
+                    except Exception:
+                        break
+
+                # Process subscriptions
+                while not self._pending_subs.empty():
+                    try:
+                        mint, coin_vault, pc_vault = self._pending_subs.get_nowait()
+                        if mint not in self._subs:
+                            continue
+
+                        # Subscribe to coin vault
+                        coin_rpc_id = self._next_rpc_id
+                        self._next_rpc_id += 1
+                        await ws.send(json.dumps({
+                            "jsonrpc": "2.0", "id": coin_rpc_id,
+                            "method": "accountSubscribe",
+                            "params": [coin_vault, {"encoding": "base64", "commitment": "confirmed"}],
+                        }))
+
+                        # Subscribe to pc vault
+                        pc_rpc_id = self._next_rpc_id
+                        self._next_rpc_id += 1
+                        await ws.send(json.dumps({
+                            "jsonrpc": "2.0", "id": pc_rpc_id,
+                            "method": "accountSubscribe",
+                            "params": [pc_vault, {"encoding": "base64", "commitment": "confirmed"}],
+                        }))
+
+                        # Store pending rpc_id -> mint mapping for subscription confirmation
+                        if not hasattr(self, '_pending_confirms'):
+                            self._pending_confirms = {}
+                        self._pending_confirms[coin_rpc_id] = (mint, "coin")
+                        self._pending_confirms[pc_rpc_id] = (mint, "pc")
+
+                    except asyncio.QueueEmpty:
+                        break
+                    except Exception as e:
+                        logger.debug(f"DexPriceFeed sub error: {e}")
+                        break
+
+                await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(1)
+
+    def _handle_ws_message(self, data: dict):
+        """Handle WebSocket messages — subscription confirmations and account updates."""
+        # Subscription confirmation: {"jsonrpc":"2.0","result":12345,"id":1}
+        if "result" in data and "id" in data and "method" not in data:
+            rpc_id = data["id"]
+            sub_id = data["result"]
+            if hasattr(self, '_pending_confirms') and rpc_id in self._pending_confirms:
+                mint, vault_type = self._pending_confirms.pop(rpc_id)
+                if mint in self._subs:
+                    self._subs[mint][f"{vault_type}_sub_id"] = sub_id
+                    self._sub_id_map[sub_id] = (mint, vault_type)
+            return
+
+        # Account notification: {"method":"accountNotification","params":{"subscription":12345,"result":{"value":{"data":["base64...","base64"]}}}}
+        if data.get("method") == "accountNotification":
+            params = data.get("params", {})
+            sub_id = params.get("subscription")
+            if sub_id not in self._sub_id_map:
+                return
+
+            mint, vault_type = self._sub_id_map[sub_id]
+            if mint not in self._subs:
+                return
+
+            try:
+                account_data = params.get("result", {}).get("value", {}).get("data", [])
+                if not account_data or not account_data[0]:
+                    return
+                raw = base64.b64decode(account_data[0])
+                if len(raw) < 72:
+                    return
+                # SPL token account: amount at offset 64 (u64 LE)
+                balance = struct.unpack_from("<Q", raw, 64)[0]
+                self._subs[mint][f"{vault_type}_balance"] = balance
+                self._update_price(mint)
+            except Exception as e:
+                logger.debug(f"DexPriceFeed: parse error for {mint[:12]}: {e}")
 
 
 # ============================================================
@@ -2484,12 +3825,1137 @@ class TradingMemory:
 
 
 # ============================================================
+# ADAPTIVE LEARNER (v4.0 — Collective Intelligence Engine)
+# ============================================================
+class AdaptiveLearner:
+    """Real-time adaptive learning engine that uses the swarm collective to
+    analyze trade patterns and auto-tune strategy parameters.
+
+    - Records rich per-trade data (velocity, buys, curve progress, holder concentration, etc.)
+    - Categorizes failure modes (creator_rug, velocity_death, sell_pressure, stop_loss, timeout)
+    - Runs local statistical analysis: win rates by condition buckets
+    - Periodically asks the swarm collective (Grok/DeepSeek/Gemini) for deeper pattern insights
+    - Auto-adjusts TraderConfig thresholds toward what's actually profitable
+    """
+
+    # Failure categories for pattern analysis
+    FAILURE_CATEGORIES = {
+        "creator_rug": ["creator_rug", "creator_sold"],
+        "holder_dump": ["holder_dump"],
+        "velocity_death": ["velocity_death", "curve_velocity_death", "dead_momentum"],
+        "sell_pressure": ["sell_pressure", "curve_sell_pressure"],
+        "stop_loss": ["stop_loss"],
+        "time_exit": ["time_exit", "max_hold_curve"],
+        "liquidity_rug": ["liquidity_rug"],
+        "data_unavailable": ["data_unavailable"],
+    }
+
+    def __init__(self, session: Optional[aiohttp.ClientSession] = None):
+        self.session = session
+        self._trades: List[dict] = []          # rich trade records
+        self._adjustments: Dict[str, float] = {}  # learned config adjustments
+        self._failure_counts: Dict[str, int] = defaultdict(int)
+        self._condition_stats: Dict[str, Dict] = {}  # condition → {wins, losses, avg_pnl}
+        self._collective_insights: List[dict] = []  # swarm analysis results
+        self._last_analysis_time = 0.0
+        self._last_collective_time = 0.0
+        self._trades_since_analysis = 0
+        self._analysis_task = None
+        self._running = False
+        # Learnable parameters with their bounds
+        self._tunable_params = {
+            "min_score": {"min": 25, "max": 70, "step": 3, "default": 40},
+            "bonding_curve_min_buys": {"min": 1, "max": 8, "step": 1, "default": 2},
+            "bonding_curve_min_velocity": {"min": 0.3, "max": 5.0, "step": 0.3, "default": 1.0},
+            "bonding_curve_max_progress": {"min": 20, "max": 80, "step": 5, "default": 50},
+            "quick_take_profit": {"min": 1.05, "max": 1.5, "step": 0.05, "default": 1.15},
+            "quick_take_profit_2": {"min": 1.1, "max": 2.0, "step": 0.05, "default": 1.25},
+            "stop_loss": {"min": 0.5, "max": 0.9, "step": 0.05, "default": 0.7},
+            "max_hold_minutes": {"min": 5, "max": 60, "step": 5, "default": 20},
+            "max_age_minutes": {"min": 5, "max": 30, "step": 2, "default": 15},
+            "velocity_drop_sell_pct": {"min": 0.2, "max": 0.7, "step": 0.05, "default": 0.4},
+            "instant_snipe_min_dev_sol": {"min": 0.5, "max": 10, "step": 0.5, "default": 2.0},
+            "cabal_follow_min_wallets": {"min": 2, "max": 5, "step": 1, "default": 2},
+        }
+        logger.info("AdaptiveLearner v4.0 initialized — collective intelligence engine ready")
+
+    async def start(self):
+        """Start background analysis loop."""
+        self._running = True
+        self._analysis_task = asyncio.create_task(self._analysis_loop())
+        logger.info("AdaptiveLearner background analysis started")
+
+    async def stop(self):
+        self._running = False
+        if self._analysis_task:
+            self._analysis_task.cancel()
+
+    def record_trade(self, trade_data: dict):
+        """Record a completed trade with rich context for learning.
+
+        trade_data should include:
+            symbol, source, outcome, pnl_multiple, pnl_sol, sol_spent, sol_received,
+            hold_minutes, sell_reason, entry_velocity, entry_buys, entry_unique_buyers,
+            entry_curve_progress, on_bonding_curve, entry_score, rug_probability,
+            cabal_score, liquidity_at_entry, age_at_entry, fdv_at_entry,
+            holder_concentration, timestamp
+        """
+        trade_data.setdefault("timestamp", time.time())
+        self._trades.append(trade_data)
+        self._trades_since_analysis += 1
+
+        # Categorize failure
+        reason = trade_data.get("sell_reason", "")
+        outcome = trade_data.get("outcome", "")
+        if outcome in ("loss", "rug", "timeout"):
+            category = self._categorize_failure(reason)
+            self._failure_counts[category] += 1
+
+        # Run quick local analysis after every 3 trades
+        if self._trades_since_analysis >= 3:
+            self._analyze_patterns_local()
+
+        logger.info(
+            f"LEARNER: recorded {trade_data.get('symbol', '?')} "
+            f"outcome={outcome} pnl={trade_data.get('pnl_sol', 0):+.4f} "
+            f"reason={reason} | total_trades={len(self._trades)}"
+        )
+
+    def _categorize_failure(self, reason: str) -> str:
+        """Map a sell reason string to a failure category."""
+        reason_lower = reason.lower()
+        for category, keywords in self.FAILURE_CATEGORIES.items():
+            for kw in keywords:
+                if kw in reason_lower:
+                    return category
+        return "other"
+
+    def _analyze_patterns_local(self):
+        """Fast local statistical analysis — runs after every few trades."""
+        if len(self._trades) < 3:
+            return
+
+        self._trades_since_analysis = 0
+        self._last_analysis_time = time.time()
+        sells = [t for t in self._trades if t.get("outcome") in ("win", "loss", "rug", "timeout")]
+        if not sells:
+            return
+
+        # Win rate by source
+        source_stats = defaultdict(lambda: {"wins": 0, "total": 0, "pnl_sum": 0.0})
+        for t in sells:
+            src = t.get("source", "unknown")
+            source_stats[src]["total"] += 1
+            source_stats[src]["pnl_sum"] += t.get("pnl_sol", 0)
+            if t.get("outcome") == "win":
+                source_stats[src]["wins"] += 1
+
+        # Win rate by velocity bucket
+        vel_buckets = {"low_vel(<1)": [], "med_vel(1-3)": [], "high_vel(3+)": []}
+        for t in sells:
+            v = t.get("entry_velocity", 0)
+            if v < 1:
+                vel_buckets["low_vel(<1)"].append(t)
+            elif v < 3:
+                vel_buckets["med_vel(1-3)"].append(t)
+            else:
+                vel_buckets["high_vel(3+)"].append(t)
+
+        # Win rate by curve vs DEX
+        curve_trades = [t for t in sells if t.get("on_bonding_curve")]
+        dex_trades = [t for t in sells if not t.get("on_bonding_curve")]
+
+        # Win rate by hold time bucket
+        hold_buckets = {"<2min": [], "2-5min": [], "5-15min": [], "15+min": []}
+        for t in sells:
+            h = t.get("hold_minutes", 0)
+            if h < 2:
+                hold_buckets["<2min"].append(t)
+            elif h < 5:
+                hold_buckets["2-5min"].append(t)
+            elif h < 15:
+                hold_buckets["5-15min"].append(t)
+            else:
+                hold_buckets["15+min"].append(t)
+
+        # Compute stats for all buckets
+        self._condition_stats = {}
+        for label, trades_list in [
+            *[("source_" + k, v) for k, v in [
+                (src, [t for t in sells if t.get("source") == src]) for src in source_stats
+            ]],
+            *vel_buckets.items(),
+            ("bonding_curve", curve_trades),
+            ("dex_pool", dex_trades),
+            *hold_buckets.items(),
+        ]:
+            if not trades_list:
+                continue
+            wins = sum(1 for t in trades_list if t.get("outcome") == "win")
+            total = len(trades_list)
+            avg_pnl = sum(t.get("pnl_sol", 0) for t in trades_list) / total
+            self._condition_stats[label] = {
+                "wins": wins, "total": total,
+                "win_rate": round(wins / total * 100, 1),
+                "avg_pnl_sol": round(avg_pnl, 6),
+            }
+
+        # Derive config adjustments from patterns
+        self._derive_adjustments(sells, source_stats, vel_buckets, hold_buckets)
+
+        logger.info(
+            f"LEARNER ANALYSIS: {len(sells)} trades | "
+            f"failures={dict(self._failure_counts)} | "
+            f"adjustments={self._adjustments}"
+        )
+
+    def _derive_adjustments(self, sells, source_stats, vel_buckets, hold_buckets):
+        """Derive config parameter adjustments from statistical patterns."""
+        total = len(sells)
+        if total < 5:
+            return
+
+        overall_wr = sum(1 for t in sells if t.get("outcome") == "win") / total
+
+        # 1. Velocity threshold: if low velocity trades consistently lose, raise minimum
+        low_vel = vel_buckets.get("low_vel(<1)", [])
+        if len(low_vel) >= 3:
+            low_wr = sum(1 for t in low_vel if t.get("outcome") == "win") / len(low_vel)
+            if low_wr < 0.15:  # <15% win rate at low velocity → raise min velocity
+                self._adjustments["bonding_curve_min_velocity"] = 0.3  # bump up
+            elif low_wr > overall_wr:
+                self._adjustments["bonding_curve_min_velocity"] = -0.2  # loosen
+
+        # 2. Hold time: if long holds always lose, shorten max_hold
+        long_holds = hold_buckets.get("15+min", [])
+        if len(long_holds) >= 3:
+            long_wr = sum(1 for t in long_holds if t.get("outcome") == "win") / len(long_holds)
+            if long_wr < 0.1:
+                self._adjustments["max_hold_minutes"] = -5  # reduce max hold
+            elif long_wr > 0.4:
+                self._adjustments["max_hold_minutes"] = 5  # can hold longer
+
+        # 3. Stop loss: if most losses are tiny (0.7-0.9x), our stop is fine.
+        #    If we're getting stopped out and price recovers, loosen stop.
+        stop_loss_trades = [t for t in sells if "stop_loss" in t.get("sell_reason", "")]
+        if len(stop_loss_trades) >= 3:
+            sl_pnl = sum(t.get("pnl_sol", 0) for t in stop_loss_trades) / len(stop_loss_trades)
+            if sl_pnl < -0.01:  # average stop loss is big → tighten
+                self._adjustments["stop_loss"] = 0.05  # raise stop loss (less loss per trade)
+            # If stop losses are a big % of all trades → maybe too tight
+            if len(stop_loss_trades) / total > 0.4:
+                self._adjustments["stop_loss"] = -0.05  # loosen
+
+        # 4. Take profit: if wins are tiny, maybe take profit too early
+        wins = [t for t in sells if t.get("outcome") == "win"]
+        if len(wins) >= 3:
+            avg_win_mult = sum(t.get("pnl_multiple", 1) for t in wins) / len(wins)
+            if avg_win_mult < 1.1:  # winning only 10% on average → hold longer
+                self._adjustments["quick_take_profit"] = 0.05
+                self._adjustments["quick_take_profit_2"] = 0.05
+            elif avg_win_mult > 1.5:  # big wins → current TP is good or can tighten
+                self._adjustments["quick_take_profit"] = -0.03
+
+        # 5. Score threshold: if low-score trades always lose
+        low_score_trades = [t for t in sells if t.get("entry_score", 100) < 35]
+        if len(low_score_trades) >= 3:
+            ls_wr = sum(1 for t in low_score_trades if t.get("outcome") == "win") / len(low_score_trades)
+            if ls_wr < 0.1:
+                self._adjustments["min_score"] = 5  # raise min score
+            elif ls_wr > overall_wr:
+                self._adjustments["min_score"] = -3
+
+        # 6. Failure-specific: if creator rugs are >30% of losses, need better creator screening
+        losses = [t for t in sells if t.get("outcome") != "win"]
+        if losses:
+            rug_pct = self._failure_counts.get("creator_rug", 0) / len(losses)
+            if rug_pct > 0.3:
+                # Raise min buys — creators with more community buys less likely to rug
+                self._adjustments["bonding_curve_min_buys"] = 1
+
+            vel_death_pct = self._failure_counts.get("velocity_death", 0) / len(losses)
+            if vel_death_pct > 0.3:
+                # Velocity death is common → tighten velocity drop sell
+                self._adjustments["velocity_drop_sell_pct"] = 0.05
+
+    def apply_to_config(self, config: 'TraderConfig') -> Dict[str, str]:
+        """Apply learned adjustments to the live config. Returns dict of changes made."""
+        if not self._adjustments:
+            return {}
+
+        changes = {}
+        for param, delta in self._adjustments.items():
+            if param not in self._tunable_params:
+                continue
+            bounds = self._tunable_params[param]
+            current = getattr(config, param, bounds["default"])
+            new_val = current + delta
+
+            # Clamp to bounds
+            new_val = max(bounds["min"], min(bounds["max"], new_val))
+
+            # Round for cleaner values
+            if isinstance(bounds["step"], int):
+                new_val = int(round(new_val))
+            else:
+                new_val = round(new_val, 2)
+
+            if new_val != current:
+                setattr(config, param, new_val)
+                changes[param] = f"{current} → {new_val}"
+                logger.info(f"LEARNER TUNE: {param} {current} → {new_val}")
+
+        if changes:
+            logger.info(f"LEARNER: Applied {len(changes)} config adjustments: {changes}")
+
+        # Clear adjustments after applying
+        self._adjustments.clear()
+        return changes
+
+    async def ask_collective(self, config: 'TraderConfig') -> Optional[dict]:
+        """Ask the swarm collective to analyze our trade patterns and suggest improvements.
+
+        Calls the local Farnsworth API which routes through Grok/DeepSeek/Gemini.
+        """
+        if not self.session or len(self._trades) < 5:
+            return None
+
+        self._last_collective_time = time.time()
+        sells = [t for t in self._trades if t.get("outcome") in ("win", "loss", "rug", "timeout")]
+        if len(sells) < 3:
+            return None
+
+        # Build a compact summary for the collective
+        total = len(sells)
+        wins = sum(1 for t in sells if t.get("outcome") == "win")
+        total_pnl = sum(t.get("pnl_sol", 0) for t in sells)
+        avg_hold = sum(t.get("hold_minutes", 0) for t in sells) / total
+
+        # Recent trades (last 10) for context
+        recent = sells[-10:]
+        recent_summary = "\n".join([
+            f"  ${t.get('symbol','?')}: {t.get('outcome')} {t.get('pnl_sol',0):+.4f} SOL "
+            f"({t.get('sell_reason','?')}) vel={t.get('entry_velocity',0):.1f} "
+            f"buys={t.get('entry_buys',0)} hold={t.get('hold_minutes',0):.0f}m "
+            f"source={t.get('source','?')}"
+            for t in recent
+        ])
+
+        failure_summary = ", ".join(f"{k}={v}" for k, v in self._failure_counts.items() if v > 0)
+
+        prompt = (
+            f"TRADING PATTERN ANALYSIS — Analyze our Solana memecoin trade data and suggest parameter adjustments.\n\n"
+            f"STATS: {total} trades, {wins} wins ({wins/total*100:.0f}%), "
+            f"net PnL {total_pnl:+.4f} SOL, avg hold {avg_hold:.1f}min\n"
+            f"FAILURES: {failure_summary}\n\n"
+            f"CURRENT CONFIG:\n"
+            f"  min_score={config.min_score}, min_velocity={config.bonding_curve_min_velocity}, "
+            f"min_buys={config.bonding_curve_min_buys}, max_progress={config.bonding_curve_max_progress}%\n"
+            f"  take_profit={config.quick_take_profit}/{config.quick_take_profit_2}, "
+            f"stop_loss=0.7, max_hold={config.max_hold_minutes}min, "
+            f"vel_drop_sell={config.velocity_drop_sell_pct}\n\n"
+            f"RECENT TRADES:\n{recent_summary}\n\n"
+            f"CONDITION WIN RATES:\n"
+            + "\n".join(f"  {k}: {v['win_rate']}% ({v['total']} trades, avg {v['avg_pnl_sol']:+.6f} SOL)"
+                       for k, v in self._condition_stats.items())
+            + "\n\nBased on this data, suggest SPECIFIC numeric parameter changes. "
+            "Reply in this EXACT format (only include params that should change):\n"
+            "ADJUST min_score=X\nADJUST bonding_curve_min_velocity=X\n"
+            "ADJUST quick_take_profit=X\nADJUST max_hold_minutes=X\n"
+            "REASONING: <1-2 sentences explaining why>\n"
+        )
+
+        try:
+            async with self.session.post(
+                "http://localhost:8080/api/chat",
+                json={"message": prompt, "bot": "Grok", "mode": "quick"},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    reply = data.get("response", "")
+                    insight = self._parse_collective_response(reply)
+                    if insight:
+                        self._collective_insights.append({
+                            "timestamp": time.time(),
+                            "adjustments": insight.get("adjustments", {}),
+                            "reasoning": insight.get("reasoning", ""),
+                        })
+                        # Merge collective suggestions into our adjustments
+                        for param, val in insight.get("adjustments", {}).items():
+                            if param in self._tunable_params:
+                                current = self._tunable_params[param]["default"]
+                                self._adjustments[param] = val - current
+                        logger.info(f"COLLECTIVE INSIGHT: {insight}")
+                        return insight
+        except Exception as e:
+            logger.debug(f"Collective analysis failed: {e}")
+
+        return None
+
+    def _parse_collective_response(self, reply: str) -> Optional[dict]:
+        """Parse the swarm's response into actionable adjustments."""
+        if not reply:
+            return None
+
+        adjustments = {}
+        reasoning = ""
+
+        for line in reply.split("\n"):
+            line = line.strip()
+            if line.startswith("ADJUST "):
+                try:
+                    parts = line[7:].split("=")
+                    if len(parts) == 2:
+                        param = parts[0].strip()
+                        val = float(parts[1].strip())
+                        if param in self._tunable_params:
+                            bounds = self._tunable_params[param]
+                            val = max(bounds["min"], min(bounds["max"], val))
+                            adjustments[param] = val
+                except (ValueError, IndexError):
+                    pass
+            elif line.startswith("REASONING:"):
+                reasoning = line[10:].strip()
+
+        if adjustments:
+            return {"adjustments": adjustments, "reasoning": reasoning}
+        return None
+
+    async def _analysis_loop(self):
+        """Background loop: run local analysis + periodic collective queries."""
+        while self._running:
+            try:
+                await asyncio.sleep(60)  # check every minute
+
+                # Local analysis every 5 minutes if we have new trades
+                if self._trades_since_analysis > 0 and time.time() - self._last_analysis_time > 300:
+                    self._analyze_patterns_local()
+
+                # Collective analysis every 15 minutes if we have enough data
+                if (len(self._trades) >= 5 and
+                        time.time() - self._last_collective_time > 900):
+                    # We need a config reference — will be called from DegenTrader
+                    pass  # collective is called explicitly by DegenTrader
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"AdaptiveLearner loop error: {e}")
+                await asyncio.sleep(30)
+
+    def get_status(self) -> dict:
+        """Return learner status for dashboard."""
+        sells = [t for t in self._trades if t.get("outcome") in ("win", "loss", "rug", "timeout")]
+        total = len(sells)
+        wins = sum(1 for t in sells if t.get("outcome") == "win")
+        return {
+            "total_trades": total,
+            "win_rate": round(wins / total * 100, 1) if total > 0 else 0,
+            "failure_breakdown": dict(self._failure_counts),
+            "condition_stats": self._condition_stats,
+            "pending_adjustments": self._adjustments,
+            "collective_insights": len(self._collective_insights),
+            "last_insight": self._collective_insights[-1] if self._collective_insights else None,
+            "trades_since_analysis": self._trades_since_analysis,
+        }
+
+    def get_learnings_summary(self) -> str:
+        """Human-readable summary of what we've learned."""
+        if not self._trades:
+            return "No trades recorded yet."
+
+        sells = [t for t in self._trades if t.get("outcome") in ("win", "loss", "rug", "timeout")]
+        if not sells:
+            return "No completed trades yet."
+
+        total = len(sells)
+        wins = sum(1 for t in sells if t.get("outcome") == "win")
+        total_pnl = sum(t.get("pnl_sol", 0) for t in sells)
+
+        lines = [
+            f"Trades: {total} | Wins: {wins} ({wins/total*100:.0f}%) | Net PnL: {total_pnl:+.4f} SOL",
+        ]
+
+        if self._failure_counts:
+            top_failures = sorted(self._failure_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            lines.append(f"Top failures: {', '.join(f'{k}({v})' for k,v in top_failures)}")
+
+        if self._condition_stats:
+            best = max(self._condition_stats.items(), key=lambda x: x[1].get("win_rate", 0))
+            worst = min(self._condition_stats.items(), key=lambda x: x[1].get("win_rate", 100))
+            if best[1]["total"] >= 2:
+                lines.append(f"Best condition: {best[0]} ({best[1]['win_rate']}% WR)")
+            if worst[1]["total"] >= 2:
+                lines.append(f"Worst condition: {worst[0]} ({worst[1]['win_rate']}% WR)")
+
+        if self._collective_insights:
+            last = self._collective_insights[-1]
+            if last.get("reasoning"):
+                lines.append(f"Collective says: {last['reasoning']}")
+
+        return " | ".join(lines)
+
+
+# ============================================================
+# WHALE HUNTER — Discover, Track, Learn from Top Wallets
+# ============================================================
+WHALE_DB_PATH = Path(__file__).parent / ".whale_db.json"
+
+# Known Solana mixer / privacy programs and bridge contracts
+KNOWN_MIXER_PROGRAMS = {
+    "mix1111111111111111111111111111111111111111",   # Placeholder for Elusiv/Light Protocol
+    "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GR",  # Elusiv program (deprecated)
+    "E1us1vDbqqZkHRSHioh2UNR6FreAjSczw3KgnBPUNXch",  # Elusiv V2 (if active)
+    "worm2ZoG2kUd4vFXhvjh93UUH596ayRfgQ2MgjNMTth",   # Wormhole Bridge
+    "DZnkkTmCiFWfYTfT41X3Rd1kDgozqzxWaHqsw6W4x2oe",  # DeBridge
+    "br1xwubggTiEZ6b7iNZUwfA3cvvzMFMoHkoM8ojeGBz",   # AllBridge
+}
+
+
+class WhaleHunter:
+    """Discover, track, and learn from the most profitable wallets on Solana.
+
+    Features:
+    - Discovery: GMGN smart money, Birdeye top traders, Jito bundle detection
+    - Persistent DB: .whale_db.json with win rates, PnL, connected wallets
+    - Connected wallet tracing: funding source analysis to find wallet clusters
+    - Mixer monitoring: track SOL flowing through privacy protocols
+    - Signal generation: whale convergence boosts token scores
+    """
+
+    def __init__(self, rpc_url: str, fast_rpc_url: str = ""):
+        self.rpc_url = rpc_url
+        self.fast_rpc = fast_rpc_url or rpc_url
+        self.session: Optional[aiohttp.ClientSession] = None
+        self._running = False
+        self._task = None
+        self._birdeye_key = os.environ.get("BIRDEYE_API_KEY", "")
+        self._discovery_interval = 900  # 15 minutes
+
+        # Whale database (persistent)
+        self.wallets: Dict[str, dict] = {}  # address -> whale profile
+        self._load_db()
+
+        # Recent whale buys for signal generation (in-memory, rolling)
+        self._recent_whale_buys: Dict[str, List[dict]] = defaultdict(list)  # mint -> [buy events]
+        self._whale_buy_signals: asyncio.Queue = asyncio.Queue(maxsize=100)
+
+        # Mixer monitoring
+        self._mixer_outflows: List[dict] = []  # recent outflows from mixers
+        self._mixer_fresh_wallets: Dict[str, float] = {}  # wallet -> timestamp first seen from mixer
+        self._mixer_buy_signals: asyncio.Queue = asyncio.Queue(maxsize=50)
+
+        logger.info(f"WhaleHunter initialized — {len(self.wallets)} wallets in DB")
+
+    def _load_db(self):
+        """Load persistent whale database."""
+        try:
+            if WHALE_DB_PATH.exists():
+                data = json.loads(WHALE_DB_PATH.read_text())
+                self.wallets = data.get("wallets", {})
+                logger.info(f"WhaleHunter loaded {len(self.wallets)} tracked wallets from DB")
+        except Exception as e:
+            logger.debug(f"WhaleHunter DB load error: {e}")
+            self.wallets = {}
+
+    def _save_db(self):
+        """Persist whale database to disk."""
+        try:
+            WHALE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            data = {"wallets": self.wallets, "updated_at": time.time()}
+            WHALE_DB_PATH.write_text(json.dumps(data, indent=2, default=str))
+        except Exception as e:
+            logger.debug(f"WhaleHunter DB save error: {e}")
+
+    async def init_session(self, session: aiohttp.ClientSession):
+        self.session = session
+
+    async def start(self):
+        self._running = True
+        self._task = asyncio.create_task(self._hunter_loop())
+        logger.info("WhaleHunter started — hunting for smart money wallets")
+
+    async def stop(self):
+        self._running = False
+        if self._task:
+            self._task.cancel()
+        self._save_db()
+
+    async def _hunter_loop(self):
+        """Main loop: discover whales every 15 min, monitor activity continuously."""
+        while self._running:
+            try:
+                await self._discover_whales()
+                await self._monitor_whale_activity()
+                await self._monitor_mixer_outflows()
+                self._save_db()
+                await asyncio.sleep(self._discovery_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"WhaleHunter loop error: {e}")
+                await asyncio.sleep(60)
+
+    # ----------------------------------------------------------
+    # DISCOVERY — Find profitable wallets
+    # ----------------------------------------------------------
+    async def _discover_whales(self):
+        """Discover top wallets from GMGN, Birdeye, and Jito analysis."""
+        if not self.session:
+            return
+
+        discovered = 0
+
+        # Source 1: GMGN smart money ranking
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+            }
+            params = {"orderby": "smartmoney", "direction": "desc"}
+            async with self.session.get(
+                GMGN_SMART_MONEY_URL, params=params, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    rank = data.get("data", {}).get("rank", [])
+                    for item in rank[:30]:
+                        addr = item.get("creator_address") or item.get("maker", "")
+                        if addr and addr not in self.wallets:
+                            self.wallets[addr] = {
+                                "label": "gmgn_smart_money",
+                                "first_seen": time.time(),
+                                "last_active": time.time(),
+                                "win_rate": 0,
+                                "total_pnl_sol": 0,
+                                "avg_hold_minutes": 0,
+                                "tokens_traded": 0,
+                                "connected_wallets": [],
+                                "funding_source": "",
+                                "is_frontrunner": False,
+                                "tags": ["smart_money"],
+                            }
+                            discovered += 1
+        except Exception as e:
+            logger.debug(f"WhaleHunter GMGN discovery error: {e}")
+
+        # Source 2: Birdeye top gainers
+        if self._birdeye_key:
+            try:
+                headers = {"X-API-KEY": self._birdeye_key}
+                url = f"{BIRDEYE_BASE_URL}/trader/gainers-losers"
+                params = {"chain": "solana", "type": "gainers", "sort_by": "PnL", "limit": 20}
+                async with self.session.get(
+                    url, headers=headers, params=params,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        traders = data.get("data", {}).get("items", [])
+                        for trader in traders:
+                            addr = trader.get("address", "")
+                            if addr:
+                                pnl = float(trader.get("pnl", 0))
+                                wr = float(trader.get("win_rate", 0))
+                                if addr not in self.wallets:
+                                    self.wallets[addr] = {
+                                        "label": "birdeye_top_gainer",
+                                        "first_seen": time.time(),
+                                        "last_active": time.time(),
+                                        "win_rate": wr,
+                                        "total_pnl_sol": pnl,
+                                        "avg_hold_minutes": 0,
+                                        "tokens_traded": int(trader.get("trade_count", 0)),
+                                        "connected_wallets": [],
+                                        "funding_source": "",
+                                        "is_frontrunner": False,
+                                        "tags": ["high_pnl"],
+                                    }
+                                    discovered += 1
+                                else:
+                                    # Update existing
+                                    self.wallets[addr]["win_rate"] = wr
+                                    self.wallets[addr]["total_pnl_sol"] = pnl
+                                    self.wallets[addr]["last_active"] = time.time()
+            except Exception as e:
+                logger.debug(f"WhaleHunter Birdeye discovery error: {e}")
+
+        # Trace connected wallets for top performers
+        await self._discover_connected_wallets()
+
+        if discovered > 0:
+            logger.info(f"WhaleHunter discovered {discovered} new wallets, total tracked: {len(self.wallets)}")
+
+    async def _discover_connected_wallets(self):
+        """For top wallets, trace funding source to find connected wallet clusters."""
+        if not self.session:
+            return
+
+        # Only trace wallets that haven't been traced yet
+        untraced = [
+            (addr, w) for addr, w in self.wallets.items()
+            if not w.get("funding_source") and w.get("label") in ("gmgn_smart_money", "birdeye_top_gainer")
+        ][:10]  # max 10 per cycle
+
+        for addr, profile in untraced:
+            try:
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [addr, {"limit": 5}],
+                }
+                async with self.session.post(
+                    self.fast_rpc, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+                    sigs = data.get("result", [])
+
+                if not sigs:
+                    continue
+
+                # Check earliest tx for funding source
+                earliest_sig = sigs[-1].get("signature", "")
+                if not earliest_sig:
+                    continue
+
+                tx_payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getTransaction",
+                    "params": [earliest_sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+                }
+                async with self.session.post(
+                    self.fast_rpc, json=tx_payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    tx_data = await resp.json()
+                    tx = tx_data.get("result", {})
+
+                if not tx:
+                    continue
+
+                instructions = tx.get("transaction", {}).get("message", {}).get("instructions", [])
+                for ix in instructions:
+                    parsed = ix.get("parsed", {})
+                    if parsed.get("type") == "transfer":
+                        info = parsed.get("info", {})
+                        if info.get("destination") == addr:
+                            funder = info.get("source", "")
+                            if funder:
+                                profile["funding_source"] = funder
+                                # Find other wallets funded by same source
+                                for other_addr, other_w in self.wallets.items():
+                                    if other_addr != addr and other_w.get("funding_source") == funder:
+                                        if other_addr not in profile.get("connected_wallets", []):
+                                            profile.setdefault("connected_wallets", []).append(other_addr)
+                                        if addr not in other_w.get("connected_wallets", []):
+                                            other_w.setdefault("connected_wallets", []).append(addr)
+                            break
+
+                await asyncio.sleep(0.2)  # rate limit
+            except Exception:
+                continue
+
+    # ----------------------------------------------------------
+    # WHALE ACTIVITY MONITORING
+    # ----------------------------------------------------------
+    async def _monitor_whale_activity(self):
+        """Check recent transactions of tracked whales for buy signals."""
+        if not self.session:
+            return
+
+        # Sample up to 20 whales per cycle (rotate through all)
+        whale_addrs = list(self.wallets.keys())
+        if not whale_addrs:
+            return
+
+        # Rotate: check a different subset each cycle
+        sample_size = min(20, len(whale_addrs))
+        cycle_offset = int(time.time() / self._discovery_interval) % max(1, len(whale_addrs) // sample_size)
+        start = cycle_offset * sample_size
+        sample = whale_addrs[start:start + sample_size]
+
+        for addr in sample:
+            try:
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [addr, {"limit": 5}],
+                }
+                async with self.session.post(
+                    self.fast_rpc, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+                    sigs = data.get("result", [])
+
+                for sig_info in sigs:
+                    block_time = sig_info.get("blockTime", 0)
+                    # Only look at txs from last 10 minutes
+                    if block_time and time.time() - block_time > 600:
+                        continue
+                    if sig_info.get("err") is not None:
+                        continue
+
+                    sig = sig_info.get("signature", "")
+                    if not sig:
+                        continue
+
+                    # Parse transaction for token buys
+                    tx_payload = {
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "getTransaction",
+                        "params": [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+                    }
+                    async with self.session.post(
+                        self.fast_rpc, json=tx_payload,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as resp2:
+                        if resp2.status != 200:
+                            continue
+                        tx_data = await resp2.json()
+                        tx = tx_data.get("result")
+
+                    if not tx:
+                        continue
+
+                    # Check pre/post token balances for new token acquisitions
+                    pre_tokens = tx.get("meta", {}).get("preTokenBalances", [])
+                    post_tokens = tx.get("meta", {}).get("postTokenBalances", [])
+
+                    # Detect new token buys (post has token balance that pre doesn't)
+                    pre_mints = {b.get("mint", ""): b for b in pre_tokens}
+                    for post_b in post_tokens:
+                        mint = post_b.get("mint", "")
+                        owner = post_b.get("owner", "")
+                        if owner != addr or not mint or mint == SOL_MINT:
+                            continue
+
+                        post_amt = float(post_b.get("uiTokenAmount", {}).get("uiAmount", 0) or 0)
+                        pre_amt = 0
+                        if mint in pre_mints:
+                            pre_amt = float(pre_mints[mint].get("uiTokenAmount", {}).get("uiAmount", 0) or 0)
+
+                        if post_amt > pre_amt and post_amt - pre_amt > 0:
+                            # This whale bought tokens!
+                            buy_event = {
+                                "whale": addr,
+                                "mint": mint,
+                                "tokens_bought": post_amt - pre_amt,
+                                "timestamp": block_time or time.time(),
+                                "label": self.wallets.get(addr, {}).get("label", ""),
+                            }
+                            self._recent_whale_buys[mint].append(buy_event)
+                            # Trim old entries
+                            cutoff = time.time() - 600  # 10 min window
+                            self._recent_whale_buys[mint] = [
+                                b for b in self._recent_whale_buys[mint] if b["timestamp"] > cutoff
+                            ]
+
+                            # Update whale last_active
+                            if addr in self.wallets:
+                                self.wallets[addr]["last_active"] = time.time()
+
+                            break  # one buy per tx
+
+                await asyncio.sleep(0.15)
+            except Exception:
+                continue
+
+    # ----------------------------------------------------------
+    # MIXER / PRIVACY MONITORING
+    # ----------------------------------------------------------
+    async def _monitor_mixer_outflows(self):
+        """Monitor known mixer programs for SOL outflows to fresh wallets."""
+        if not self.session:
+            return
+
+        for mixer_prog in list(KNOWN_MIXER_PROGRAMS)[:3]:  # check top 3 per cycle
+            try:
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [mixer_prog, {"limit": 15}],
+                }
+                async with self.session.post(
+                    self.fast_rpc, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+                    sigs = data.get("result", [])
+
+                for sig_info in sigs:
+                    block_time = sig_info.get("blockTime", 0)
+                    if block_time and time.time() - block_time > 300:  # last 5 min
+                        continue
+                    if sig_info.get("err") is not None:
+                        continue
+                    sig = sig_info.get("signature", "")
+                    if not sig:
+                        continue
+
+                    # Parse tx for SOL transfers OUT of mixer
+                    tx_payload = {
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "getTransaction",
+                        "params": [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+                    }
+                    async with self.session.post(
+                        self.fast_rpc, json=tx_payload,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as resp2:
+                        if resp2.status != 200:
+                            continue
+                        tx_data = await resp2.json()
+                        tx = tx_data.get("result")
+
+                    if not tx:
+                        continue
+
+                    # Check post balances for wallets that received SOL
+                    pre_balances = tx.get("meta", {}).get("preBalances", [])
+                    post_balances = tx.get("meta", {}).get("postBalances", [])
+                    accounts = tx.get("transaction", {}).get("message", {}).get("accountKeys", [])
+
+                    for i, (pre, post) in enumerate(zip(pre_balances, post_balances)):
+                        sol_received = (post - pre) / LAMPORTS_PER_SOL
+                        if sol_received > 0.1:  # meaningful SOL outflow
+                            acct_key = accounts[i] if i < len(accounts) else {}
+                            dest_addr = acct_key.get("pubkey", "") if isinstance(acct_key, dict) else str(acct_key)
+                            if dest_addr and dest_addr != mixer_prog:
+                                self._mixer_fresh_wallets[dest_addr] = time.time()
+                                self._mixer_outflows.append({
+                                    "wallet": dest_addr,
+                                    "sol_amount": sol_received,
+                                    "mixer": mixer_prog[:16],
+                                    "timestamp": time.time(),
+                                })
+                                # Flag existing tracked whale if using mixer
+                                if dest_addr in self.wallets:
+                                    self.wallets[dest_addr]["tags"] = list(set(
+                                        self.wallets[dest_addr].get("tags", []) + ["mixer_user"]
+                                    ))
+
+                    await asyncio.sleep(0.15)
+            except Exception:
+                continue
+
+        # Trim old outflows (keep last 30 min)
+        cutoff = time.time() - 1800
+        self._mixer_outflows = [o for o in self._mixer_outflows if o["timestamp"] > cutoff]
+        # Trim old fresh wallets (keep 30 min window)
+        self._mixer_fresh_wallets = {
+            w: t for w, t in self._mixer_fresh_wallets.items() if time.time() - t < 1800
+        }
+
+        # Check if any mixer-funded fresh wallets are now buying tokens
+        await self._check_mixer_wallet_buys()
+
+    async def _check_mixer_wallet_buys(self):
+        """Check if fresh wallets from mixer outflows are now buying tokens.
+        If SOL came from mixer into wallet that buys a token with good liquidity
+        and price action → generate buy signal for 0.05 SOL."""
+        if not self.session or not self._mixer_fresh_wallets:
+            return
+
+        # Sample up to 10 fresh mixer wallets
+        fresh_wallets = list(self._mixer_fresh_wallets.keys())[:10]
+
+        for wallet_addr in fresh_wallets:
+            try:
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getSignaturesForAddress",
+                    "params": [wallet_addr, {"limit": 5}],
+                }
+                async with self.session.post(
+                    self.fast_rpc, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+                    sigs = data.get("result", [])
+
+                for sig_info in sigs:
+                    block_time = sig_info.get("blockTime", 0)
+                    if block_time and time.time() - block_time > 300:
+                        continue
+                    sig = sig_info.get("signature", "")
+                    if not sig:
+                        continue
+
+                    tx_payload = {
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "getTransaction",
+                        "params": [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+                    }
+                    async with self.session.post(
+                        self.fast_rpc, json=tx_payload,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as resp2:
+                        if resp2.status != 200:
+                            continue
+                        tx_data = await resp2.json()
+                        tx = tx_data.get("result")
+
+                    if not tx:
+                        continue
+
+                    # Detect token buys
+                    pre_tokens = tx.get("meta", {}).get("preTokenBalances", [])
+                    post_tokens = tx.get("meta", {}).get("postTokenBalances", [])
+                    pre_mints = {b.get("mint", ""): b for b in pre_tokens}
+
+                    for post_b in post_tokens:
+                        mint = post_b.get("mint", "")
+                        owner = post_b.get("owner", "")
+                        if owner != wallet_addr or not mint or mint == SOL_MINT:
+                            continue
+                        post_amt = float(post_b.get("uiTokenAmount", {}).get("uiAmount", 0) or 0)
+                        pre_amt = 0
+                        if mint in pre_mints:
+                            pre_amt = float(pre_mints[mint].get("uiTokenAmount", {}).get("uiAmount", 0) or 0)
+
+                        if post_amt > pre_amt:
+                            # Mixer-funded wallet bought a token! Check health via DexScreener
+                            try:
+                                async with self.session.get(
+                                    f"{DEXSCREENER_TOKENS}/{mint}",
+                                    timeout=aiohttp.ClientTimeout(total=5),
+                                ) as ds_resp:
+                                    if ds_resp.status == 200:
+                                        ds_data = await ds_resp.json()
+                                        pairs = ds_data.get("pairs") or []
+                                        if pairs:
+                                            pair = pairs[0]
+                                            liq = float(pair.get("liquidity", {}).get("usd", 0) or 0)
+                                            vol_24h = float(pair.get("volume", {}).get("h24", 0) or 0)
+                                            price_change_5m = float(pair.get("priceChange", {}).get("m5", 0) or 0)
+                                            buys_5m = int(pair.get("txns", {}).get("m5", {}).get("buys", 0) or 0)
+                                            symbol = pair.get("baseToken", {}).get("symbol", "?")
+
+                                            # Good liquidity + positive price action
+                                            if liq >= 5000 and vol_24h >= 1000 and price_change_5m > -10 and buys_5m >= 3:
+                                                signal = {
+                                                    "mint": mint,
+                                                    "symbol": symbol,
+                                                    "source": "mixer_wallet",
+                                                    "wallet": wallet_addr[:12] + "...",
+                                                    "liquidity": liq,
+                                                    "volume_24h": vol_24h,
+                                                    "price_change_5m": price_change_5m,
+                                                    "timestamp": time.time(),
+                                                    "max_sol": 0.02,
+                                                }
+                                                try:
+                                                    self._mixer_buy_signals.put_nowait(signal)
+                                                    logger.info(
+                                                        f"MIXER WALLET BUY: ${symbol} ({mint[:12]}...) | "
+                                                        f"wallet from mixer buying | liq=${liq:.0f} | "
+                                                        f"vol=${vol_24h:.0f} | Δ5m={price_change_5m:+.1f}%"
+                                                    )
+                                                except asyncio.QueueFull:
+                                                    pass
+
+                                                # Add fresh wallet to tracked whales
+                                                if wallet_addr not in self.wallets:
+                                                    self.wallets[wallet_addr] = {
+                                                        "label": "mixer_funded",
+                                                        "first_seen": time.time(),
+                                                        "last_active": time.time(),
+                                                        "win_rate": 0,
+                                                        "total_pnl_sol": 0,
+                                                        "avg_hold_minutes": 0,
+                                                        "tokens_traded": 1,
+                                                        "connected_wallets": [],
+                                                        "funding_source": "mixer",
+                                                        "is_frontrunner": False,
+                                                        "tags": ["mixer_funded", "fresh"],
+                                                    }
+                            except Exception:
+                                pass
+                            break
+
+                await asyncio.sleep(0.15)
+            except Exception:
+                continue
+
+    # ----------------------------------------------------------
+    # SIGNAL GENERATION — for scoring pipeline
+    # ----------------------------------------------------------
+    def get_whale_score_boost(self, mint: str) -> int:
+        """Get score boost for a token based on tracked whale activity.
+        Returns: 0 (no signal), +15-25 (single whale), +35 (convergence)"""
+        whale_buys = self._recent_whale_buys.get(mint, [])
+        if not whale_buys:
+            return 0
+
+        # Deduplicate by whale address
+        unique_whales = set(b["whale"] for b in whale_buys)
+        cutoff = time.time() - 600  # last 10 minutes
+        recent = [b for b in whale_buys if b["timestamp"] > cutoff]
+        recent_whales = set(b["whale"] for b in recent)
+
+        if len(recent_whales) >= 2:
+            return 35  # CONVERGENCE: 2+ tracked whales on same token
+        elif len(recent_whales) == 1:
+            whale_addr = list(recent_whales)[0]
+            whale_profile = self.wallets.get(whale_addr, {})
+            wr = whale_profile.get("win_rate", 0)
+            if wr >= 60:
+                return 25  # high win-rate whale
+            return 15  # any tracked whale
+        return 0
+
+    def get_whale_feed(self) -> List[dict]:
+        """Get recent whale activity for the dashboard feed."""
+        feed = []
+        cutoff = time.time() - 600
+        for mint, buys in self._recent_whale_buys.items():
+            for b in buys:
+                if b["timestamp"] > cutoff:
+                    feed.append({
+                        "mint": mint,
+                        "whale": b["whale"][:12] + "...",
+                        "label": b.get("label", ""),
+                        "tokens": b.get("tokens_bought", 0),
+                        "timestamp": b["timestamp"],
+                    })
+        feed.sort(key=lambda x: x["timestamp"], reverse=True)
+        return feed[:20]
+
+    def get_status(self) -> dict:
+        return {
+            "tracked_wallets": len(self.wallets),
+            "recent_whale_buys": sum(len(v) for v in self._recent_whale_buys.values()),
+            "mixer_fresh_wallets": len(self._mixer_fresh_wallets),
+            "mixer_outflows": len(self._mixer_outflows),
+            "labels": dict(defaultdict(int, {
+                w.get("label", "unknown"): 1 for w in self.wallets.values()
+            })),
+        }
+
+
+# ============================================================
 # DEGEN TRADER (MAIN)
 # ============================================================
 class DegenTrader:
     """High-frequency Solana memecoin trader powered by collective intelligence."""
 
     def __init__(self, config: Optional[TraderConfig] = None, wallet_name: str = "degen_trader"):
+        # Auth lock — refuse to run outside Farnsworth
+        _FarnsworthAuthLock.lock_check()
         self.config = config or TraderConfig()
         self.wallet_name = wallet_name
         self.keypair = None
@@ -2503,6 +4969,8 @@ class DegenTrader:
         self.total_trades = 0
         self.winning_trades = 0
         self.start_balance = 0.0
+        self.total_invested_sol = 0.0   # v3.9: total SOL spent on buys
+        self.total_lost_sol = 0.0       # v3.9: total SOL lost (realized losses)
         self._scan_count = 0
 
         # Intelligence layers
@@ -2521,26 +4989,58 @@ class DegenTrader:
         self._reentry_watchlist: Dict[str, dict] = {}  # mint -> {sold_at, sold_price, peak_vel, symbol}
         # v3.7: Quantum wallet prediction
         self.wallet_predictor: Optional[QuantumWalletPredictor] = None
+        # v3.9: Holder rug detection — monitors top holders of our positions
+        self.holder_watcher: Optional[HolderWatcher] = None
+        # v4.0: Burn signal monitor — detects LP/supply burns for buy signals
+        self.burn_monitor: Optional[BurnSignalMonitor] = None
+        # v4.0: Adaptive learning engine — uses collective to learn and auto-tune
+        self.adaptive_learner: Optional[AdaptiveLearner] = None
+        # v4.1: Whale hunter — discover, track, learn from top wallets + mixer monitoring
+        self.whale_hunter: Optional[WhaleHunter] = None
+        self._last_collective_query = 0.0  # timestamp of last collective query
+        # v4.3: Real-time DEX price feed via Raydium pool vault WebSocket
+        self.dex_price_feed: Optional[DexPriceFeed] = None
+        # v3.8: Dynamic adaptation state
+        self._quiet_cycles = 0          # consecutive cycles with 0 qualifying tokens
+        self._hot_cycles = 0            # consecutive cycles with 3+ qualifying tokens
+        self._adapt_score_offset = 0    # dynamic score adjustment (negative = looser)
+        self._adapt_vel_mult = 1.0      # dynamic velocity multiplier (< 1 = looser)
+        # v4.3: Paper trading virtual state
+        self._paper_balance = 0.0                     # virtual SOL balance
+        self._paper_token_holdings: Dict[str, int] = {}  # mint -> virtual raw token amount
 
     async def initialize(self):
         """Load wallet, start session, initialize intelligence layers."""
+        # v4.3: Paper trading — set virtual balance, still load wallet for pubkey (read-only)
+        if self.config.paper_trade:
+            self._paper_balance = self.config.paper_start_balance
+            logger.info(f"PAPER TRADE MODE — virtual balance: {self._paper_balance:.4f} SOL (no real SOL will be spent)")
+
         wallet_path = WALLET_DIR / f"{self.wallet_name}.json"
         if not wallet_path.exists():
             pubkey, _ = create_wallet(self.wallet_name)
             logger.info(f"New wallet generated: {pubkey}")
-            logger.info(f"Fund this wallet with SOL before starting trades")
+            if not self.config.paper_trade:
+                logger.info(f"Fund this wallet with SOL before starting trades")
 
         self.keypair = load_wallet(self.wallet_name)
         self.pubkey = str(self.keypair.pubkey())
 
-        # Resolve Alchemy RPC if available
+        # Resolve Alchemy RPC for bulk reads
         if not self.config.fast_rpc_url:
             alchemy_key = os.environ.get("ALCHEMY_API_KEY", "")
             if alchemy_key:
                 self.config.fast_rpc_url = f"https://solana-mainnet.g.alchemy.com/v2/{alchemy_key}"
-                logger.info("Using Alchemy RPC for fast on-chain reads")
+                logger.info("Using Alchemy RPC for bulk reads (30M CU/month)")
             else:
                 self.config.fast_rpc_url = self.config.rpc_url
+
+        # v4.2: Resolve Helius staked RPC for sendTransaction (better landing rate)
+        if not self.config.helius_api_key:
+            self.config.helius_api_key = os.environ.get("HELIUS_API_KEY", "")
+        if self.config.helius_api_key and not self.config.helius_rpc_url:
+            self.config.helius_rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.config.helius_api_key}"
+            logger.info("Using Helius staked RPC for sendTransaction (better tx landing)")
 
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
@@ -2581,15 +5081,48 @@ class DegenTrader:
             self.trading_memory = TradingMemory()
             await self.trading_memory.initialize()
 
-        # v3.5: Bonding curve engine
+        # v3.5: Bonding curve engine (v4.2: Helius staked for sends)
         if self.config.use_bonding_curve:
-            self.curve_engine = BondingCurveEngine(self.config.rpc_url, self.config.fast_rpc_url)
+            self.curve_engine = BondingCurveEngine(
+                self.config.rpc_url, self.config.fast_rpc_url,
+                send_rpc_url=self.config.helius_rpc_url or self.config.fast_rpc_url
+            )
             logger.info("Bonding curve engine enabled (direct pump.fun trading)")
 
         # v3.7: Quantum wallet prediction engine
         if self.config.use_quantum:
             self.wallet_predictor = QuantumWalletPredictor()
             logger.info("Quantum wallet prediction engine enabled (Bell state correlations)")
+
+        # v3.9: Holder rug detection — monitors top holders of our positions in real-time
+        self.holder_watcher = HolderWatcher(self.config.rpc_url, self.config.fast_rpc_url)
+        await self.holder_watcher.init_session(self.session)
+        await self.holder_watcher.start()
+        logger.info("HolderWatcher enabled — monitoring top holders for rug detection")
+
+        # v4.0: Burn signal monitor — detects LP/supply burns for auto-buy
+        self.burn_monitor = BurnSignalMonitor(self.config.rpc_url, self.config.fast_rpc_url)
+        await self.burn_monitor.init_session(self.session)
+        await self.burn_monitor.start()
+        logger.info("BurnSignalMonitor v4.1 enabled — tightened filters, watching incinerator for bullish burns")
+
+        # v4.0: Adaptive learning engine — collective intelligence auto-tuning
+        self.adaptive_learner = AdaptiveLearner(session=self.session)
+        await self.adaptive_learner.start()
+        logger.info("AdaptiveLearner v4.0 enabled — collective intelligence auto-tuning")
+
+        # v4.1: Whale hunter — discover, track, and learn from top wallets
+        self.whale_hunter = WhaleHunter(self.config.rpc_url, self.config.fast_rpc_url)
+        await self.whale_hunter.init_session(self.session)
+        await self.whale_hunter.start()
+        logger.info(f"WhaleHunter v4.1 enabled — tracking {len(self.whale_hunter.wallets)} wallets + mixer monitoring")
+
+        # v4.3: Real-time DEX price feed — subscribe to Raydium pool vaults via WebSocket
+        ws_rpc = self.config.helius_rpc_url or self.config.fast_rpc_url or self.config.rpc_url
+        ws_url = ws_rpc.replace("https://", "wss://").replace("http://", "ws://")
+        self.dex_price_feed = DexPriceFeed(self.config.fast_rpc_url or self.config.rpc_url, ws_url)
+        await self.dex_price_feed.start()
+        logger.info(f"DexPriceFeed v4.3 enabled — real-time Raydium pool vault subscriptions")
 
         self._load_state()
         return self.pubkey
@@ -2604,6 +5137,16 @@ class DegenTrader:
             await self.copy_engine.stop()
         if self.x_sentinel:
             await self.x_sentinel.stop()
+        if self.holder_watcher:
+            await self.holder_watcher.stop()
+        if self.burn_monitor:
+            await self.burn_monitor.stop()
+        if self.adaptive_learner:
+            await self.adaptive_learner.stop()
+        if self.whale_hunter:
+            await self.whale_hunter.stop()
+        if self.dex_price_feed:
+            await self.dex_price_feed.stop()
         if self.session:
             await self.session.close()
         logger.info("Trader shut down cleanly")
@@ -2612,6 +5155,9 @@ class DegenTrader:
     # BALANCE & RPC
     # ----------------------------------------------------------
     async def get_sol_balance(self) -> float:
+        # v4.3: Paper mode — return virtual balance
+        if self.config.paper_trade:
+            return self._paper_balance
         payload = {"jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [self.pubkey]}
         async with self.session.post(self.config.rpc_url, json=payload) as resp:
             data = await resp.json()
@@ -2661,15 +5207,21 @@ class DegenTrader:
         dx_tokens = await self._scan_dexscreener()
         tokens.extend(dx_tokens)
 
-        # Source 3: GMGN new pairs (backup — catches what DexScreener misses)
-        if self._scan_count % 3 == 0:  # every 3rd cycle to avoid rate limits
-            gmgn_tokens = await self._scan_gmgn_new_pairs()
-            tokens.extend(gmgn_tokens)
+        # Source 3: GMGN new pairs — catches what DexScreener misses
+        # Official limit: 2 rps. At 3s scan interval = 0.33 rps → well under limit. Scan every cycle.
+        gmgn_tokens = await self._scan_gmgn_new_pairs()
+        tokens.extend(gmgn_tokens)
 
-        # Source 4: Birdeye new tokens (backup — requires API key)
-        if self._scan_count % 4 == 0 and os.environ.get("BIRDEYE_API_KEY"):
+        # Source 4: Birdeye new tokens (requires API key)
+        # Official limit: 1 rps (free). At 6s cadence = 0.17 rps → safe. Every 2nd cycle.
+        if self._scan_count % 2 == 0 and os.environ.get("BIRDEYE_API_KEY"):
             birdeye_tokens = await self._scan_birdeye_new()
             tokens.extend(birdeye_tokens)
+
+        # Source 5: Pump.fun trending (king-of-the-hill + latest)
+        # No documented rate limit on trending page. Scan every cycle.
+        pf_trending = await self._scan_pumpfun_trending()
+        tokens.extend(pf_trending)
 
         # Deduplicate by address
         seen = set()
@@ -2748,22 +5300,46 @@ class DegenTrader:
         return tokens
 
     async def _scan_dexscreener(self) -> List[TokenInfo]:
-        """Scan DexScreener for trending tokens."""
+        """Scan DexScreener for trending tokens.
+
+        v4.0: Parallel fetch boosts+profiles (60 rpm each = safe at 3s cycle).
+        Token lookups use 300 rpm limit = can do ~5/sec. Batch addresses to minimize calls.
+        """
         tokens = []
         try:
-            for url in [DEXSCREENER_BOOSTS, DEXSCREENER_PROFILES]:
-                async with self.session.get(url) as resp:
-                    if resp.status != 200:
-                        continue
-                    data = await resp.json()
-                    items = data if isinstance(data, list) else []
-                    for item in items[:25]:
-                        if item.get("chainId") == "solana":
-                            addr = item.get("tokenAddress", "")
-                            if addr and addr not in self.seen_tokens:
-                                token = await self._fetch_token_data(addr)
-                                if token:
-                                    tokens.append(token)
+            # Fetch boosts + profiles in parallel (saves ~2s)
+            async def fetch_list(url):
+                try:
+                    async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            return data if isinstance(data, list) else []
+                        elif resp.status == 429:
+                            logger.debug(f"DexScreener rate limited: {url}")
+                except Exception:
+                    pass
+                return []
+
+            boosts, profiles = await asyncio.gather(
+                fetch_list(DEXSCREENER_BOOSTS),
+                fetch_list(DEXSCREENER_PROFILES),
+            )
+
+            # Collect unique Solana addresses from both sources
+            addresses = []
+            for item in (boosts[:20] + profiles[:15]):
+                if item.get("chainId") == "solana":
+                    addr = item.get("tokenAddress", "")
+                    if addr and addr not in self.seen_tokens and addr not in [a for a in addresses]:
+                        addresses.append(addr)
+
+            # Fetch token data — limit to 8 lookups per cycle (300 rpm = 5/sec, we do 8 in ~3s)
+            for addr in addresses[:8]:
+                token = await self._fetch_token_data(addr)
+                if token:
+                    tokens.append(token)
+                await asyncio.sleep(0.2)  # 200ms gap = 5 rps, under 300 rpm limit
+
         except Exception as e:
             logger.error(f"DexScreener scan error: {e}")
         return tokens
@@ -2841,6 +5417,76 @@ class DegenTrader:
             logger.info(f"Birdeye backup: found {len(tokens)} fresh tokens")
         return tokens
 
+    async def _scan_pumpfun_trending(self) -> List[TokenInfo]:
+        """v3.8: Scan pump.fun trending/king-of-the-hill for fresh momentum plays."""
+        tokens = []
+        try:
+            endpoints = [
+                f"{PUMPFUN_API_URL}/coins/king-of-the-hill?includeNsfw=false",
+                f"{PUMPFUN_API_URL}/coins/latest?offset=0&limit=10&includeNsfw=false",
+            ]
+            headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+            for url in endpoints:
+                try:
+                    async with self.session.get(url, headers=headers,
+                                                timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status != 200:
+                            continue
+                        data = await resp.json()
+                        items = data if isinstance(data, list) else data.get("data", data.get("coins", []))
+                        for item in items[:8]:
+                            mint = item.get("mint", item.get("address", ""))
+                            if not mint or mint in self.seen_tokens:
+                                continue
+                            # Check if already tracked in hot_tokens
+                            if self.pump_monitor and mint in self.pump_monitor.hot_tokens:
+                                continue
+                            created = item.get("created_timestamp", item.get("createdAt", 0))
+                            if isinstance(created, str):
+                                try:
+                                    from datetime import datetime as _dt
+                                    created = _dt.fromisoformat(created.replace("Z", "+00:00")).timestamp()
+                                except Exception:
+                                    created = 0
+                            age_min = (time.time() - created) / 60 if created and created > 1e9 else 999
+                            if age_min > self.config.max_age_minutes:
+                                continue
+                            mc = item.get("usd_market_cap", item.get("market_cap", 0)) or 0
+                            if mc > self.config.max_fdv and mc > 0:
+                                continue
+                            symbol = item.get("symbol", "?")
+                            # Register in hot_tokens for velocity tracking
+                            if self.pump_monitor:
+                                self.pump_monitor.hot_tokens[mint] = {
+                                    "buys": 0, "sells": 0, "volume_sol": 0,
+                                    "first_seen": time.time(), "unique_buyers": set(),
+                                    "creator": item.get("creator", ""), "creator_bought": False,
+                                    "creator_sol": 0, "buy_timestamps": [],
+                                    "symbol": symbol, "name": item.get("name", ""),
+                                    "largest_buy_sol": 0, "platform": PLATFORM_PUMP,
+                                }
+                            token = TokenInfo(
+                                address=mint,
+                                symbol=symbol,
+                                name=item.get("name", ""),
+                                pair_address="",
+                                price_usd=0,
+                                liquidity_usd=mc * 0.1 if mc else 0,  # rough estimate
+                                volume_24h=0,
+                                age_minutes=age_min,
+                                fdv=mc,
+                                source="pumpfun_trending",
+                                on_bonding_curve=True,
+                            )
+                            tokens.append(token)
+                except Exception as e:
+                    logger.debug(f"Pump.fun trending endpoint error: {e}")
+        except Exception as e:
+            logger.debug(f"Pump.fun trending scan error: {e}")
+        if tokens:
+            logger.info(f"Pump.fun trending: found {len(tokens)} fresh tokens")
+        return tokens
+
     async def _fetch_token_data(self, address: str) -> Optional[TokenInfo]:
         """Fetch detailed token data from DexScreener, with Birdeye fallback."""
         try:
@@ -2908,6 +5554,53 @@ class DegenTrader:
             logger.debug(f"Birdeye fallback error {address}: {e}")
 
         return None
+
+    async def _get_jupiter_price(self, mint: str) -> float:
+        """v4.3: Fast real-time price via Jupiter Price API v2 (~200ms, reads AMM pools directly).
+
+        Returns price in USD, or 0.0 if unavailable.
+        Much faster than DexScreener (15-30s stale) for position management and paper PnL.
+        Requires x-api-key header (free tier from portal.jup.ag).
+        """
+        try:
+            params = {"ids": mint}  # no vsToken = returns USD price
+            headers = {}
+            if self.config.jupiter_api_key:
+                headers["x-api-key"] = self.config.jupiter_api_key
+            async with self.session.get(
+                JUPITER_PRICE_URL, params=params,
+                headers=headers if headers else None,
+                timeout=aiohttp.ClientTimeout(total=3)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    token_data = data.get("data", {}).get(mint, {})
+                    price = float(token_data.get("price", 0) or 0)
+                    if price > 0:
+                        return price
+                elif resp.status == 401:
+                    logger.warning("Jupiter Price API returned 401 — set JUPITER_API_KEY in .env (free at portal.jup.ag)")
+        except Exception as e:
+            logger.debug(f"Jupiter price error {mint[:12]}: {e}")
+        return 0.0
+
+    async def _get_fast_price(self, mint: str) -> float:
+        """v4.3: Fastest available price — Jupiter first, DexScreener fallback.
+
+        Jupiter Price API v2 returns real-time AMM pool prices in ~200ms.
+        DexScreener data is 15-30s stale. This method tries Jupiter first.
+        """
+        # 1. Jupiter Price API — real-time (~200ms)
+        price = await self._get_jupiter_price(mint)
+        if price > 0:
+            return price
+
+        # 2. DexScreener fallback — slower but wider coverage
+        token = await self._fetch_token_data(mint)
+        if token and token.price_usd > 0:
+            return token.price_usd
+
+        return 0.0
 
     # ----------------------------------------------------------
     # TOKEN SCORING (enhanced)
@@ -3002,12 +5695,12 @@ class DegenTrader:
         # v3.5: Bonding curve scoring (pre-graduation plays)
         if token.on_bonding_curve:
             score += 15  # base bonus for being early
-            # Buy velocity = momentum
-            if token.buy_velocity_per_min >= 5.0:
+            # Buy velocity = momentum (v3.8: loosened thresholds)
+            if token.buy_velocity_per_min >= 4.0:
                 score += 20  # extremely hot
-            elif token.buy_velocity_per_min >= 3.0:
+            elif token.buy_velocity_per_min >= 2.0:
                 score += 15
-            elif token.buy_velocity_per_min >= 1.5:
+            elif token.buy_velocity_per_min >= 0.8:
                 score += 10
             # Early in curve = more upside
             if token.curve_progress < 10:
@@ -3045,6 +5738,23 @@ class DegenTrader:
                 cabal_adj = self.trading_memory.get_learned_adjustment("cabal_detected")
                 if cabal_adj != 0:
                     score += cabal_adj
+
+        # v4.0: Burn signal bonus — if token has recent burns in our history, big boost
+        if self.burn_monitor:
+            for burn in self.burn_monitor._burn_history:
+                if burn["mint"] == token.address:
+                    if burn["burn_type"] == "supply_burn":
+                        score += 15  # supply burn = deflationary = bullish
+                    else:
+                        score += 20  # LP burn = can't rug liquidity = very bullish
+                    break  # one boost per token
+
+        # v4.1: Whale hunter signal boost — tracked whales buying this token
+        if self.whale_hunter:
+            whale_boost = self.whale_hunter.get_whale_score_boost(token.address)
+            if whale_boost > 0:
+                score += whale_boost
+                logger.debug(f"Whale boost for {token.symbol}: +{whale_boost}")
 
         token.score = max(0, min(100, score))
         return token.score
@@ -3168,41 +5878,52 @@ class DegenTrader:
 
         # Execute via PumpPortal (fastest path)
         logger.info(
-            f"[{platform_label}] SNIPER BUY ${symbol} | {amount_sol:.4f} SOL | "
+            f"{'[PAPER] ' if self.config.paper_trade else ''}[{platform_label}] SNIPER BUY ${symbol} | {amount_sol:.4f} SOL | "
             f"curve {curve_state.progress_pct:.1f}% | {signal.get('buys', 0)} buys | "
             f"{signal.get('velocity', 0):.1f}/min | {signal.get('unique_buyers', 0)} unique"
         )
 
-        tx_sig = None
-        if self.config.use_pumpportal:
-            tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
-                mint, amount_sol, self.pubkey, self.keypair, self.session,
-                pool=pool,
-            )
+        # v4.3: Paper trade — simulate sniper buy
+        if self.config.paper_trade:
+            if self._paper_balance < amount_sol + self.config.reserve_sol:
+                logger.info(f"[PAPER] SNIPER BLOCKED: insufficient virtual balance ({self._paper_balance:.4f} SOL)")
+                return None
+            tx_sig = f"PAPER_SNIPE_{mint[:8]}_{int(time.time())}"
+            self._paper_balance -= amount_sol
+            self._paper_token_holdings[mint] = 1_000_000_000
+        else:
+            tx_sig = None
+            if self.config.use_pumpportal:
+                tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
+                    mint, amount_sol, self.pubkey, self.keypair, self.session,
+                    pool=pool,
+                )
 
-        if not tx_sig:
-            # Fallback to Jupiter (token might have just graduated)
-            tx_sig = await self._jupiter_swap(SOL_MINT, mint, int(amount_sol * LAMPORTS_PER_SOL))
+            if not tx_sig:
+                # Fallback to Jupiter (token might have just graduated)
+                tx_sig = await self._jupiter_swap(SOL_MINT, mint, int(amount_sol * LAMPORTS_PER_SOL))
 
         if tx_sig:
             self._sniper_bought.add(mint)
+            self.total_invested_sol += amount_sol  # v3.9: track total invested
             entry_vel = signal.get("velocity", 0)
             self.positions[mint] = Position(
                 token_address=mint, symbol=symbol,
-                entry_price=curve_state.price_sol * 1e9,  # approx USD
+                entry_price=amount_sol,  # v3.9: use SOL spent as reference (real PnL from balance diff)
                 amount_tokens=0, amount_sol_spent=amount_sol,
                 entry_time=time.time(),
-                take_profit_levels=[3.0, 7.0, 15.0],  # higher targets for early entries
-                stop_loss=0.4,  # tighter stop for sniper plays
+                take_profit_levels=[1.15, 1.25, 1.5],  # v3.8: micro scalp — pull at 15-25%
+                stop_loss=0.7,  # v3.8: tight stop — cut at 30% loss
                 source="bonding_curve",
                 entry_velocity=entry_vel,
                 peak_velocity=entry_vel,
+                on_bonding_curve=True,  # v3.9: mark as bonding curve token
             )
             self.seen_tokens.add(mint)
             trade = Trade(
                 timestamp=time.time(), action="buy", token_address=mint,
                 symbol=symbol, amount_sol=amount_sol,
-                price_usd=curve_state.price_sol * 1e9,
+                price_usd=curve_state.progress_pct,  # v3.9: store curve progress for reference
                 tx_signature=tx_sig,
                 reason=f"SNIPER curve={curve_state.progress_pct:.0f}% buys={signal.get('buys', 0)} vel={signal.get('velocity', 0):.1f}/min",
             )
@@ -3210,6 +5931,10 @@ class DegenTrader:
             self.total_trades += 1
             self._save_state()
             logger.info(f"SNIPER BUY OK: ${symbol} tx={tx_sig[:20]}...")
+
+            # v3.9: Snapshot top holders for rug detection
+            if self.holder_watcher:
+                asyncio.create_task(self.holder_watcher.snapshot_holders(mint, exclude_owner=self.pubkey))
 
             # Record to memory
             if self.trading_memory:
@@ -3245,10 +5970,16 @@ class DegenTrader:
             # Token graduated! Sell configured percentage for guaranteed profit
             if curve_state.complete and pos.partial_sells == 0:
                 sell_pct = self.config.graduation_sell_pct
-                logger.info(f"GRADUATION DETECTED: ${pos.symbol} | Selling {sell_pct:.0%}")
-                tx_sig = await self.curve_engine.sell_on_curve_pumpportal(
-                    addr, sell_pct, self.pubkey, self.keypair, self.session,
-                )
+                logger.info(f"{'[PAPER] ' if self.config.paper_trade else ''}GRADUATION DETECTED: ${pos.symbol} | Selling {sell_pct:.0%}")
+                # v4.3: Paper trade — simulate graduation sell
+                if self.config.paper_trade:
+                    tx_sig = f"PAPER_GRAD_{addr[:8]}_{int(time.time())}"
+                    grad_sol = pos.amount_sol_spent * sell_pct * 1.2  # assume 20% gain at graduation
+                    self._paper_balance += grad_sol
+                else:
+                    tx_sig = await self.curve_engine.sell_on_curve_pumpportal(
+                        addr, sell_pct, self.pubkey, self.keypair, self.session,
+                    )
                 if tx_sig:
                     pos.partial_sells += 1
                     trade = Trade(
@@ -3266,22 +5997,40 @@ class DegenTrader:
     # ----------------------------------------------------------
     async def execute_buy(self, token: TokenInfo, amount_sol: float) -> Optional[Trade]:
         amount_lamports = int(amount_sol * LAMPORTS_PER_SOL)
-        logger.info(f"BUY {token.symbol} | {amount_sol:.4f} SOL | score={token.score:.0f} | rug={token.rug_probability:.0%} | swarm={token.swarm_sentiment}")
 
-        # v3.5: Use bonding curve for pre-graduation tokens
-        tx_sig = None
-        if token.on_bonding_curve and self.curve_engine and self.config.use_pumpportal:
-            tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
-                token.address, amount_sol, self.pubkey, self.keypair, self.session,
-            )
-        if not tx_sig:
-            tx_sig = await self._jupiter_swap(SOL_MINT, token.address, amount_lamports)
+        # v4.1: Pre-buy safety check — verify token has real liquidity and trading
+        if not token.on_bonding_curve and token.liquidity_usd < 2000:
+            logger.info(f"BUY BLOCKED: {token.symbol} — liquidity ${token.liquidity_usd:.0f} too low, skipping")
+            return None
+
+        logger.info(f"{'[PAPER] ' if self.config.paper_trade else ''}BUY {token.symbol} | {amount_sol:.4f} SOL | score={token.score:.0f} | rug={token.rug_probability:.0%} | swarm={token.swarm_sentiment}")
+
+        # v4.3: Paper trade — simulate buy without real transaction
+        if self.config.paper_trade:
+            if self._paper_balance < amount_sol + self.config.reserve_sol:
+                logger.info(f"[PAPER] BUY BLOCKED: insufficient virtual balance ({self._paper_balance:.4f} SOL)")
+                return None
+            tx_sig = f"PAPER_{token.address[:8]}_{int(time.time())}"
+            self._paper_balance -= amount_sol
+            # Store virtual token amount (arbitrary positive value — real amount doesn't matter for paper PnL)
+            self._paper_token_holdings[token.address] = 1_000_000_000
+        else:
+            # v3.5: Use bonding curve for pre-graduation tokens
+            tx_sig = None
+            if token.on_bonding_curve and self.curve_engine and self.config.use_pumpportal:
+                tx_sig = await self.curve_engine.buy_on_curve_pumpportal(
+                    token.address, amount_sol, self.pubkey, self.keypair, self.session,
+                )
+            if not tx_sig:
+                tx_sig = await self._jupiter_swap(SOL_MINT, token.address, amount_lamports)
         if tx_sig:
+            self.total_invested_sol += amount_sol  # v3.9: track total invested
             self.positions[token.address] = Position(
                 token_address=token.address, symbol=token.symbol,
                 entry_price=token.price_usd, amount_tokens=0,
                 amount_sol_spent=amount_sol, entry_time=time.time(),
                 source=token.source,
+                on_bonding_curve=getattr(token, 'on_bonding_curve', False),
             )
             self.seen_tokens.add(token.address)
             trade = Trade(
@@ -3294,6 +6043,14 @@ class DegenTrader:
             self.total_trades += 1
             self._save_state()
             logger.info(f"BUY OK: {token.symbol} tx={tx_sig[:20]}...")
+
+            # v3.9: Snapshot top holders for rug detection
+            if self.holder_watcher:
+                asyncio.create_task(self.holder_watcher.snapshot_holders(token.address, exclude_owner=self.pubkey))
+
+            # v4.3: Subscribe to real-time DEX price feed for this token
+            if self.dex_price_feed and token.pair_address and not token.on_bonding_curve:
+                asyncio.create_task(self.dex_price_feed.subscribe(token.address, token.pair_address, self.session))
 
             # v3: Record buy to trading memory
             if self.trading_memory:
@@ -3320,54 +6077,218 @@ class DegenTrader:
             self.positions.pop(token_address, None)
             return None
 
-        token_info = await self._fetch_token_data(token_address)
-        current_price = token_info.price_usd if token_info else pos.entry_price
+        # v4.3: Paper trade — simulate sell using price data
+        if self.config.paper_trade:
+            logger.info(f"[PAPER] SELL {pos.symbol} | reason={reason}")
+            tx_sig = f"PAPER_SELL_{token_address[:8]}_{int(time.time())}"
+            # Estimate SOL received from current market price (Jupiter real-time → DexScreener fallback)
+            sol_received = pos.amount_sol_spent  # default: break even
+            if not pos.on_bonding_curve:
+                current_price = await self._get_fast_price(token_address)
+                if current_price > 0 and pos.entry_price > 0:
+                    price_mult = current_price / pos.entry_price
+                    sol_received = pos.amount_sol_spent * price_mult
+                elif current_price == 0:
+                    sol_received = 0  # token dead / rugged
+            else:
+                # Bonding curve token — use real-time PumpPortal price data
+                if self.pump_monitor and token_address in self.pump_monitor.hot_tokens:
+                    stats = self.pump_monitor.hot_tokens[token_address]
+                    # v4.3: Use real curve price if available (from PumpPortal WS events)
+                    curve_price = stats.get("price_sol", 0)
+                    entry_price_sol = pos.entry_price  # SOL spent at entry (used as reference for bonding curve)
+                    if curve_price > 0 and entry_price_sol > 0:
+                        # Read curve state for exact sell simulation
+                        if self.curve_engine:
+                            curve_state = await self.curve_engine.get_bonding_curve_state(token_address, self.session)
+                            if curve_state and not curve_state.complete:
+                                # Simulate selling our tokens on the curve
+                                virtual_tokens = self._paper_token_holdings.get(token_address, 0)
+                                if virtual_tokens > 0:
+                                    estimated_tokens = curve_state.calc_tokens_for_sol(pos.amount_sol_spent)
+                                    sol_back_lamports = curve_state.calc_sol_for_tokens(estimated_tokens)
+                                    sol_received = sol_back_lamports / 1e9
+                                else:
+                                    sol_received = pos.amount_sol_spent  # break even fallback
+                            else:
+                                # Graduated or state unavailable — use market cap ratio
+                                mcap = stats.get("market_cap_sol", 0)
+                                sol_received = pos.amount_sol_spent * 1.2 if mcap > 0 else pos.amount_sol_spent
+                        else:
+                            sol_received = pos.amount_sol_spent  # no engine available
+                    else:
+                        # Fallback: momentum-based estimate
+                        buys = stats.get("buys", 0)
+                        sells = stats.get("sells", 0)
+                        if sells > buys * 0.6:
+                            sol_received = pos.amount_sol_spent * 0.5
+                        elif buys > 5:
+                            sol_received = pos.amount_sol_spent * 1.1
+            # Update virtual balance
+            self._paper_balance += sol_received
+            self._paper_token_holdings.pop(token_address, None)
+            real_pnl = sol_received - pos.amount_sol_spent
+        else:
+            # v4.0: SAFETY — verify the token mint is a valid SPL token before interacting
+            try:
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getAccountInfo",
+                    "params": [token_address, {"encoding": "jsonParsed"}],
+                }
+                rpc = self.config.fast_rpc_url or self.config.rpc_url
+                async with self.session.post(rpc, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status == 200:
+                        acct_data = await resp.json()
+                        acct_info = acct_data.get("result", {}).get("value", {})
+                        owner_program = acct_info.get("owner", "")
+                        # Must be owned by SPL Token program — reject anything else
+                        if owner_program not in (SPL_TOKEN_PROGRAM, SPL_TOKEN_2022):
+                            logger.error(
+                                f"SAFETY BLOCK: {pos.symbol} mint owned by {owner_program} — NOT SPL Token! "
+                                f"Possible malicious contract. Skipping sell to avoid token drain."
+                            )
+                            # Remove position to avoid retrying
+                            self.positions.pop(token_address, None)
+                            return None
+            except Exception as e:
+                logger.debug(f"Token safety check error (proceeding with caution): {e}")
 
-        logger.info(f"SELL {pos.symbol} | reason={reason}")
-        tx_sig = await self._jupiter_swap(token_address, SOL_MINT, raw_amount)
+            # v3.9: Get SOL balance BEFORE sell to calculate real PnL
+            pre_sell_balance = await self.get_sol_balance()
 
-        if tx_sig:
-            if pos.entry_price > 0:
-                price_mult = current_price / pos.entry_price
-                if price_mult > 1:
-                    self.winning_trades += 1
-                    self.total_pnl_sol += pos.amount_sol_spent * (price_mult - 1)
-                else:
-                    self.total_pnl_sol -= pos.amount_sol_spent * (1 - price_mult)
+            logger.info(f"SELL {pos.symbol} | reason={reason}")
 
-            trade = Trade(
-                timestamp=time.time(), action="sell", token_address=token_address,
-                symbol=pos.symbol, amount_sol=pos.amount_sol_spent, price_usd=current_price,
-                tx_signature=tx_sig, reason=reason,
-            )
-            self.trades.append(trade)
-            self.total_trades += 1
-            self.positions.pop(token_address, None)
-            self._save_state()
-            logger.info(f"SELL OK: {pos.symbol} tx={tx_sig[:20]}...")
+            # v3.9: Smart routing — try PumpPortal first for bonding curve tokens (best price on pump pool)
+            tx_sig = None
+            if pos.on_bonding_curve and self.curve_engine:
+                # Sell directly on the bonding curve via PumpPortal — best route for pre-migration tokens
+                logger.info(f"SELL via PumpPortal (bonding curve): {pos.symbol}")
+                tx_sig = await self.curve_engine.sell_on_curve_pumpportal(
+                    token_address, 1.0, self.pubkey, self.keypair, self.session,
+                )
 
-            # v3: Record sell outcome to trading memory
-            if self.trading_memory:
-                hold_min = (time.time() - pos.entry_time) / 60
-                price_mult_mem = current_price / pos.entry_price if pos.entry_price > 0 else 1.0
-                outcome = "win" if price_mult_mem > 1.0 else "loss"
-                if "rug" in reason or "liquidity" in reason:
-                    outcome = "rug"
-                elif "time" in reason:
-                    outcome = "timeout"
-                await self.trading_memory.record_trade(TradeMemoryEntry(
-                    token_address=token_address, symbol=pos.symbol, action="sell",
-                    entry_score=0, rug_probability=0, swarm_sentiment="",
-                    cabal_score=0, source=pos.source, outcome=outcome,
-                    pnl_multiple=round(price_mult_mem, 3), hold_minutes=round(hold_min, 1),
-                    liquidity_at_entry=0, age_at_entry=0, timestamp=time.time(),
-                ))
-            return trade
+            if not tx_sig:
+                # v4.0: Smart route — parallel Jupiter + Raydium quotes, pick the better one
+                tx_sig = await self._smart_sell(token_address, raw_amount)
 
-        logger.warning(f"SELL FAILED: {pos.symbol}")
-        return None
+            if not tx_sig:
+                logger.warning(f"SELL FAILED: {pos.symbol}")
+                return None
+
+            # v3.9: Real PnL — measure actual SOL received instead of trusting DexScreener prices
+            await asyncio.sleep(1.5)  # wait for balance to update
+            post_sell_balance = await self.get_sol_balance()
+            sol_received = max(0, post_sell_balance - pre_sell_balance)
+
+            # v4.0: SAFETY — detect balance drain (if SOL dropped instead of increasing)
+            if post_sell_balance < pre_sell_balance - 0.001:
+                # Balance DECREASED after sell — possible token drain attack
+                drain_amount = pre_sell_balance - post_sell_balance
+                logger.error(
+                    f"SAFETY ALERT: SOL balance DROPPED by {drain_amount:.6f} after selling {pos.symbol}! "
+                    f"Pre={pre_sell_balance:.6f} Post={post_sell_balance:.6f}. "
+                    f"Possible malicious token interaction. tx={tx_sig}"
+                )
+                # Still record the trade but flag it
+                sol_received = 0  # treat as total loss
+
+            real_pnl = sol_received - pos.amount_sol_spent
+
+        # --- Shared path: record trade for both paper and real modes ---
+        if real_pnl > 0:
+            self.winning_trades += 1
+            self.total_pnl_sol += real_pnl
+        else:
+            self.total_pnl_sol += real_pnl  # negative
+            self.total_lost_sol += abs(real_pnl)
+
+        price_mult = sol_received / pos.amount_sol_spent if pos.amount_sol_spent > 0 else 0
+
+        trade = Trade(
+            timestamp=time.time(), action="sell", token_address=token_address,
+            symbol=pos.symbol, amount_sol=pos.amount_sol_spent, price_usd=sol_received,
+            tx_signature=tx_sig, reason=reason,
+            pnl_sol=round(real_pnl, 6),
+        )
+        self.trades.append(trade)
+        self.total_trades += 1
+        self.positions.pop(token_address, None)
+        # v3.9: Stop watching holders for this token
+        if self.holder_watcher:
+            await self.holder_watcher.unwatch(token_address)
+        # v4.3: Unsubscribe from DEX price feed
+        if self.dex_price_feed:
+            await self.dex_price_feed.unsubscribe(token_address)
+        self._save_state()
+        logger.info(
+            f"{'[PAPER] ' if self.config.paper_trade else ''}SELL OK: {pos.symbol} tx={tx_sig[:20]}... | "
+            f"spent={pos.amount_sol_spent:.4f} received={sol_received:.4f} pnl={real_pnl:+.4f} SOL ({price_mult:.2f}x)"
+        )
+
+        # Compute outcome + hold time
+        hold_min = (time.time() - pos.entry_time) / 60
+        outcome = "win" if real_pnl > 0 else "loss"
+        if "rug" in reason or "liquidity" in reason or "holder_dump" in reason:
+            outcome = "rug"
+        elif "time" in reason:
+            outcome = "timeout"
+
+        # Gather rich context from PumpPortal hot_tokens data
+        entry_buys = 0
+        entry_unique_buyers = 0
+        entry_curve_progress = 0.0
+        holder_concentration = 0.0
+        if self.pump_monitor and token_address in self.pump_monitor.hot_tokens:
+            stats = self.pump_monitor.hot_tokens[token_address]
+            entry_buys = stats.get("buys", 0)
+            entry_unique_buyers = len(stats.get("unique_buyers", set()))
+            entry_curve_progress = stats.get("curve_progress", 0)
+        if self.holder_watcher:
+            snaps = self.holder_watcher.holder_snapshots.get(token_address, [])
+            if snaps:
+                holder_concentration = max(s.pct_supply for s in snaps)
+
+        # v3: Record to TradingMemory (archival + knowledge graph)
+        if self.trading_memory:
+            await self.trading_memory.record_trade(TradeMemoryEntry(
+                token_address=token_address, symbol=pos.symbol, action="sell",
+                entry_score=0, rug_probability=0, swarm_sentiment="",
+                cabal_score=0, source=pos.source, outcome=outcome,
+                pnl_multiple=round(price_mult, 3), hold_minutes=round(hold_min, 1),
+                liquidity_at_entry=0, age_at_entry=0, timestamp=time.time(),
+                entry_velocity=pos.entry_velocity, entry_buys=entry_buys,
+                entry_unique_buyers=entry_unique_buyers,
+                entry_curve_progress=entry_curve_progress,
+                on_bonding_curve=pos.on_bonding_curve, sell_reason=reason,
+                sol_spent=pos.amount_sol_spent, sol_received=sol_received,
+                holder_concentration=holder_concentration,
+            ))
+
+        # v4.0: Feed rich data to adaptive learner
+        if self.adaptive_learner:
+            self.adaptive_learner.record_trade({
+                "symbol": pos.symbol, "source": pos.source,
+                "outcome": outcome, "pnl_multiple": round(price_mult, 3),
+                "pnl_sol": round(real_pnl, 6),
+                "sol_spent": pos.amount_sol_spent, "sol_received": sol_received,
+                "hold_minutes": round(hold_min, 1), "sell_reason": reason,
+                "entry_velocity": pos.entry_velocity, "entry_buys": entry_buys,
+                "entry_unique_buyers": entry_unique_buyers,
+                "entry_curve_progress": entry_curve_progress,
+                "on_bonding_curve": pos.on_bonding_curve,
+                "entry_score": 0, "rug_probability": 0, "cabal_score": 0,
+                "liquidity_at_entry": 0, "age_at_entry": 0,
+                "holder_concentration": holder_concentration,
+                "fdv_at_entry": 0, "timestamp": time.time(),
+            })
+
+        return trade
 
     async def _get_raw_token_balance(self, mint: str) -> int:
+        # v4.3: Paper mode — return virtual token balance
+        if self.config.paper_trade:
+            return self._paper_token_holdings.get(mint, 0)
         payload = {
             "jsonrpc": "2.0", "id": 1,
             "method": "getTokenAccountsByOwner",
@@ -3383,34 +6304,130 @@ class DegenTrader:
             logger.error(f"Raw balance error: {e}")
         return 0
 
+    async def _smart_sell(self, token_address: str, raw_amount: int) -> Optional[str]:
+        """v4.0: Smart routing — parallel Jupiter + Raydium quotes, rate-limit aware.
+
+        Rate limits (official docs):
+        - Jupiter free: 1 req/sec (60/min). Pro: 10+ rps.
+        - Raydium: undocumented, ~2-5 rps safe.
+        We fetch both quotes in parallel to save time, respecting 1s min gap for Jupiter.
+        """
+        jup_key = os.environ.get("JUP_API_KEY", "")
+        quote_url = "https://api.jup.ag/swap/v1/quote" if jup_key else JUPITER_QUOTE_URL
+        headers = {"x-api-key": jup_key} if jup_key else {}
+
+        # Fetch Jupiter + Raydium quotes in PARALLEL (saves ~4s vs sequential)
+        async def get_jup_quote():
+            try:
+                params = {
+                    "inputMint": token_address, "outputMint": SOL_MINT,
+                    "amount": str(raw_amount), "slippageBps": str(self.config.slippage_bps),
+                }
+                async with self.session.get(quote_url, params=params, headers=headers,
+                                            timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                    if resp.status == 200:
+                        q = await resp.json()
+                        return int(q.get("outAmount", 0))
+                    elif resp.status == 429:
+                        logger.debug("Jupiter rate limited on quote — using Raydium only")
+            except Exception:
+                pass
+            return 0
+
+        async def get_ray_quote():
+            try:
+                params = {
+                    "inputMint": token_address, "outputMint": SOL_MINT,
+                    "amount": str(raw_amount), "slippageBps": str(self.config.slippage_bps),
+                    "txVersion": "V0",
+                }
+                async with self.session.get(RAYDIUM_QUOTE_URL, params=params,
+                                            timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                    if resp.status == 200:
+                        q = await resp.json()
+                        return int(q.get("data", {}).get("outputAmount", q.get("outputAmount", 0)) or 0)
+            except Exception:
+                pass
+            return 0
+
+        jup_out, ray_out = await asyncio.gather(get_jup_quote(), get_ray_quote())
+
+        # Pick best route
+        if jup_out >= ray_out and jup_out > 0:
+            logger.info(f"SMART ROUTE: Jupiter wins (jup={jup_out} ray={ray_out})")
+            tx = await self._jupiter_swap_inner(token_address, SOL_MINT, raw_amount)
+            if tx:
+                return tx
+        if ray_out > 0:
+            logger.info(f"SMART ROUTE: Raydium {'wins' if ray_out > jup_out else 'fallback'} (jup={jup_out} ray={ray_out})")
+            tx = await self._raydium_swap(token_address, SOL_MINT, raw_amount)
+            if tx:
+                return tx
+
+        # Both failed — try Jupiter as final fallback
+        return await self._jupiter_swap(token_address, SOL_MINT, raw_amount)
+
     async def _jupiter_swap(self, input_mint: str, output_mint: str, amount: int) -> Optional[str]:
+        """Swap via Jupiter (lite-api) with Raydium fallback. v3.8: updated for new endpoints."""
+        # Try Jupiter first, then Raydium
+        tx_sig = await self._jupiter_swap_inner(input_mint, output_mint, amount)
+        if tx_sig:
+            return tx_sig
+        # Fallback to Raydium
+        logger.info("Jupiter failed — trying Raydium fallback...")
+        return await self._raydium_swap(input_mint, output_mint, amount)
+
+    async def _jupiter_swap_inner(self, input_mint: str, output_mint: str, amount: int) -> Optional[str]:
+        """Jupiter swap via lite-api.jup.ag (v3.8 migration from dead quote-api.jup.ag)."""
         try:
             from solders.transaction import VersionedTransaction
 
-            # Quote
+            # Quote via new endpoint
             params = {
                 "inputMint": input_mint, "outputMint": output_mint,
                 "amount": str(amount), "slippageBps": str(self.config.slippage_bps),
             }
-            async with self.session.get(JUPITER_QUOTE_URL, params=params) as resp:
+            # If JUP_API_KEY is set, use api.jup.ag (faster, long-term); otherwise lite-api
+            jup_key = os.environ.get("JUP_API_KEY", "")
+            if jup_key:
+                quote_url = "https://api.jup.ag/swap/v1/quote"
+                swap_url = "https://api.jup.ag/swap/v1/swap"
+                headers = {"x-api-key": jup_key}
+            else:
+                quote_url = JUPITER_QUOTE_URL
+                swap_url = JUPITER_SWAP_URL
+                headers = {}
+
+            async with self.session.get(quote_url, params=params, headers=headers,
+                                        timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
-                    logger.error(f"Jupiter quote error: {await resp.text()}")
+                    err = await resp.text()
+                    logger.warning(f"Jupiter quote error ({resp.status}): {err[:200]}")
                     return None
                 quote = await resp.json()
 
             if "error" in quote:
-                logger.error(f"Jupiter quote: {quote['error']}")
+                logger.warning(f"Jupiter quote: {quote['error']}")
                 return None
+
+            # v4.2: Use Helius priority fee if available, otherwise static config
+            priority_fee = self.config.priority_fee_lamports
+            helius_fee = await self._get_helius_priority_fee([input_mint, output_mint])
+            if helius_fee is not None:
+                # Helius returns microlamports, Jupiter expects lamports
+                priority_fee = max(helius_fee, self.config.priority_fee_lamports)
 
             # Swap transaction
             swap_body = {
                 "quoteResponse": quote, "userPublicKey": self.pubkey,
                 "wrapAndUnwrapSol": True,
-                "prioritizationFeeLamports": self.config.priority_fee_lamports,
+                "prioritizationFeeLamports": priority_fee,
             }
-            async with self.session.post(JUPITER_SWAP_URL, json=swap_body) as resp:
+            async with self.session.post(swap_url, json=swap_body, headers=headers,
+                                         timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
-                    logger.error(f"Jupiter swap error: {await resp.text()}")
+                    err = await resp.text()
+                    logger.warning(f"Jupiter swap error ({resp.status}): {err[:200]}")
                     return None
                 swap_data = await resp.json()
 
@@ -3418,9 +6435,177 @@ class DegenTrader:
             if not swap_tx_b64:
                 return None
 
-            # Sign and send
+            return await self._sign_and_send_tx(swap_tx_b64)
+
+        except ImportError:
+            logger.error("pip install solders")
+            return None
+        except Exception as e:
+            logger.warning(f"Jupiter swap error: {e}")
+            return None
+
+    async def _raydium_swap(self, input_mint: str, output_mint: str, amount: int) -> Optional[str]:
+        """Raydium Trade API fallback — no API key needed. v3.8."""
+        try:
+            from solders.transaction import VersionedTransaction
+
+            # Quote
+            params = {
+                "inputMint": input_mint, "outputMint": output_mint,
+                "amount": str(amount), "slippageBps": str(self.config.slippage_bps),
+                "txVersion": "V0",
+            }
+            async with self.session.get(RAYDIUM_QUOTE_URL, params=params,
+                                        timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    err = await resp.text()
+                    logger.warning(f"Raydium quote error ({resp.status}): {err[:200]}")
+                    return None
+                quote_data = await resp.json()
+
+            if not quote_data.get("success", True):
+                logger.warning(f"Raydium quote failed: {quote_data}")
+                return None
+
+            # v4.2: Use Helius priority fee if available
+            priority_fee = self.config.priority_fee_lamports
+            helius_fee = await self._get_helius_priority_fee([input_mint, output_mint])
+            if helius_fee is not None:
+                priority_fee = max(helius_fee, self.config.priority_fee_lamports)
+
+            # Build swap transaction
+            swap_body = {
+                "computeUnitPriceMicroLamports": str(priority_fee),
+                "swapResponse": quote_data,
+                "txVersion": "V0",
+                "wallet": self.pubkey,
+                "wrapSol": input_mint == SOL_MINT,
+                "unwrapSol": output_mint == SOL_MINT,
+            }
+            async with self.session.post(RAYDIUM_SWAP_URL, json=swap_body,
+                                         timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    err = await resp.text()
+                    logger.warning(f"Raydium swap error ({resp.status}): {err[:200]}")
+                    return None
+                swap_data = await resp.json()
+
+            # Raydium returns data array of base64 transactions
+            txns = swap_data.get("data", [])
+            if not txns:
+                logger.warning("Raydium: no transaction data returned")
+                return None
+
+            # Sign and send first transaction
+            swap_tx_b64 = txns[0].get("transaction", txns[0]) if isinstance(txns[0], dict) else txns[0]
+            result = await self._sign_and_send_tx(swap_tx_b64)
+            if result:
+                logger.info(f"Raydium swap OK: {result[:20]}...")
+            return result
+
+        except ImportError:
+            logger.error("pip install solders")
+            return None
+        except Exception as e:
+            logger.warning(f"Raydium swap error: {e}")
+            return None
+
+    # v4.2: Helius priority fee estimation + staked send
+    async def _get_helius_priority_fee(self, account_keys: List[str] = None) -> Optional[int]:
+        """Get optimal priority fee from Helius getPriorityFeeEstimate API.
+
+        Returns fee in microlamports, or None if Helius unavailable.
+        Uses Helius-exclusive RPC method for accurate fee estimation.
+        """
+        if not self.config.helius_rpc_url:
+            return None
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getPriorityFeeEstimate",
+                "params": [{
+                    "accountKeys": account_keys or [PUMP_PROGRAM_ID],
+                    "options": {"priorityLevel": "High"}
+                }]
+            }
+            async with self.session.post(
+                self.config.helius_rpc_url, json=payload,
+                timeout=aiohttp.ClientTimeout(total=3)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    fee = data.get("result", {}).get("priorityFeeEstimate")
+                    if fee is not None:
+                        fee_int = int(fee)
+                        logger.debug(f"Helius priority fee: {fee_int} microlamports")
+                        return fee_int
+        except Exception as e:
+            logger.debug(f"Helius priority fee error: {e}")
+        return None
+
+    def _get_send_rpc(self) -> str:
+        """Get the best RPC for sendTransaction. Helius staked > Alchemy > default."""
+        if self.config.helius_rpc_url:
+            return self.config.helius_rpc_url
+        return self.config.fast_rpc_url or self.config.rpc_url
+
+    # v4.0: Trusted programs — only sign transactions that interact with these
+    TRUSTED_PROGRAMS = {
+        SPL_TOKEN_PROGRAM,                                     # SPL Token
+        SPL_TOKEN_2022,                                        # Token-2022
+        "11111111111111111111111111111111",                     # System Program
+        "ComputeBudget111111111111111111111111111111",          # Compute Budget
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",      # Associated Token Account
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",       # Jupiter v6
+        "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPGeSyBD8TAc",       # Jupiter v4
+        "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",      # Raydium AMM v4
+        "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",      # Raydium CPMM
+        "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",      # Raydium CLMM
+        "routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS",       # Raydium Router
+        "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",       # Orca Whirlpool
+        "9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP",      # Orca v2
+        "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",       # Pump.fun
+        "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",       # PumpSwap AMM
+        "srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX",       # Serum DEX
+        "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",      # Meteora LB
+        "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB",     # Meteora Pools
+        "SSwapUtytfBdBn1b9NUGG6foMVPtcWgpRU32HToDUZr",       # Saros Swap
+        "MERLuDFBMmsHnsBPZw2sDQZHvXFMwp8EdjudcU2HKky",       # Mercurial
+    }
+
+    async def _sign_and_send_tx(self, swap_tx_b64: str) -> Optional[str]:
+        """Sign a base64 transaction and send to RPC. Shared by Jupiter + Raydium.
+
+        v4.0: SAFETY — validates transaction only touches trusted programs before signing.
+        Prevents interaction with malicious contracts that could drain the wallet.
+        """
+        try:
+            from solders.transaction import VersionedTransaction
+
             raw_tx = base64.b64decode(swap_tx_b64)
             tx = VersionedTransaction.from_bytes(raw_tx)
+
+            # v4.0: SAFETY — check all program IDs in the transaction
+            try:
+                msg = tx.message
+                # Get account keys from the message (includes lookup table resolved keys)
+                account_keys = [str(k) for k in msg.account_keys]
+                # Check instructions reference only trusted programs
+                for ix in msg.instructions:
+                    program_idx = ix.program_id_index
+                    if program_idx < len(account_keys):
+                        program_id = account_keys[program_idx]
+                        if program_id not in self.TRUSTED_PROGRAMS:
+                            logger.error(
+                                f"SAFETY BLOCK: Transaction contains untrusted program {program_id}! "
+                                f"Refusing to sign. This could be a malicious contract."
+                            )
+                            return None
+            except Exception as e:
+                # If we can't parse programs, log warning but allow through
+                # (Jupiter/Raydium sometimes use address lookup tables)
+                logger.debug(f"TX safety check partial: {e} — proceeding (from trusted API)")
+
             signed_tx = VersionedTransaction(tx.message, [self.keypair])
             signed_bytes = base64.b64encode(bytes(signed_tx)).decode("ascii")
 
@@ -3428,8 +6613,8 @@ class DegenTrader:
                 "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
                 "params": [signed_bytes, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}]
             }
-            # Use fast RPC for sending (lower latency)
-            rpc = self.config.fast_rpc_url or self.config.rpc_url
+            # v4.2: Send via Helius staked RPC for better landing rate
+            rpc = self._get_send_rpc()
             async with self.session.post(rpc, json=send_payload) as resp:
                 result = await resp.json()
 
@@ -3442,11 +6627,8 @@ class DegenTrader:
                 await self._confirm_transaction(tx_sig)
             return tx_sig
 
-        except ImportError:
-            logger.error("pip install solders")
-            return None
         except Exception as e:
-            logger.error(f"Jupiter swap error: {e}")
+            logger.error(f"Sign/send error: {e}")
             return None
 
     async def _confirm_transaction(self, signature: str, timeout: int = 30):
@@ -3481,7 +6663,20 @@ class DegenTrader:
             if not pos:
                 continue
 
-            token = await self._fetch_token_data(addr)
+            hold_min = (time.time() - pos.entry_time) / 60
+
+            # v3.9: Bonding curve tokens — use PumpPortal data + curve state, NOT DexScreener
+            if pos.on_bonding_curve:
+                await self._manage_bonding_curve_position(addr, pos, hold_min)
+                continue
+
+            # v4.3: Real-time price — Jupiter USD (~200ms) + DexScreener (liquidity/rug data) in parallel
+            # WS feed provides instant SOL-denominated price for change detection
+            token_task = asyncio.create_task(self._fetch_token_data(addr))
+            jup_task = asyncio.create_task(self._get_jupiter_price(addr))
+            token, jup_price = await asyncio.gather(token_task, jup_task)
+            if jup_price > 0 and token:
+                token.price_usd = jup_price  # real-time Jupiter USD overrides stale DexScreener
             if not token:
                 if time.time() - pos.entry_time > 600:
                     await self.execute_sell(addr, reason="data_unavailable")
@@ -3491,27 +6686,36 @@ class DegenTrader:
                 continue
 
             price_mult = token.price_usd / pos.entry_price
-            hold_min = (time.time() - pos.entry_time) / 60
 
             # Stop loss
             if price_mult <= pos.stop_loss:
                 await self.execute_sell(addr, reason=f"stop_loss_{price_mult:.2f}x")
                 continue
 
-            # Take profits
-            if price_mult >= 10.0 and pos.partial_sells < 3:
-                await self.execute_sell(addr, reason=f"tp_10x_{price_mult:.1f}x")
-                continue
-            elif price_mult >= 5.0 and pos.partial_sells < 2:
-                await self.execute_sell(addr, reason=f"tp_5x_{price_mult:.1f}x")
-                continue
-            elif price_mult >= 2.0 and pos.partial_sells < 1:
-                await self.execute_sell(addr, reason=f"tp_2x_{price_mult:.1f}x")
+            # v3.8: Dynamic take profits from position's levels (quick scalp style)
+            tp_levels = pos.take_profit_levels if pos.take_profit_levels else [1.4, 1.5, 2.0]
+            sold_tp = False
+            for i, tp in enumerate(reversed(tp_levels)):
+                sell_idx = len(tp_levels) - 1 - i  # check highest TP first
+                if price_mult >= tp and pos.partial_sells < sell_idx + 1:
+                    await self.execute_sell(addr, reason=f"tp_{tp:.1f}x_{price_mult:.2f}x")
+                    sold_tp = True
+                    break
+            if sold_tp:
                 continue
 
-            # Time exit
-            if hold_min > 120 and price_mult < 1.5:
-                await self.execute_sell(addr, reason=f"time_exit_{hold_min:.0f}m")
+            # v4.1: Tightened time exit — don't hold losers, take any profit after 5min
+            max_hold = self.config.max_hold_minutes
+            if hold_min > max_hold and price_mult < 1.1:
+                await self.execute_sell(addr, reason=f"time_exit_{hold_min:.0f}m_{price_mult:.2f}x")
+                continue
+            # v4.1: If losing after 8 min, cut it — momentum is gone
+            if hold_min > 8 and price_mult < 1.0:
+                await self.execute_sell(addr, reason=f"stale_loser_{hold_min:.0f}m_{price_mult:.2f}x")
+                continue
+            # v4.1: If in profit after 5min, just take it (was 10min)
+            if hold_min > 5 and price_mult >= 1.03:
+                await self.execute_sell(addr, reason=f"micro_tp_{hold_min:.0f}m_{price_mult:.2f}x")
                 continue
 
             # Rug detection: liquidity vanishing
@@ -3532,7 +6736,7 @@ class DegenTrader:
                 if current_velocity > pos.peak_velocity:
                     pos.peak_velocity = current_velocity
                 # Sell when velocity drops below threshold of peak (momentum dying)
-                if pos.peak_velocity > 0 and hold_min >= 2.0:  # give at least 2 min before checking
+                if pos.peak_velocity > 0 and hold_min >= 1.0:  # v3.8: check after 1 min (was 2)
                     velocity_ratio = current_velocity / pos.peak_velocity
                     if velocity_ratio <= self.config.velocity_drop_sell_pct:
                         logger.info(
@@ -3554,21 +6758,131 @@ class DegenTrader:
                         await self.execute_sell(addr, reason=f"velocity_drop_{velocity_ratio:.0%}_of_peak")
                         continue
 
+    async def _manage_bonding_curve_position(self, addr: str, pos, hold_min: float):
+        """v3.9: Manage bonding curve positions using curve state + PumpPortal data.
+
+        DexScreener returns priceUsd=0 for pre-migration tokens, causing instant false stop_loss.
+        Instead, use the actual bonding curve state to determine if we should hold or sell.
+        """
+        # Check if token has graduated — if so, switch to normal management
+        if self.curve_engine:
+            curve_state = await self.curve_engine.get_bonding_curve_state(addr, self.session)
+            if curve_state and curve_state.complete:
+                # Token graduated! It now has a Raydium pool. Switch to normal management.
+                pos.on_bonding_curve = False
+                logger.info(f"GRADUATED: ${pos.symbol} — switching to DEX price tracking")
+                return  # will be handled normally next cycle
+
+        # Use PumpPortal hot_tokens data for buy momentum tracking
+        velocity = 0.0
+        buys = 0
+        sells = 0
+        creator_sold = False
+        curve_price_sol = 0.0
+        if self.pump_monitor and addr in self.pump_monitor.hot_tokens:
+            stats = self.pump_monitor.hot_tokens[addr]
+            age_s = time.time() - stats.get("first_seen", time.time())
+            buys = stats.get("buys", 0)
+            sells = stats.get("sells", 0)
+            velocity = (buys / (age_s / 60)) if age_s > 60 else buys
+            creator_sold = stats.get("creator_sold", False)
+            # v4.3: Real-time curve price from PumpPortal WS events
+            curve_price_sol = stats.get("price_sol", 0)
+
+            # Track peak velocity
+            if velocity > pos.peak_velocity:
+                pos.peak_velocity = velocity
+
+        # v4.3: Price-based PnL for bonding curve tokens (if we have real-time price)
+        # Use curve state for exact sell simulation
+        if curve_price_sol > 0 and self.curve_engine:
+            curve_state = await self.curve_engine.get_bonding_curve_state(addr, self.session) if not (hasattr(self, '_last_curve_state') and addr in getattr(self, '_last_curve_state', {})) else None
+            if curve_state and not curve_state.complete:
+                estimated_tokens = curve_state.calc_tokens_for_sol(pos.amount_sol_spent)
+                if estimated_tokens > 0:
+                    sol_back = curve_state.calc_sol_for_tokens(estimated_tokens) / 1e9
+                    curve_pnl_mult = sol_back / pos.amount_sol_spent if pos.amount_sol_spent > 0 else 1.0
+                    # Take profit on curve tokens if real PnL is solid
+                    if curve_pnl_mult >= 1.5 and hold_min >= 0.5:
+                        logger.info(f"CURVE TP: ${pos.symbol} | {curve_pnl_mult:.2f}x (real curve PnL) — taking profit")
+                        await self.execute_sell(addr, reason=f"curve_tp_{curve_pnl_mult:.2f}x")
+                        return
+                    # Stop loss on curve tokens
+                    if curve_pnl_mult <= 0.6 and hold_min >= 1.0:
+                        logger.info(f"CURVE SL: ${pos.symbol} | {curve_pnl_mult:.2f}x (real curve PnL) — cutting loss")
+                        await self.execute_sell(addr, reason=f"curve_sl_{curve_pnl_mult:.2f}x")
+                        return
+
+        # SELL CONDITIONS for bonding curve tokens:
+
+        # 1. Creator rugged — sold their tokens
+        if creator_sold:
+            logger.info(f"CREATOR SOLD: ${pos.symbol} — selling immediately")
+            await self.execute_sell(addr, reason="creator_rug")
+            return
+
+        # 2. Heavy sell pressure (more sells than buys)
+        if buys > 3 and sells > buys * 0.6:
+            logger.info(f"SELL PRESSURE on curve: ${pos.symbol} {sells}s/{buys}b — selling")
+            await self.execute_sell(addr, reason=f"curve_sell_pressure_{sells}s_{buys}b")
+            return
+
+        # 3. Velocity died — momentum gone (v4.1: check sooner at 1.5min)
+        if hold_min >= 1.5 and pos.peak_velocity > 0:
+            velocity_ratio = velocity / pos.peak_velocity if pos.peak_velocity > 0 else 0
+            if velocity_ratio <= 0.3:  # velocity dropped to 30% of peak
+                logger.info(
+                    f"CURVE VEL DROP: ${pos.symbol} | vel {velocity:.1f}/min "
+                    f"(peak {pos.peak_velocity:.1f}/min, now {velocity_ratio:.0%}) — selling"
+                )
+                await self.execute_sell(addr, reason=f"curve_vel_drop_{velocity_ratio:.0%}")
+                return
+
+        # 4. Max hold time (v4.1: tightened from 10 to 7 min for bonding curve tokens)
+        if hold_min > 7:
+            logger.info(f"CURVE TIME EXIT: ${pos.symbol} | held {hold_min:.0f}m — selling")
+            await self.execute_sell(addr, reason=f"curve_time_exit_{hold_min:.0f}m")
+            return
+
+        # 5. No activity — token is dead (v4.1: tightened from 3min to 2min, vel 0.5 to 0.8)
+        if hold_min >= 2.0 and velocity < 0.8:
+            logger.info(f"CURVE DEAD: ${pos.symbol} | vel={velocity:.1f}/min — selling")
+            await self.execute_sell(addr, reason="curve_dead_momentum")
+            return
+
+    def reset_pnl(self):
+        """v3.9: Reset all PnL counters for a fresh start."""
+        self.total_pnl_sol = 0.0
+        self.total_trades = 0
+        self.winning_trades = 0
+        self.total_invested_sol = 0.0
+        self.total_lost_sol = 0.0
+        self.trades.clear()
+        self._save_state()
+        logger.info("PnL RESET — starting fresh")
+
     # ----------------------------------------------------------
     # MAIN TRADING LOOP
     # ----------------------------------------------------------
     async def run(self):
+        _FarnsworthAuthLock.lock_check()  # double-check at runtime
         await self.initialize()
         self.running = True
 
         balance = await self.get_sol_balance()
         logger.info("=" * 60)
-        logger.info("FARNSWORTH DEGEN TRADER v3.7 - INSTANT SNIPE + QUANTUM ANALYSIS")
+        if self.config.paper_trade:
+            logger.info("FARNSWORTH DEGEN TRADER v4.3 - PAPER TRADE MODE (NO REAL SOL)")
+        else:
+            logger.info("FARNSWORTH DEGEN TRADER v4.3 - LIVE TRADING (REAL SOL)")
         logger.info("=" * 60)
+        logger.info(f"Mode:       {'PAPER TRADE' if self.config.paper_trade else 'LIVE'}")
         logger.info(f"Wallet:     {self.pubkey}")
-        logger.info(f"Balance:    {balance:.4f} SOL")
+        logger.info(f"Balance:    {balance:.4f} SOL{' (virtual)' if self.config.paper_trade else ''}")
         logger.info(f"RPC:        {self.config.rpc_url[:40]}...")
-        logger.info(f"Fast RPC:   {self.config.fast_rpc_url[:40]}...")
+        logger.info(f"Read RPC:   {self.config.fast_rpc_url[:40]}...")
+        logger.info(f"Send RPC:   {(self.config.helius_rpc_url or self.config.fast_rpc_url)[:40]}...")
+        logger.info(f"Helius:     {'ON (staked + priority fees)' if self.config.helius_rpc_url else 'OFF'}")
         logger.info(f"Pump.fun:   {'ON' if self.pump_monitor else 'OFF'}")
         logger.info(f"BondCurve:  {'ON' if self.curve_engine else 'OFF'} (PumpPortal: {'ON' if self.config.use_pumpportal else 'OFF'})")
         logger.info(f"InstSnipe:  {'ON' if self.config.instant_snipe else 'OFF'} (dev buy >= {self.config.instant_snipe_min_dev_sol} SOL → instant {self.config.instant_snipe_max_sol} SOL)")
@@ -3577,6 +6891,8 @@ class DegenTrader:
         logger.info(f"Sniper:     {'ON' if self.config.sniper_mode else 'OFF'} (max {self.config.bonding_curve_max_sol} SOL, <{self.config.bonding_curve_max_progress}% curve)")
         logger.info(f"FreshOnly:  <{self.config.max_age_minutes}min | FDV cap: ${self.config.max_fdv:,.0f} | Liq: ${self.config.min_liquidity:,.0f}-${self.config.max_liquidity:,.0f}")
         logger.info(f"CabalFollow: {'ON' if self.config.use_cabal_follow else 'OFF'} (FDV<${self.config.cabal_follow_max_fdv:,.0f}, {self.config.cabal_follow_min_wallets}+ wallets, vel-drop sell at {self.config.velocity_drop_sell_pct:.0%})")
+        logger.info(f"Scalper:    TP at {self.config.quick_take_profit}x/{self.config.quick_take_profit_2}x | max hold {self.config.max_hold_minutes:.0f}m")
+        logger.info(f"DynAdapt:   {'ON' if self.config.dynamic_adapt else 'OFF'} (loosen after {self.config.adapt_quiet_cycles} quiet, tighten after {self.config.adapt_hot_cycles} hot)")
         logger.info(f"Wallets:    {'ON' if self.wallet_analyzer else 'OFF'}")
         logger.info(f"Quantum:    {'ON' if self.quantum_oracle else 'OFF'}")
         logger.info(f"QPredict:   {'ON' if self.wallet_predictor else 'OFF'} (Bell state wallet correlation → pre-buy before crowd)")
@@ -3584,6 +6900,8 @@ class DegenTrader:
         logger.info(f"CopyTrade:  {'ON' if self.copy_engine else 'OFF'}")
         logger.info(f"X Sentinel: {'ON' if self.x_sentinel else 'OFF'}")
         logger.info(f"Memory:     {'ON' if self.trading_memory and self.trading_memory._initialized else 'OFF'}")
+        logger.info(f"BurnWatch:  {'ON' if self.burn_monitor else 'OFF'} (incinerator scan 8s, auto-buy 0.05 SOL on healthy burns)")
+        logger.info(f"Learner:    {'ON' if self.adaptive_learner else 'OFF'} (collective auto-tune every 15m, local analysis every 3 trades)")
         logger.info(f"Max trade:  {self.config.max_position_sol} SOL")
         logger.info(f"Max pos:    {self.config.max_positions}")
         logger.info(f"Grad sell:  {self.config.graduation_sell_pct:.0%} at graduation")
@@ -3598,10 +6916,141 @@ class DegenTrader:
         while self.running:
             try:
                 cycle += 1
-                logger.info(f"--- Cycle {cycle} | Pos: {len(self.positions)}/{self.config.max_positions} | PnL: {self.total_pnl_sol:+.4f} SOL | Trades: {self.total_trades} ---")
+                paper_tag = "[PAPER] " if self.config.paper_trade else ""
+                logger.info(f"--- {paper_tag}Cycle {cycle} | Pos: {len(self.positions)}/{self.config.max_positions} | PnL: {self.total_pnl_sol:+.4f} SOL | Trades: {self.total_trades} | Bal: {await self.get_sol_balance():.4f} SOL ---")
 
                 # Manage existing positions
                 await self.manage_positions()
+
+                # v3.9: Process holder dump alerts — EMERGENCY SELL if top holder is dumping
+                if self.holder_watcher:
+                    while not self.holder_watcher.sell_alerts.empty():
+                        try:
+                            alert = self.holder_watcher.sell_alerts.get_nowait()
+                            mint = alert.get("mint", "")
+                            if mint in self.positions:
+                                holder = alert.get("holder", "")[:12]
+                                drop = alert.get("drop_pct", 0)
+                                supply_pct = alert.get("original_pct_supply", 0)
+                                logger.warning(
+                                    f"HOLDER RUG ALERT: ${self.positions[mint].symbol} | "
+                                    f"holder {holder}... ({supply_pct:.1f}% supply) dropped {drop:.0f}% — EMERGENCY SELL"
+                                )
+                                await self.execute_sell(
+                                    mint,
+                                    reason=f"holder_dump_{holder}_{drop:.0f}pct_{supply_pct:.1f}pct_supply"
+                                )
+                        except asyncio.QueueEmpty:
+                            break
+
+                # v4.0: Process burn buy signals — tokens with LP/supply burns = strong bullish
+                if self.burn_monitor:
+                    while not self.burn_monitor.buy_signals.empty():
+                        try:
+                            sig = self.burn_monitor.buy_signals.get_nowait()
+                            mint = sig.get("mint", "")
+                            symbol = sig.get("symbol", "?")
+                            burn_type = sig.get("burn_type", "?")
+                            health = sig.get("health", {})
+
+                            if mint in self.positions or mint in self._sniper_bought or mint in self.seen_tokens:
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < 0.05:
+                                break
+
+                            # Cross-reference with PumpPortal for pre-bonding tokens
+                            is_pre_bonding = False
+                            if self.pump_monitor and mint in self.pump_monitor.hot_tokens:
+                                stats = self.pump_monitor.hot_tokens[mint]
+                                buys = stats.get("buys", 0)
+                                vel = stats.get("velocity", 0)
+                                symbol = stats.get("symbol", symbol)
+                                is_pre_bonding = True
+                                # Extra health check for pre-bonding
+                                if buys < 2 or vel < 0.5:
+                                    logger.debug(f"BURN SKIP prebond {symbol}: buys={buys} vel={vel:.1f} too weak")
+                                    continue
+
+                            # For DEX tokens, health was already checked by BurnSignalMonitor
+                            # For pre-bonding, we just validated above
+                            if not health.get("on_dex") and not is_pre_bonding:
+                                continue  # unknown token — skip
+
+                            buy_sol = 0.02  # v4.1: 0.02 SOL for burn buys
+                            logger.info(
+                                f"BURN BUY: ${symbol} ({mint[:12]}...) | "
+                                f"type={burn_type} | {'PRE-BOND' if is_pre_bonding else 'DEX'} | "
+                                f"buying {buy_sol} SOL"
+                            )
+
+                            if is_pre_bonding and self.curve_engine:
+                                # Buy on bonding curve via PumpPortal
+                                trade = await self.execute_sniper_buy(
+                                    {"mint": mint, "symbol": symbol, "buys": health.get("buys_5m", 0)},
+                                    buy_sol,
+                                )
+                                if trade and mint in self.positions:
+                                    self.positions[mint].source = f"burn_{burn_type}"
+                            else:
+                                # Buy on DEX via Jupiter
+                                token = TokenInfo(
+                                    address=mint, symbol=symbol, name=symbol,
+                                    pair_address="", price_usd=0,
+                                    liquidity_usd=health.get("liquidity", 0),
+                                    volume_24h=0, source=f"burn_{burn_type}",
+                                )
+                                token.score = 70  # burn signal = high confidence
+                                trade = await self.execute_buy(token, buy_sol)
+
+                            await asyncio.sleep(0.3)
+                        except asyncio.QueueEmpty:
+                            break
+                        except Exception as e:
+                            logger.debug(f"Burn buy error: {e}")
+
+                # v4.1: Process mixer wallet buy signals — fresh wallets from mixer buying tokens
+                if self.whale_hunter:
+                    while not self.whale_hunter._mixer_buy_signals.empty():
+                        try:
+                            sig = self.whale_hunter._mixer_buy_signals.get_nowait()
+                            mint = sig.get("mint", "")
+                            symbol = sig.get("symbol", "?")
+
+                            if mint in self.positions or mint in self._sniper_bought or mint in self.seen_tokens:
+                                continue
+                            if len(self.positions) >= self.config.max_positions:
+                                break
+
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol < 0.05:
+                                break
+
+                            buy_sol = 0.02  # v4.1: 0.02 SOL for mixer wallet signals
+                            logger.info(
+                                f"MIXER WALLET BUY: ${symbol} ({mint[:12]}...) | "
+                                f"wallet={sig.get('wallet', '?')} | "
+                                f"liq=${sig.get('liquidity', 0):.0f} | buying {buy_sol} SOL"
+                            )
+
+                            token = TokenInfo(
+                                address=mint, symbol=symbol, name=symbol,
+                                pair_address="", price_usd=0,
+                                liquidity_usd=sig.get("liquidity", 0),
+                                volume_24h=sig.get("volume_24h", 0),
+                                source="mixer_wallet",
+                            )
+                            token.score = 65  # mixer wallet signal = moderate confidence
+                            await self.execute_buy(token, buy_sol)
+
+                            await asyncio.sleep(0.3)
+                        except asyncio.QueueEmpty:
+                            break
+                        except Exception as e:
+                            logger.debug(f"Mixer buy error: {e}")
 
                 # Check capacity
                 balance = await self.get_sol_balance()
@@ -3707,6 +7156,10 @@ class DegenTrader:
                             mint = signal.get("mint", "")
                             if not mint or mint in self.positions or mint in self.seen_tokens or mint in self._sniper_bought:
                                 continue
+                            # v4.0: Enforce min wallets from config (PumpFunMonitor uses hardcoded 3)
+                            if signal.get("connected_wallets", 0) < self.config.cabal_follow_min_wallets:
+                                logger.debug(f"SKIP cabal {signal.get('symbol','')}: only {signal.get('connected_wallets',0)} wallets < {self.config.cabal_follow_min_wallets}")
+                                continue
                             if len(self.positions) >= self.config.max_positions:
                                 break
                             balance = await self.get_sol_balance()
@@ -3722,15 +7175,20 @@ class DegenTrader:
                             if token.fdv > self.config.cabal_follow_max_fdv and token.fdv > 0:
                                 logger.debug(f"SKIP cabal {token.symbol}: FDV ${token.fdv:.0f} > ${self.config.cabal_follow_max_fdv:.0f}")
                                 continue
-                            # Tag and buy
+                            # Tag and score
                             token.source = "cabal_follow"
                             token.cabal_score = min(100, signal.get("connected_wallets", 2) * 30)
                             token.top_holders_connected = True
                             self.score_token(token)
                             token.score = min(100, token.score + 25)  # cabal coordination bonus
                             velocity = signal.get("velocity", 0)
+                            # v4.0: Enforce minimum score — cabal bonus shouldn't bypass quality filter
+                            effective_min = self.config.min_score + self._adapt_score_offset
+                            if token.score < effective_min:
+                                logger.debug(f"SKIP cabal {token.symbol}: score {token.score:.0f} < min {effective_min:.0f}")
+                                continue
                             logger.info(
-                                f"CABAL FOLLOW: ${token.symbol} | {signal.get('connected_wallets', 0)} connected wallets | "
+                                f"CABAL FOLLOW: ${token.symbol} | score={token.score:.0f} | {signal.get('connected_wallets', 0)} connected wallets | "
                                 f"FDV ${token.fdv:.0f} | age {token.age_minutes:.0f}m | vel {velocity:.1f}/min"
                             )
                             buy_result = await self.execute_buy(token, self.config.cabal_follow_max_sol)
@@ -3767,7 +7225,7 @@ class DegenTrader:
 
                     # v3: Check X sentinel for hot tokens
                     if self.x_sentinel:
-                        hot = self.x_sentinel.get_hot_tokens(min_strength=7)
+                        hot = self.x_sentinel.get_hot_tokens(min_strength=5)  # v3.8: loosened from 7
                         for signal in hot[:2]:
                             addr = signal.get("address", "")
                             if not addr or addr in self.positions or addr in self.seen_tokens:
@@ -3846,13 +7304,49 @@ class DegenTrader:
                     else:
                         logger.info(f"Found {len(fresh)} fresh tokens (all under {self.config.max_age_minutes}m)")
 
-                    # Score
+                    # Score with dynamic adaptation (v3.8)
+                    effective_min_score = max(25, self.config.min_score + self._adapt_score_offset)
                     scored = []
                     for t in fresh:
                         s = self.score_token(t)
-                        if s >= self.config.min_score:
+                        if s >= effective_min_score:
                             scored.append(t)
                     scored.sort(key=lambda t: t.score, reverse=True)
+
+                    # v3.8: Dynamic adaptation — auto-adjust based on market activity
+                    if self.config.dynamic_adapt:
+                        if len(scored) == 0:
+                            self._quiet_cycles += 1
+                            self._hot_cycles = 0
+                            if self._quiet_cycles >= self.config.adapt_quiet_cycles:
+                                # Market is quiet — loosen thresholds
+                                old_offset = self._adapt_score_offset
+                                self._adapt_score_offset = max(-20, self._adapt_score_offset - 3)
+                                if self._adapt_score_offset != old_offset:
+                                    logger.info(
+                                        f"ADAPT: {self._quiet_cycles} quiet cycles → loosening score "
+                                        f"(min_score {effective_min_score} → {max(25, self.config.min_score + self._adapt_score_offset)})"
+                                    )
+                        elif len(scored) >= 3:
+                            self._hot_cycles += 1
+                            self._quiet_cycles = 0
+                            if self._hot_cycles >= self.config.adapt_hot_cycles:
+                                # Market is hot — tighten slightly to pick best only
+                                old_offset = self._adapt_score_offset
+                                self._adapt_score_offset = min(10, self._adapt_score_offset + 2)
+                                if self._adapt_score_offset != old_offset:
+                                    logger.info(
+                                        f"ADAPT: {self._hot_cycles} hot cycles → tightening score "
+                                        f"(min_score {effective_min_score} → {max(25, self.config.min_score + self._adapt_score_offset)})"
+                                    )
+                        else:
+                            # Normal activity — slowly drift back to baseline
+                            if self._adapt_score_offset > 0:
+                                self._adapt_score_offset -= 1
+                            elif self._adapt_score_offset < 0:
+                                self._adapt_score_offset += 1
+                            self._quiet_cycles = 0
+                            self._hot_cycles = 0
 
                     # Deep analyze and trade top picks
                     for token in scored[:3]:
@@ -3949,6 +7443,28 @@ class DegenTrader:
                         for mint in expired:
                             self._reentry_watchlist.pop(mint, None)
 
+                # v4.0: Adaptive learning — apply local learnings + periodic collective query
+                if self.adaptive_learner and cycle % 10 == 0:
+                    # Apply any pending local adjustments every 10 cycles
+                    changes = self.adaptive_learner.apply_to_config(self.config)
+                    if changes:
+                        logger.info(f"ADAPTIVE TUNE: {changes}")
+
+                    # Query collective every 15 minutes for deep analysis
+                    if (time.time() - self._last_collective_query > 900
+                            and len(self.adaptive_learner._trades) >= 5):
+                        self._last_collective_query = time.time()
+                        try:
+                            insight = await self.adaptive_learner.ask_collective(self.config)
+                            if insight:
+                                logger.info(f"COLLECTIVE INSIGHT: {insight.get('reasoning', '')}")
+                                # Apply collective's suggestions
+                                coll_changes = self.adaptive_learner.apply_to_config(self.config)
+                                if coll_changes:
+                                    logger.info(f"COLLECTIVE TUNE: {coll_changes}")
+                        except Exception as e:
+                            logger.debug(f"Collective query failed: {e}")
+
                 await asyncio.sleep(self.config.scan_interval)
 
             except asyncio.CancelledError:
@@ -3971,7 +7487,13 @@ class DegenTrader:
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "start_balance": self.start_balance,
+            "total_invested_sol": self.total_invested_sol,
+            "total_lost_sol": self.total_lost_sol,
             "saved_at": time.time(),
+            # v4.3: Paper trading state
+            "paper_trade": self.config.paper_trade,
+            "paper_balance": self._paper_balance,
+            "paper_token_holdings": self._paper_token_holdings,
         }
         try:
             STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
@@ -3987,12 +7509,19 @@ class DegenTrader:
             self.total_trades = state.get("total_trades", 0)
             self.winning_trades = state.get("winning_trades", 0)
             self.start_balance = state.get("start_balance", 0)
+            self.total_invested_sol = state.get("total_invested_sol", 0)
+            self.total_lost_sol = state.get("total_lost_sol", 0)
             self.seen_tokens = set(state.get("seen_tokens", []))
             for addr, pdata in state.get("positions", {}).items():
                 self.positions[addr] = Position(**pdata)
             for tdata in state.get("trades", []):
                 self.trades.append(Trade(**tdata))
-            logger.info(f"Loaded: {self.total_trades} trades, {len(self.positions)} positions")
+            # v4.3: Restore paper trading state
+            if self.config.paper_trade and state.get("paper_trade"):
+                self._paper_balance = state.get("paper_balance", self.config.paper_start_balance)
+                self._paper_token_holdings = state.get("paper_token_holdings", {})
+            logger.info(f"Loaded: {self.total_trades} trades, {len(self.positions)} positions" +
+                        (f" | Paper balance: {self._paper_balance:.4f} SOL" if self.config.paper_trade else ""))
         except Exception as e:
             logger.error(f"State load error: {e}")
 
@@ -4030,30 +7559,95 @@ class DegenTrader:
         result.sort(key=lambda x: x["velocity"], reverse=True)
         return result[:15]
 
-    def status(self) -> Dict:
+    async def _fetch_live_prices(self) -> Dict[str, dict]:
+        """Batch fetch live prices from DexScreener for all open positions.
+        Returns: {mint: {"price_usd": float, "price_sol": float}} """
+        if not self.session or not self.positions:
+            return {}
+
+        prices = {}
+        mints = list(self.positions.keys())
+
+        # DexScreener supports comma-separated tokens (max 30 per call)
+        for i in range(0, len(mints), 30):
+            batch = mints[i:i + 30]
+            batch_str = ",".join(batch)
+            try:
+                async with self.session.get(
+                    f"{DEXSCREENER_TOKENS}/{batch_str}",
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for pair in (data.get("pairs") or []):
+                            mint = pair.get("baseToken", {}).get("address", "")
+                            if mint and mint in self.positions:
+                                price_usd = float(pair.get("priceUsd", 0) or 0)
+                                price_native = float(pair.get("priceNative", 0) or 0)
+                                prices[mint] = {
+                                    "price_usd": price_usd,
+                                    "price_sol": price_native,
+                                }
+            except Exception as e:
+                logger.debug(f"Live price fetch error: {e}")
+
+        return prices
+
+    async def status(self) -> Dict:
         win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
+
+        # v4.1: Fetch live prices for PnL calculation
+        live_prices = await self._fetch_live_prices()
+
+        # Build positions dict with live PnL
+        positions_data = {}
+        total_unrealized_pnl = 0.0
+        for addr, p in self.positions.items():
+            pos_data = {
+                "symbol": p.symbol, "entry_price": p.entry_price,
+                "sol_spent": p.amount_sol_spent, "source": p.source,
+                "hold_minutes": round((time.time() - p.entry_time) / 60, 1),
+                "entry_velocity": round(p.entry_velocity, 1),
+                "peak_velocity": round(p.peak_velocity, 1),
+                "current_velocity": round(self.pump_monitor.get_buy_velocity(addr), 1) if self.pump_monitor else 0,
+                "on_curve": p.on_bonding_curve,
+                "current_price_usd": 0,
+                "unrealized_pnl_sol": 0,
+                "unrealized_pnl_pct": 0,
+            }
+
+            # Calculate live PnL if we have price data
+            if addr in live_prices:
+                price_sol = live_prices[addr].get("price_sol", 0)
+                price_usd = live_prices[addr].get("price_usd", 0)
+                pos_data["current_price_usd"] = price_usd
+
+                if price_sol > 0 and p.amount_tokens > 0:
+                    current_value_sol = p.amount_tokens * price_sol
+                    unrealized = current_value_sol - p.amount_sol_spent
+                    pnl_pct = ((current_value_sol / p.amount_sol_spent) - 1) * 100 if p.amount_sol_spent > 0 else 0
+                    pos_data["unrealized_pnl_sol"] = round(unrealized, 4)
+                    pos_data["unrealized_pnl_pct"] = round(pnl_pct, 1)
+                    total_unrealized_pnl += unrealized
+
+            positions_data[addr] = pos_data
+
         return {
             "running": self.running,
             "wallet": self.pubkey,
             "total_pnl_sol": round(self.total_pnl_sol, 4),
+            "total_invested_sol": round(self.total_invested_sol, 4),
+            "total_lost_sol": round(self.total_lost_sol, 4),
+            "total_unrealized_pnl_sol": round(total_unrealized_pnl, 4),
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "win_rate": round(win_rate, 1),
             "open_positions": len(self.positions),
-            "positions": {
-                addr: {
-                    "symbol": p.symbol, "entry_price": p.entry_price,
-                    "sol_spent": p.amount_sol_spent, "source": p.source,
-                    "hold_minutes": round((time.time() - p.entry_time) / 60, 1),
-                    "entry_velocity": round(p.entry_velocity, 1),
-                    "peak_velocity": round(p.peak_velocity, 1),
-                    "current_velocity": round(self.pump_monitor.get_buy_velocity(addr), 1) if self.pump_monitor else 0,
-                }
-                for addr, p in self.positions.items()
-            },
+            "positions": positions_data,
             "recent_trades": [
                 {"action": t.action, "symbol": t.symbol, "sol": t.amount_sol,
-                 "reason": t.reason, "time": datetime.fromtimestamp(t.timestamp).isoformat()}
+                 "pnl_sol": t.pnl_sol, "reason": t.reason,
+                 "time": datetime.fromtimestamp(t.timestamp).isoformat()}
                 for t in self.trades[-10:]
             ],
             "scan_count": self._scan_count,
@@ -4074,6 +7668,7 @@ class DegenTrader:
                 "x_signals_active": len(self.x_sentinel.trending_tokens) if self.x_sentinel else 0,
                 "learned_patterns": len(self.trading_memory.get_historical_patterns()) if self.trading_memory else 0,
                 "fast_rpc": bool(self.config.fast_rpc_url and self.config.fast_rpc_url != self.config.rpc_url),
+                "helius_staked": bool(self.config.helius_rpc_url),
                 "sniper_buys": len(self._sniper_bought),
                 "cabal_follow": self.config.use_cabal_follow,
                 "cabal_follow_max_fdv": self.config.cabal_follow_max_fdv,
@@ -4084,10 +7679,15 @@ class DegenTrader:
                 "platform_counts": self.pump_monitor.platform_counts if self.pump_monitor else {},
                 "bundles_detected": len(self.pump_monitor._bundle_detected) if self.pump_monitor else 0,
                 "reentry_watchlist": len(self._reentry_watchlist),
+                "holder_watcher": self.holder_watcher.get_status() if self.holder_watcher else {},
+                "adaptive_learner": self.adaptive_learner.get_status() if self.adaptive_learner else {},
+                "burn_monitor": self.burn_monitor.get_status() if self.burn_monitor else {},
+                "whale_hunter": self.whale_hunter.get_status() if self.whale_hunter else {},
             },
             "sniper_feed": self.pump_monitor.get_sniper_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
             "cabal_feed": self.pump_monitor.get_cabal_feed(max_age_seconds=self.config.max_age_minutes * 60) if self.pump_monitor else [],
             "scan_feed": self._get_scan_feed() if self.pump_monitor else [],
+            "whale_feed": self.whale_hunter.get_whale_feed() if self.whale_hunter else [],
             "prediction_feed": self.wallet_predictor.get_prediction_feed() if self.wallet_predictor else [],
             "prediction_stats": {
                 "hits": self.wallet_predictor.prediction_hits if self.wallet_predictor else 0,
@@ -4110,7 +7710,19 @@ class DegenTrader:
                 "instant_snipe": self.config.instant_snipe,
                 "instant_snipe_min_dev_sol": self.config.instant_snipe_min_dev_sol,
                 "instant_snipe_max_sol": self.config.instant_snipe_max_sol,
+                "quick_take_profit": self.config.quick_take_profit,
+                "quick_take_profit_2": self.config.quick_take_profit_2,
+                "max_hold_minutes": self.config.max_hold_minutes,
+                "dynamic_adapt": self.config.dynamic_adapt,
+                "adapt_score_offset": self._adapt_score_offset,
+                "effective_min_score": max(25, self.config.min_score + self._adapt_score_offset),
+                "bonding_curve_min_velocity": self.config.bonding_curve_min_velocity,
+                "bonding_curve_min_buys": self.config.bonding_curve_min_buys,
+                "min_score": self.config.min_score,
+                "stop_loss_default": 0.7,
             },
+            "learner": self.adaptive_learner.get_status() if self.adaptive_learner else {},
+            "learner_summary": self.adaptive_learner.get_learnings_summary() if self.adaptive_learner else "disabled",
         }
 
 
@@ -4120,40 +7732,31 @@ class DegenTrader:
 async def start_trader(
     rpc_url: str = DEFAULT_RPC,
     wallet_name: str = "degen_trader",
-    max_position_sol: float = 0.1,
-    max_positions: int = 10,
-    scan_interval: int = 8,
-    use_swarm: bool = True,
-    use_quantum: bool = True,
-    use_pumpfun: bool = True,
-    use_copy_trading: bool = True,
-    use_x_sentinel: bool = True,
-    use_trading_memory: bool = True,
-    use_bonding_curve: bool = True,
-    sniper_mode: bool = True,
-    bonding_curve_max_sol: float = 0.08,
+    **overrides,
 ):
-    config = TraderConfig(
-        rpc_url=rpc_url,
-        max_position_sol=max_position_sol,
-        max_positions=max_positions,
-        scan_interval=scan_interval,
-        use_swarm=use_swarm,
-        use_quantum=use_quantum,
-        use_pumpfun=use_pumpfun,
-        use_copy_trading=use_copy_trading,
-        use_x_sentinel=use_x_sentinel,
-        use_trading_memory=use_trading_memory,
-        use_bonding_curve=use_bonding_curve,
-        sniper_mode=sniper_mode,
-        bonding_curve_max_sol=bonding_curve_max_sol,
-    )
+    # v4.0: Use TraderConfig class defaults (tightened in v4.0)
+    # Any kwargs passed override specific fields
+    config_kwargs = {"rpc_url": rpc_url}
+    config_kwargs.update(overrides)
+    config = TraderConfig(**config_kwargs)
     trader = DegenTrader(config=config, wallet_name=wallet_name)
     await trader.run()
     return trader
 
 
 if __name__ == "__main__":
+    # Auth lock: refuse direct standalone execution
+    print("\n" + "=" * 60)
+    print("FARNSWORTH DEGEN TRADER - AUTH LOCK")
+    print("=" * 60)
+    print("This trading engine is locked to the Farnsworth AI Swarm.")
+    print("It cannot be run standalone.")
+    print("\nStart via the Farnsworth server:")
+    print("  python -m farnsworth.web.server")
+    print("  Then POST to /api/trading/start")
+    print("=" * 60 + "\n")
+
+    # Only allow --create-wallet as standalone
     import argparse
 
     logging.basicConfig(
@@ -4161,7 +7764,7 @@ if __name__ == "__main__":
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    parser = argparse.ArgumentParser(description="Farnsworth Degen Trader v3.5 - Bonding Curve Sniper")
+    parser = argparse.ArgumentParser(description="Farnsworth Degen Trader v3.8 - LOCKED TO SWARM")
     parser.add_argument("--rpc", default=os.environ.get("SOLANA_RPC_URL", DEFAULT_RPC))
     parser.add_argument("--wallet", default="degen_trader")
     parser.add_argument("--max-sol", type=float, default=0.1, help="Max SOL per standard trade")
@@ -4176,6 +7779,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-memory", action="store_true")
     parser.add_argument("--no-sniper", action="store_true", help="Disable bonding curve sniper mode")
     parser.add_argument("--no-bonding-curve", action="store_true", help="Disable direct bonding curve trading")
+    parser.add_argument("--live", action="store_true", help="Disable paper trading and use REAL SOL (requires explicit opt-in)")
+    parser.add_argument("--paper-balance", type=float, default=1.0, help="Starting virtual SOL for paper trading (default: 1.0)")
     parser.add_argument("--create-wallet", action="store_true")
     args = parser.parse_args()
 
@@ -4184,19 +7789,13 @@ if __name__ == "__main__":
         print(f"\nWallet created!")
         print(f"  Address: {pubkey}")
         print(f"  Keypair: {path}")
-        print(f"\nFund this address, then start trading:")
-        print(f"  python -m farnsworth.trading.degen_trader --max-sol 0.1")
+        print(f"\nStart via Farnsworth server, then POST to /api/trading/start")
     else:
-        asyncio.run(start_trader(
-            rpc_url=args.rpc, wallet_name=args.wallet,
-            max_position_sol=args.max_sol, max_positions=args.max_positions,
-            scan_interval=args.interval,
-            use_swarm=not args.no_swarm, use_quantum=not args.no_quantum,
-            use_pumpfun=not args.no_pumpfun,
-            use_copy_trading=not args.no_copy_trading,
-            use_x_sentinel=not args.no_x_sentinel,
-            use_trading_memory=not args.no_memory,
-            use_bonding_curve=not args.no_bonding_curve,
-            sniper_mode=not args.no_sniper,
-            bonding_curve_max_sol=args.sniper_sol,
-        ))
+        # Auth lock: standalone trading blocked
+        print("\nERROR: Direct trading execution is disabled.")
+        print("The Degen Trader requires the full Farnsworth swarm to operate.")
+        print("\nTo trade, start the Farnsworth server:")
+        print("  python -m farnsworth.web.server")
+        print("  curl -X POST http://localhost:8080/api/trading/start")
+        import sys
+        sys.exit(1)

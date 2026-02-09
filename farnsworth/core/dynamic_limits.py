@@ -659,6 +659,36 @@ def get_all_limits() -> Dict[str, Any]:
     }
 
 
+def get_budget_for_tier(tier: str) -> Dict[str, int]:
+    """
+    Get token budget allocation by tier for orchestrator integration.
+
+    Args:
+        tier: One of "local", "economy", "standard", "premium"
+
+    Returns:
+        Dict with default_max_tokens, context_window, and count of models in tier.
+    """
+    config = _get_config()
+    tier_models = {
+        mid: ml for mid, ml in config.models.items()
+        if ml.tier.value == tier
+    }
+    if not tier_models:
+        return {"default_max_tokens": 2000, "context_window": 4096, "model_count": 0}
+
+    total_max_tokens = sum(ml.default_max_tokens for ml in tier_models.values())
+    total_context = sum(ml.context_window for ml in tier_models.values())
+    count = len(tier_models)
+
+    return {
+        "default_max_tokens": total_max_tokens // count if count else 2000,
+        "context_window": total_context // count if count else 4096,
+        "model_count": count,
+        "models": list(tier_models.keys()),
+    }
+
+
 def reset_to_defaults():
     """Reset all limits to default values."""
     global _config

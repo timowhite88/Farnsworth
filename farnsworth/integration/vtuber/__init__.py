@@ -67,10 +67,18 @@ from .vtuber_core import (
     VTuberState,
     start_vtuber_stream,
 )
+from .local_animation import (
+    LocalAnimationBackend,
+    LocalAnimationConfig,
+)
 from .neural_avatar import (
     NeuralAvatarConfig,
     NeuralAvatarManager,
     MuseTalkAvatar,
+)
+from .musetalk_backend import (
+    MuseTalkBackend,
+    MuseTalkConfig,
 )
 from .server_integration import (
     router as vtuber_router,
@@ -119,10 +127,18 @@ __all__ = [
     'ChatMessage',
     'SimulatedChatReader',
 
+    # Local Animation
+    'LocalAnimationBackend',
+    'LocalAnimationConfig',
+
     # Neural Avatar
     'NeuralAvatarConfig',
     'NeuralAvatarManager',
     'MuseTalkAvatar',
+
+    # MuseTalk Backend
+    'MuseTalkBackend',
+    'MuseTalkConfig',
 
     # Server Integration
     'vtuber_router',

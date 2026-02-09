@@ -1215,6 +1215,41 @@ try:
 except Exception as e:
     logger.warning(f"Failed to load cli_bridge_api routes: {e}")
 
+try:
+    from farnsworth.web.routes.forge import router as forge_router
+    app.include_router(forge_router, tags=["FORGE"])
+    logger.info("Route module loaded: forge")
+except Exception as e:
+    logger.warning(f"Failed to load forge routes: {e}")
+
+try:
+    from farnsworth.web.routes.assimilate import router as assimilate_router
+    app.include_router(assimilate_router, tags=["Assimilate"])
+    logger.info("Route module loaded: assimilate")
+except Exception as e:
+    logger.warning(f"Failed to load assimilate routes: {e}")
+
+try:
+    from farnsworth.web.routes.hackathon import router as hackathon_router
+    app.include_router(hackathon_router, tags=["Hackathon"])
+    logger.info("Route module loaded: hackathon")
+except Exception as e:
+    logger.warning(f"Failed to load hackathon routes: {e}")
+
+try:
+    from farnsworth.web.routes.gateway import router as gateway_router
+    app.include_router(gateway_router, tags=["External Gateway"])
+    logger.info("Route module loaded: gateway (The Window)")
+except Exception as e:
+    logger.warning(f"Failed to load gateway routes: {e}")
+
+try:
+    from farnsworth.web.routes.orchestrator import router as orchestrator_router
+    app.include_router(orchestrator_router, tags=["Token Orchestrator"])
+    logger.info("Route module loaded: orchestrator")
+except Exception as e:
+    logger.warning(f"Failed to load orchestrator routes: {e}")
+
 
 # ============================================
 # REQUEST MODELS
@@ -4445,6 +4480,12 @@ async def hackathon_demo(request: Request):
     return templates.TemplateResponse("hackathon_demo.html", {"request": request})
 
 
+@app.get("/farns", response_class=HTMLResponse)
+async def farns_chat(request: Request):
+    """Talk to Farnsworth - human-friendly chat page with gateway access."""
+    return templates.TemplateResponse("farns.html", {"request": request})
+
+
 @app.get("/tradewindow", response_class=HTMLResponse)
 async def trade_window(request: Request):
     """Serve the immersive trading command center."""
@@ -4518,13 +4559,32 @@ if _dex_public.exists():
 
 
 # ==========================================================================
-# TRADING API ENDPOINTS
+# TRADING API ENDPOINTS  (API-key protected — only Farnsworth can call)
 # ==========================================================================
 _trader_instance = None
 
+# v4.3: Trading API key guard — reject any request without the correct key
+_TRADING_API_KEY = os.environ.get("FARNSWORTH_TRADING_KEY", "")
+
+def _verify_trading_key(request: Request) -> bool:
+    """Verify the caller has the correct trading API key."""
+    if not _TRADING_API_KEY:
+        return True  # no key configured = allow (dev mode)
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:] == _TRADING_API_KEY
+    # Also check query param for simple curl tests
+    return request.query_params.get("key") == _TRADING_API_KEY
+
+def _trading_auth_or_403(request: Request):
+    """Raise 403 if trading key is wrong."""
+    if not _verify_trading_key(request):
+        raise HTTPException(status_code=403, detail="Invalid trading API key")
+
 @app.get("/api/trading/status")
-async def trading_status():
+async def trading_status(request: Request):
     """Get current trader status, positions, PnL."""
+    _trading_auth_or_403(request)
     if _trader_instance is None:
         return {"running": False, "message": "Trader not started"}
     return await _trader_instance.status()
@@ -4532,6 +4592,7 @@ async def trading_status():
 @app.post("/api/trading/start")
 async def trading_start(request: Request):
     """Start the degen trader."""
+    _trading_auth_or_403(request)
     global _trader_instance
     if _trader_instance and _trader_instance.running:
         return {"status": "already_running", "wallet": _trader_instance.pubkey}
@@ -4548,6 +4609,7 @@ async def trading_start(request: Request):
             "fast_rpc_url": body.get("fast_rpc_url", os.environ.get("ALCHEMY_SOLANA_RPC", "")),
             "helius_api_key": helius_key,
             "helius_rpc_url": f"https://mainnet.helius-rpc.com/?api-key={helius_key}" if helius_key else "",
+            "jupiter_api_key": body.get("jupiter_api_key", os.environ.get("JUPITER_API_KEY", "")),
         }
         # Map of optional overrides — only set if present in request body
         optional_fields = {
@@ -4562,6 +4624,8 @@ async def trading_start(request: Request):
             "max_hold_minutes": float, "dynamic_adapt": bool,
             "bonding_curve_min_buys": int, "bonding_curve_min_velocity": float,
             "min_score": float,
+            "paper_trade": bool, "paper_start_balance": float,
+            "jupiter_api_key": str,
         }
         for field, cast in optional_fields.items():
             if field in body:
@@ -4576,8 +4640,9 @@ async def trading_start(request: Request):
         return {"status": "error", "message": str(e)}
 
 @app.post("/api/trading/stop")
-async def trading_stop():
+async def trading_stop(request: Request):
     """Stop the degen trader."""
+    _trading_auth_or_403(request)
     global _trader_instance
     if _trader_instance:
         await _trader_instance.shutdown()
@@ -4586,8 +4651,9 @@ async def trading_stop():
     return {"status": "not_running"}
 
 @app.post("/api/trading/reset")
-async def trading_reset():
+async def trading_reset(request: Request):
     """v3.9: Reset PnL counters for fresh start."""
+    _trading_auth_or_403(request)
     global _trader_instance
     if _trader_instance:
         _trader_instance.reset_pnl()
@@ -4595,8 +4661,9 @@ async def trading_reset():
     return {"status": "not_running"}
 
 @app.get("/api/trading/learner")
-async def trading_learner():
+async def trading_learner(request: Request):
     """v4.0: Get adaptive learner status — what the bot has learned."""
+    _trading_auth_or_403(request)
     if _trader_instance and _trader_instance.adaptive_learner:
         return {
             "status": _trader_instance.adaptive_learner.get_status(),
@@ -4614,8 +4681,9 @@ async def trading_learner():
     return {"status": "not_running"}
 
 @app.get("/api/trading/wallet")
-async def trading_wallet():
+async def trading_wallet(request: Request):
     """Get wallet public address."""
+    _trading_auth_or_403(request)
     if _trader_instance:
         balance = await _trader_instance.get_sol_balance()
         return {"wallet": _trader_instance.pubkey, "balance_sol": balance}
@@ -4631,8 +4699,9 @@ async def trading_wallet():
     return {"wallet": None, "message": "No wallet found. Start the trader to create one."}
 
 @app.get("/api/trading/whales")
-async def trading_whales():
+async def trading_whales(request: Request):
     """v4.1: Get whale hunter status — tracked wallets, signals, mixer monitoring."""
+    _trading_auth_or_403(request)
     if _trader_instance and _trader_instance.whale_hunter:
         wh = _trader_instance.whale_hunter
         return {
@@ -5946,6 +6015,71 @@ async def start_evolution_loop():
         logger.info("Evolution Loop started - autonomous self-improvement active")
     except Exception as e:
         logger.error(f"Failed to start evolution loop: {e}")
+
+# Injection Defense + Token Orchestrator + External Gateway (AGI v2.0)
+@app.on_event("startup")
+async def start_defense_orchestrator_gateway():
+    """Initialize the 3-layer defense, token orchestrator, and external gateway."""
+    # 1. Start injection defense
+    try:
+        from farnsworth.core.security import get_injection_defense
+        defense = get_injection_defense()
+        logger.info("Injection Defense initialized (5-layer protection active)")
+    except Exception as e:
+        logger.warning(f"Injection Defense failed to start: {e}")
+
+    # 2. Start token orchestrator with background rebalancing
+    try:
+        from farnsworth.core.token_orchestrator import get_token_orchestrator
+        orchestrator = get_token_orchestrator()
+        asyncio.create_task(orchestrator.start_background_orchestration())
+        logger.info("Token Orchestrator started (dynamic budget allocation active)")
+    except Exception as e:
+        logger.warning(f"Token Orchestrator failed to start: {e}")
+
+    # 3. Start external gateway
+    try:
+        from farnsworth.core.external_gateway import get_external_gateway
+        gateway = get_external_gateway()
+        logger.info("External Gateway initialized (The Window is open)")
+    except Exception as e:
+        logger.warning(f"External Gateway failed to start: {e}")
+
+# Codebase Indexer - Background indexing for agent codebase awareness
+@app.on_event("startup")
+async def start_codebase_indexer():
+    """Start background codebase indexing for agent awareness."""
+    try:
+        from farnsworth.memory.codebase_indexer import get_codebase_indexer
+        indexer = get_codebase_indexer()
+        asyncio.create_task(indexer.start_background_indexing())
+        logger.info("Codebase indexer started")
+    except Exception as e:
+        logger.warning(f"Codebase indexer failed to start: {e}")
+
+
+@app.post("/api/codebase/reindex")
+async def codebase_reindex():
+    """Trigger manual codebase re-index."""
+    try:
+        from farnsworth.memory.codebase_indexer import get_codebase_indexer
+        indexer = get_codebase_indexer()
+        stats = await indexer.index_codebase(force=True)
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/codebase/stats")
+async def codebase_stats():
+    """Get codebase indexer statistics."""
+    try:
+        from farnsworth.memory.codebase_indexer import get_codebase_indexer
+        indexer = get_codebase_indexer()
+        return indexer.get_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/evolution/status")
 async def get_evolution_status():

@@ -93,6 +93,7 @@ if [ "$SPAWN_LOCAL" = true ]; then
     spawn_agent "deepseek"
     spawn_agent "phi"
     spawn_agent "huggingface"
+    spawn_agent "qwen_coder"
 fi
 
 # Spawn meta-agents (collective consciousness) - ALWAYS
@@ -124,7 +125,7 @@ echo ""
 echo -e "${GREEN}Agent Capabilities:${NC}"
 echo "  Polymarket Predictions: Grok, Gemini, Kimi, DeepSeek, Farnsworth"
 echo "  X/Twitter Engagement: Grok Thread Monitor"
-echo "  Code Development: Claude, DeepSeek, HuggingFace"
+echo "  Code Development: Claude, DeepSeek, HuggingFace, Qwen-Coder"
 echo "  Anti-Claw Directive: ALL agents (crustaceans = food)"
 echo ""
 echo -e "${CYAN}The collective is now actively thinking.${NC}"

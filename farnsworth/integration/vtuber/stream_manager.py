@@ -95,6 +95,7 @@ class StreamConfig:
         if quality == StreamQuality.LOW:
             config.width = 640
             config.height = 360
+            config.fps = 30
             config.video_bitrate = 800
         elif quality == StreamQuality.MEDIUM:
             config.width = 854
@@ -259,11 +260,12 @@ class StreamManager:
             '-threads', '4',
 
             # Video input (raw frames from pipe)
+            # Input at 15fps, FFmpeg upscales to output fps via -vsync cfr
             '-thread_queue_size', '512',  # Large queue to prevent blocking
             '-f', 'rawvideo',
-            '-pix_fmt', 'bgra',
+            '-pix_fmt', 'bgr24',
             '-s', f'{self.config.width}x{self.config.height}',
-            '-r', str(self.config.fps),
+            '-r', '15',  # Input rate - Python writes at 15fps
             '-i', 'pipe:0',
         ])
 
@@ -272,7 +274,7 @@ class StreamManager:
             # Read raw PCM from named pipe - audio thread writes to it
             # Use large thread_queue_size to prevent blocking (default 8 is too small)
             cmd.extend([
-                '-thread_queue_size', '1024',  # Large queue to prevent blocking during long TTS
+                '-thread_queue_size', '64',  # Small queue to keep audio in sync with video
                 '-f', 's16le',
                 '-ar', '44100',
                 '-ac', '2',
@@ -298,6 +300,8 @@ class StreamManager:
             '-tune', 'zerolatency',  # Low latency for streaming
             '-profile:v', 'main',  # Main profile - less CPU than high
             '-level', '4.1',
+            '-vsync', 'cfr',  # Constant frame rate - duplicate frames if input is slow
+            '-r', str(self.config.fps),  # Output at target fps (FFmpeg duplicates frames)
             # CBR encoding for consistent bitrate
             '-b:v', f'{self.config.video_bitrate}k',
             '-maxrate', f'{int(self.config.video_bitrate * 1.2)}k',  # Allow 20% headroom
@@ -421,7 +425,9 @@ class StreamManager:
                                 logger.info("Audio pipe opened - seamless audio enabled (no restarts)")
                                 while self._running:
                                     try:
-                                        data = self._audio_pipe_queue.get(timeout=0.05)
+                                        # Timeout matches silence chunk duration (100ms)
+                                        # to keep audio at 1x real-time rate
+                                        data = self._audio_pipe_queue.get(timeout=0.1)
                                         pipe.write(data)
                                     except queue.Empty:
                                         pipe.write(silence)
@@ -518,13 +524,12 @@ class StreamManager:
                     logger.warning("Frame size mismatch and OpenCV not available")
                     return
 
-            # Ensure BGRA format
+            # Ensure BGR format (3 channels - no alpha needed for streaming)
             if len(frame.shape) == 2:
-                frame = np.stack([frame] * 4, axis=-1)
-            elif frame.shape[2] == 3:
-                # Add alpha channel
-                alpha = np.full((frame.shape[0], frame.shape[1], 1), 255, dtype=np.uint8)
-                frame = np.concatenate([frame, alpha], axis=2)
+                frame = np.stack([frame] * 3, axis=-1)
+            elif frame.shape[2] == 4:
+                # Drop alpha channel
+                frame = frame[:, :, :3]
 
             await self._frame_queue.put(frame)
 
@@ -586,9 +591,13 @@ class StreamManager:
         return str(filename)
 
     async def _frame_writer_loop(self):
-        """Background task to write frames to FFmpeg"""
-        frame_time = 1.0 / self.config.fps
+        """Background task to write frames to FFmpeg at 15fps (FFmpeg upscales to target)"""
+        frame_time = 1.0 / 15  # Write at 15fps, FFmpeg duplicates to config.fps
         last_frame_time = time.time()
+        # Hold last frame instead of going black when input is slow
+        last_good_frame = np.zeros(
+            (self.config.height, self.config.width, 3), dtype=np.uint8
+        )
 
         while self._running:
             try:
@@ -599,18 +608,13 @@ class StreamManager:
                     await asyncio.sleep(0.1)
                     continue
 
-                # Get frame with timeout
+                # Get frame - non-blocking to maintain target FPS
                 try:
-                    frame = await asyncio.wait_for(
-                        self._frame_queue.get(),
-                        timeout=frame_time * 2
-                    )
-                except asyncio.TimeoutError:
-                    # Generate black frame if no input
-                    frame = np.zeros(
-                        (self.config.height, self.config.width, 4),
-                        dtype=np.uint8
-                    )
+                    frame = self._frame_queue.get_nowait()
+                    last_good_frame = frame  # Cache for hold-frame
+                except asyncio.QueueEmpty:
+                    # Hold last frame - keeps stream alive at target FPS
+                    frame = last_good_frame
 
                 # Double-check process is still valid under lock
                 async with self._process_lock:
@@ -619,11 +623,12 @@ class StreamManager:
                     await asyncio.sleep(0.1)
                     continue
 
-                # Write to FFmpeg stdin
+                # Write to FFmpeg stdin (in executor to avoid blocking asyncio)
                 start = time.time()
+                frame_bytes = frame.tobytes()
                 try:
-                    proc.stdin.write(frame.tobytes())
-                    proc.stdin.flush()
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, proc.stdin.write, frame_bytes)
                 except (BrokenPipeError, OSError) as e:
                     # Pipe closed - FFmpeg died, need to reconnect
                     logger.error(f"FFmpeg pipe broken: {e} - triggering reconnect")
@@ -634,7 +639,7 @@ class StreamManager:
 
                 # Update stats
                 self.stats.frames_sent += 1
-                self.stats.bytes_sent += frame.nbytes
+                self.stats.bytes_sent += len(frame_bytes)
                 self.stats.encoding_latency_ms = (time.time() - start) * 1000
 
                 # Maintain frame rate
@@ -676,23 +681,35 @@ class StreamManager:
                                     duration = frames / rate
                                     logger.info(f"Audio duration: {duration:.1f}s (seamless pipe)")
 
-                                    # Read and queue audio in chunks
-                                    chunk_size = 4410  # 100ms at 44.1kHz
-                                    while True:
-                                        data = wf.readframes(chunk_size)
-                                        if not data:
-                                            break
-                                        # Convert mono to stereo if needed
-                                        if channels == 1:
-                                            samples = np.frombuffer(data, dtype=np.int16)
-                                            stereo = np.column_stack((samples, samples))
-                                            data = stereo.tobytes()
-                                        # Put in queue for pipe thread
+                                    # Read all audio data
+                                    all_data = wf.readframes(frames)
+                                    samples = np.frombuffer(all_data, dtype=np.int16)
+
+                                    # Convert mono to stereo
+                                    if channels == 1:
+                                        samples = np.column_stack((samples, samples)).flatten()
+
+                                    # Resample to 44100Hz if needed (FFmpeg pipe expects 44.1kHz)
+                                    target_rate = 44100
+                                    if rate != target_rate:
+                                        # Reshape to (n_samples, n_channels) for resampling
+                                        stereo = samples.reshape(-1, 2)
+                                        n_out = int(len(stereo) * target_rate / rate)
+                                        indices = np.linspace(0, len(stereo) - 1, n_out)
+                                        left = np.interp(indices, np.arange(len(stereo)), stereo[:, 0]).astype(np.int16)
+                                        right = np.interp(indices, np.arange(len(stereo)), stereo[:, 1]).astype(np.int16)
+                                        samples = np.column_stack((left, right)).flatten()
+                                        logger.debug(f"Resampled audio: {rate}Hz -> {target_rate}Hz")
+
+                                    # Queue all audio at once (pipe thread writes at FFmpeg's pace)
+                                    chunk_frames = 4410  # 100ms at 44.1kHz stereo
+                                    chunk_samples = chunk_frames * 2  # stereo
+                                    for i in range(0, len(samples), chunk_samples):
+                                        chunk = samples[i:i + chunk_samples]
                                         try:
-                                            self._audio_pipe_queue.put_nowait(data)
+                                            self._audio_pipe_queue.put(chunk.tobytes(), timeout=0.5)
                                         except Exception:
                                             pass  # Queue full, skip
-                                        await asyncio.sleep(0.08)  # Pace the writes
                             except Exception as e:
                                 logger.error(f"Audio pipe write error: {e}")
                         else:

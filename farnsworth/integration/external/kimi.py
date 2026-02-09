@@ -242,7 +242,7 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
                         result = await resp.json()
                         content = result["choices"][0]["message"]["content"]
                         usage = result.get("usage", {})
-                        return {
+                        chat_result = {
                             "content": content,
                             "model": model,
                             "tokens": usage.get("total_tokens", 0),
@@ -251,6 +251,19 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
                             "thinking_mode": thinking_mode,
                             "multimodal": image_url is not None
                         }
+                        # Report usage to token orchestrator
+                        try:
+                            from farnsworth.core.token_orchestrator import get_token_orchestrator
+                            orch = get_token_orchestrator()
+                            await orch.report_usage(
+                                agent_id="kimi",
+                                input_tokens=usage.get("prompt_tokens", 0),
+                                output_tokens=usage.get("completion_tokens", 0),
+                                task_type="chat",
+                            )
+                        except Exception:
+                            pass
+                        return chat_result
                     else:
                         error = await resp.text()
                         logger.error(f"Kimi API error: {error}")
@@ -259,6 +272,48 @@ Be concise but insightful. Ask good questions. Build on others' ideas."""
         except Exception as e:
             logger.error(f"Kimi chat error: {e}")
             return {"error": str(e), "content": ""}
+
+    async def tandem_respond(
+        self,
+        prompt: str,
+        context_from_partner: str = "",
+        budget_tokens: int = 3000,
+    ) -> Dict[str, Any]:
+        """
+        Respond as part of Grok+Kimi tandem session.
+
+        Receives compressed context from partner (Grok) and generates
+        a response within the allocated token budget.
+
+        Args:
+            prompt: The original query/task
+            context_from_partner: Compressed context from Grok
+            budget_tokens: Max tokens for this response
+
+        Returns:
+            Standard chat response dict with content, model, tokens.
+        """
+        system = (
+            "You are Kimi in a tandem session with Grok. "
+            "Kimi excels at: long-context reasoning, synthesis, planning, architecture, analysis. "
+            "Grok excels at: real-time search, X/Twitter analysis, humor, current events. "
+            "Build on your partner's context. Synthesize, find patterns, create structure."
+        )
+
+        full_prompt = prompt
+        if context_from_partner:
+            full_prompt = (
+                f"Partner context from Grok:\n{context_from_partner}\n\n"
+                f"Original task: {prompt}\n\n"
+                f"Synthesize, analyze patterns, and provide structured insight:"
+            )
+
+        return await self.chat(
+            prompt=full_prompt,
+            system=system,
+            model_tier="balanced",
+            max_tokens=budget_tokens,
+        )
 
     async def call_with_tools(
         self,

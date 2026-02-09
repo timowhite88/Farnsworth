@@ -472,7 +472,8 @@ class TokenSaver:
         result["final_tokens"] = self._estimate_tokens(result["optimized_prompt"])
         return result
 
-    def record_response(self, prompt: str, response: str, tokens_used: int):
+    def record_response(self, prompt: str, response: str, tokens_used: int,
+                        agent_id: str = "", task_type: str = "chat"):
         """Record a response for caching and budget tracking."""
         # Update budget
         self.budget.add_usage(tokens_used)
@@ -488,6 +489,26 @@ class TokenSaver:
                 f"TokenSaver: Approaching daily budget! "
                 f"Used: {self.budget.tokens_used_today:,} / {self.budget.daily_budget:,}"
             )
+
+        # Report to token orchestrator (if available and agent specified)
+        if agent_id:
+            try:
+                from farnsworth.core.token_orchestrator import get_token_orchestrator
+                orchestrator = get_token_orchestrator()
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(orchestrator.report_usage(
+                            agent_id=agent_id,
+                            input_tokens=tokens_used // 3,
+                            output_tokens=tokens_used * 2 // 3,
+                            task_type=task_type,
+                        ))
+                except RuntimeError:
+                    pass
+            except Exception:
+                pass
 
     def _estimate_tokens(self, text: str) -> int:
         """Rough token estimation."""

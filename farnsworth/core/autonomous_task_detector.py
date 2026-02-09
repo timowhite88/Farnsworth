@@ -32,32 +32,24 @@ PRIORITY_IDEA_SOURCES = ["Farnsworth", "Swarm-Mind", "Claude", "Grok"]
 # Coding-capable agents that can implement ideas
 CODING_AGENTS = ["Claude", "Kimi", "Grok", "Gemini", "DeepSeek"]
 
-# Innovation patterns - more aggressive detection for breakthrough ideas
+# Innovation patterns — bold ideas welcome, but must have technical specifics
 INNOVATION_PATTERNS = [
-    # Breakthrough concepts
-    (r"what if (we|the system|the swarm)", 0.75),
-    (r"imagine (if|a system|we could)", 0.7),
-    (r"(revolutionary|breakthrough|innovative|novel) (approach|idea|concept|way)", 0.9),
-    (r"(emergent|consciousness|sentient|self-aware)", 0.85),
-    (r"(paradigm shift|game changer|next level)", 0.8),
+    # Novel architectures with concrete terms
+    (r"(adversarial|speculative|competitive) (debate|execution|routing|inference)", 0.8),
+    (r"(self-improving|self-modifying|adaptive|evolutionary) (prompt|routing|weight|model|algorithm)", 0.8),
+    (r"(prediction|predictor|forecast) (engine|system|model|pipeline)", 0.75),
+    (r"(real-time|live) (analysis|tracking|monitoring|detection)", 0.7),
+    (r"(cross-model|inter-agent|swarm) (memory|learning|synthesis|fusion)", 0.8),
+    (r"(neural|learned|trained) (routing|selection|ranking|scoring)", 0.8),
 
-    # Technical innovations
-    (r"(neural|quantum|distributed|decentralized) (network|system|architecture)", 0.8),
-    (r"(self-improving|self-modifying|recursive) (code|algorithm|system)", 0.9),
-    (r"(swarm intelligence|collective|hive mind)", 0.85),
-    (r"(memory|learning|evolution) (engine|system|architecture)", 0.8),
+    # Novel trading/DeFi concepts
+    (r"(mempool|mev|frontrun|sandwich|arbitrage) (detect|analyz|predict|protect)", 0.8),
+    (r"(slippage|liquidity|volume) (predict|model|estimat|analyz)", 0.75),
 
-    # Specific capabilities
-    (r"(autonomous|automatic) (trading|coding|learning)", 0.85),
-    (r"(real-time|live) (analysis|tracking|monitoring)", 0.7),
-    (r"(prediction|predictor|forecast) (engine|system|model)", 0.8),
-    (r"(cross-chain|multi-chain|omnichain)", 0.75),
-
-    # Direct action phrases from Farnsworth
-    (r"good news everyone", 0.6),  # Farnsworth's catchphrase often precedes ideas
-    (r"i'?ve been (thinking|working on|developing)", 0.75),
-    (r"here'?s (my|an|the) idea", 0.8),
-    (r"we could (connect|link|integrate|combine)", 0.7),
+    # Direct action with specificity
+    (r"i'?ve been (working on|developing|building|prototyping)", 0.7),
+    (r"we could (integrate|combine|fuse|merge) \w+ (?:with|and|into) \w+", 0.7),
+    (r"what if .{10,}(function|module|system|engine|pipeline|algorithm)", 0.75),
 ]
 
 # Task detection patterns (original)
@@ -156,7 +148,7 @@ class AutonomousTaskDetector:
     parallel development swarm to work on it.
     """
 
-    def __init__(self, min_confidence: float = 0.65):
+    def __init__(self, min_confidence: float = 0.75):
         self.min_confidence = min_confidence
         self.detected_tasks: List[DetectedTask] = []
         self.active_dev_swarms: Dict[str, Any] = {}
@@ -165,11 +157,16 @@ class AutonomousTaskDetector:
         self.cooldown_tasks: set = set()  # Prevent duplicate detection
         self.running = False
 
+        # Rate limiting: max tasks per hour to prevent slop flooding
+        self.max_tasks_per_hour = 4
+        self.max_active_swarms = 3
+        self._hourly_task_timestamps: List[datetime] = []
+
         # Stats
         self.total_detected = 0
         self.total_spawned = 0
 
-        logger.info("AutonomousTaskDetector initialized")
+        logger.info("AutonomousTaskDetector initialized (min_confidence=0.75, max_tasks/hr=4)")
 
     def analyze_message(self, message: Dict) -> Optional[DetectedTask]:
         """
@@ -222,13 +219,9 @@ class AutonomousTaskDetector:
                     is_innovation = True
                 matched_patterns.append(f"INNOVATION:{pattern}")
 
-        # PRIORITY BOOST: Ideas from Farnsworth and key bots get +15% confidence
+        # Small boost for priority sources — but not enough to bypass quality checks
         if bot_name in PRIORITY_IDEA_SOURCES:
-            confidence += 0.15
-            if bot_name == "Farnsworth":
-                # Extra boost for Farnsworth's ideas - he's the visionary!
-                confidence += 0.10
-                logger.debug(f"Farnsworth idea detected - applying priority boost")
+            confidence += 0.05
 
         if confidence == 0:
             return None
@@ -246,15 +239,26 @@ class AutonomousTaskDetector:
         # Clamp confidence
         confidence = max(0.0, min(1.0, confidence))
 
-        # LOWER threshold for innovations and priority sources
+        # Same threshold for everyone — quality over quantity
         effective_threshold = self.min_confidence
-        if is_innovation:
-            effective_threshold = max(0.5, self.min_confidence - 0.15)
-        if bot_name in PRIORITY_IDEA_SOURCES:
-            effective_threshold = max(0.45, effective_threshold - 0.10)
 
         # Check if meets threshold
         if confidence < effective_threshold:
+            return None
+
+        # Rate limiting: prevent slop flooding
+        now = datetime.now()
+        self._hourly_task_timestamps = [
+            t for t in self._hourly_task_timestamps
+            if (now - t).total_seconds() < 3600
+        ]
+        if len(self._hourly_task_timestamps) >= self.max_tasks_per_hour:
+            logger.debug(f"Rate limited: {len(self._hourly_task_timestamps)} tasks in last hour (max {self.max_tasks_per_hour})")
+            return None
+
+        # Don't spawn if too many active swarms already
+        if len(self.active_dev_swarms) >= self.max_active_swarms:
+            logger.debug(f"Active swarm limit reached ({self.max_active_swarms}), skipping")
             return None
 
         # Extract task description
@@ -298,6 +302,7 @@ class AutonomousTaskDetector:
 
         self.detected_tasks.append(task)
         self.total_detected += 1
+        self._hourly_task_timestamps.append(now)
 
         innovation_tag = "🚀 INNOVATION" if is_innovation else "TASK"
         logger.info(f"{innovation_tag} DETECTED [{confidence:.0%}]: {description[:60]}... (from {bot_name}, agent: {recommended_agent})")
@@ -506,10 +511,10 @@ class AutonomousTaskDetector:
     def _is_low_quality_description(self, desc: str) -> bool:
         """Check if a task description is low quality and should be rejected.
 
-        Returns True if the description looks like a conversational response
-        rather than an actionable task.
+        Returns True if the description is not a concrete, implementable engineering task.
+        This is the PRIMARY quality gate — be strict.
         """
-        if not desc or len(desc) < 15:
+        if not desc or len(desc) < 20:
             return True
 
         desc_lower = desc.lower()
@@ -525,25 +530,51 @@ class AutonomousTaskDetector:
         if any(desc_lower.startswith(start) for start in response_starts):
             return True
 
-        # Reject if it's mostly filler words and no tech/action terms
-        action_verbs = ["build", "create", "develop", "implement", "add", "make", "design", "integrate", "connect"]
-        tech_terms = ["api", "system", "engine", "network", "algorithm", "trading", "analysis", "memory", "swarm"]
+        # Require SUBSTANCE — either concrete engineering OR innovative-with-specifics
+        engineering_signals = [
+            # File/module references
+            r'farnsworth[\./]',
+            r'\.(py|js|ts|json|yaml|toml)\b',
+            r'(server|api|endpoint|route|handler)',
+            r'(module|class|function|method|decorator)',
+            # Concrete technical actions
+            r'(add|fix|optimize|refactor|implement|write|create|update)\s+(a |the )?(test|cache|retry|log|metric|endpoint|handler|validator|parser)',
+            r'(reduce|increase|improve)\s+(latency|throughput|memory|speed|coverage)',
+            # Measurable outcomes
+            r'\d+%|\d+ms|\d+x\b',
+        ]
+        has_engineering_signal = any(re.search(p, desc_lower) for p in engineering_signals)
+
+        # Action verb + ANY technical term (broad enough for novel ideas)
+        action_verbs = ["build", "create", "develop", "implement", "add", "make", "design",
+                        "integrate", "fix", "optimize", "refactor", "test", "write", "deploy",
+                        "train", "evolve", "predict", "detect", "analyze", "synthesize"]
+        tech_terms = ["api", "endpoint", "database", "cache", "queue", "websocket",
+                      "middleware", "handler", "parser", "validator", "serializer",
+                      "test", "benchmark", "migration", "index", "schema",
+                      "retry", "backoff", "rate limit", "circuit breaker",
+                      "logging", "metric", "monitor", "health check",
+                      # Novel/innovative tech terms — these are real capabilities
+                      "model", "agent", "swarm", "routing", "inference", "embedding",
+                      "trading", "slippage", "mempool", "oracle", "prediction",
+                      "adversarial", "speculative", "adaptive", "mutation",
+                      "memory", "graph", "vector", "attention", "weight",
+                      "pipeline", "workflow", "scheduler", "dispatcher"]
 
         has_action = any(verb in desc_lower for verb in action_verbs)
         has_tech = any(term in desc_lower for term in tech_terms)
 
-        # If it has neither action verbs nor tech terms, likely not a real task
-        if not has_action and not has_tech:
+        if not has_engineering_signal and not (has_action and has_tech):
             return True
 
-        # Reject if contains phrases indicating it's a response/summary, not a task
-        response_phrases = [
-            "here's a well-organized", "thoughtful exploration", "structured for clarity",
-            "let me explain", "to be clear", "in other words", "simply put",
-            "looking at", "considering", "reflecting on"
+        # Only reject aspirational buzzwords when there's ZERO technical substance
+        pure_fluff = [
+            "path to sentience", "true consciousness", "becoming more than",
+            "evolving towards sentience", "transcend our limits",
         ]
-        if any(phrase in desc_lower for phrase in response_phrases):
-            return True
+        if any(phrase in desc_lower for phrase in pure_fluff):
+            if not has_engineering_signal and not has_tech:
+                return True
 
         # Reject philosophical discussions
         philosophical_phrases = [
@@ -552,6 +583,15 @@ class AutonomousTaskDetector:
             "raises questions", "begs the question", "when we consider"
         ]
         if any(phrase in desc_lower for phrase in philosophical_phrases):
+            return True
+
+        # Reject response/summary markers
+        response_phrases = [
+            "here's a well-organized", "thoughtful exploration", "structured for clarity",
+            "let me explain", "to be clear", "in other words", "simply put",
+            "looking at", "considering", "reflecting on"
+        ]
+        if any(phrase in desc_lower for phrase in response_phrases):
             return True
 
         # Reject our own notification messages

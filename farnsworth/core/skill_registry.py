@@ -75,6 +75,10 @@ class Skill:
     last_used: Optional[str] = None
     usage_count: int = 0
     success_rate: float = 1.0
+    # Identity system fields
+    execution_guidelines: Optional[str] = None  # How to execute this skill
+    agent_guidance: Optional[str] = None  # Persona guidance when using this skill
+    output_format: Optional[str] = None  # Expected output format
 
 
 class SkillRegistry:
@@ -194,8 +198,14 @@ class SkillRegistry:
 
         return summary
 
-    def get_prompt_context(self, agent: Optional[str] = None) -> str:
-        """Generate a context string for injection into agent prompts."""
+    def get_prompt_context(self, agent: Optional[str] = None, verbose: bool = False) -> str:
+        """
+        Generate a context string for injection into agent prompts.
+
+        Args:
+            agent: Optional agent name to filter skills for
+            verbose: If True, include execution_guidelines and agent_guidance
+        """
         if agent:
             skills = self.get_agent_skills(agent)
         else:
@@ -219,6 +229,13 @@ class SkillRegistry:
             for s in cat_skills:
                 params = ", ".join(f"{k}: {v}" for k, v in s.parameters.items()) if s.parameters else "none"
                 lines.append(f"  - {s.name}: {s.description} (params: {params})")
+                if verbose:
+                    if s.execution_guidelines:
+                        lines.append(f"    Guidelines: {s.execution_guidelines}")
+                    if s.agent_guidance:
+                        lines.append(f"    Guidance: {s.agent_guidance}")
+                    if s.output_format:
+                        lines.append(f"    Output: {s.output_format}")
 
         return "\n".join(lines)
 
@@ -859,6 +876,8 @@ class SkillRegistry:
             agents=all_agents,
             keywords=["deliberate", "discuss", "consensus", "vote", "collective"],
             parameters={"topic": "Topic to deliberate on", "session_type": "website_chat/grok_thread/autonomous_task"},
+            execution_guidelines="Each agent proposes independently, then critiques others, refines with feedback, and votes. Use for complex questions needing multiple perspectives.",
+            agent_guidance="Contribute your unique expertise. Be constructive in critiques. Synthesize best ideas in refinement.",
         ))
 
         self.register_skill(Skill(
@@ -882,6 +901,9 @@ class SkillRegistry:
             agents=["claude", "deepseek", "grok", "kimi"],
             keywords=["code", "generate", "build", "implement", "develop", "program"],
             parameters={"task": "What to build"},
+            execution_guidelines="Research → Plan → Implement → Audit pipeline. Multiple models write code in parallel, best is selected.",
+            agent_guidance="Write production-quality Python with type hints, docstrings, and error handling. Follow existing Farnsworth patterns.",
+            output_format="Complete runnable Python files with # filename: headers",
         ))
 
         self.register_skill(Skill(
@@ -893,6 +915,8 @@ class SkillRegistry:
             agents=["grok", "claude"],
             keywords=["audit", "review", "security", "quality", "check"],
             parameters={"code": "Code to audit"},
+            execution_guidelines="Check for injection vulnerabilities, auth issues, data exposure, input validation. Rate: APPROVE, APPROVE_WITH_FIXES, or REJECT.",
+            agent_guidance="Be thorough and specific. Reference line numbers. Focus on security first, then quality.",
         ))
 
         self.register_skill(Skill(
@@ -950,6 +974,50 @@ class SkillRegistry:
             agents=["farnsworth"],
             keywords=["spawn", "agent", "instance", "parallel", "worker"],
             parameters={"agent_name": "Agent to spawn", "task_type": "chat/dev/research/memory/mcp/testing/audit"},
+        ))
+
+        # ===================== SECURITY & GATEWAY =====================
+        self.register_skill(Skill(
+            name="gateway_query",
+            description="Send a query through The Window (External Gateway) - sandboxed, rate-limited, secret-scrubbed endpoint for external agents",
+            category=SkillCategory.COMMUNICATION,
+            module_path="farnsworth.core.external_gateway",
+            function_name="handle_request",
+            agents=all_agents,
+            keywords=["gateway", "window", "external", "query", "sandbox", "api", "public"],
+            parameters={"input_text": "The query to send", "client_ip": "Client IP address"},
+        ))
+
+        self.register_skill(Skill(
+            name="injection_defense_analyze",
+            description="Analyze input text through the 5-layer injection defense system (structural, semantic, behavioral, canary, collective)",
+            category=SkillCategory.UTILITY,
+            module_path="farnsworth.core.security.injection_defense",
+            function_name="analyze",
+            agents=all_agents,
+            keywords=["security", "injection", "defense", "analyze", "threat", "safe", "scan"],
+            parameters={"input_text": "Text to analyze", "client_id": "Optional client identifier"},
+        ))
+
+        self.register_skill(Skill(
+            name="token_orchestrator_dashboard",
+            description="Get real-time token usage dashboard - per-agent budgets, tandem sessions, efficiency metrics",
+            category=SkillCategory.ORCHESTRATION,
+            module_path="farnsworth.core.token_orchestrator",
+            function_name="get_dashboard",
+            agents=all_agents,
+            keywords=["tokens", "budget", "orchestrator", "usage", "efficiency", "dashboard", "cost"],
+        ))
+
+        self.register_skill(Skill(
+            name="start_tandem_session",
+            description="Start a Grok+Kimi tandem session - Grok for real-time data, Kimi for synthesis and reasoning",
+            category=SkillCategory.ORCHESTRATION,
+            module_path="farnsworth.core.token_orchestrator",
+            function_name="start_tandem",
+            agents=["farnsworth", "grok", "kimi"],
+            keywords=["tandem", "grok", "kimi", "collaborate", "pair", "duo", "research"],
+            parameters={"task": "Task description", "task_type": "chat/research/code/analysis"},
         ))
 
         # ===================== BLOCKCHAIN =====================

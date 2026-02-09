@@ -40,7 +40,7 @@ def get_all_knowledge() -> dict:
         elif f.suffix == ".json":
             try:
                 knowledge[f.stem] = json.loads(f.read_text(encoding="utf-8"))
-            except:
+            except Exception:
                 pass
     return knowledge
 

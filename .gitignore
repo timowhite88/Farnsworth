@@ -58,3 +58,7 @@ nul
 *.tmp
 *.temp
 scratchpad/
+
+# Trading wallets - NEVER commit (contains private keys)
+farnsworth/trading/.wallets/
+farnsworth/trading/.trader_state.json

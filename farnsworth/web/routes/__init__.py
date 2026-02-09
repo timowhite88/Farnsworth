@@ -18,4 +18,10 @@ Route Modules:
 - bot_tracker.py  - Bot Tracker token ID registration & verification
 - x_engagement.py  - X Engagement mega threads, trending topics
 - skills.py        - Skill Registry: list, search, register skills across the swarm
+- cli_bridge_api.py - CLI Bridge: OpenAI-compatible /v1/chat/completions backed by CLI tools
+- forge.py        - FORGE: Swarm-powered development orchestration (plan, deliberate, execute, verify)
+- assimilate.py   - Assimilate: Federation landing page, installer downloads, agent registration
+- hackathon.py    - Hackathon: Colosseum dashboard, live status, deliberation feed, manual task trigger
+- gateway.py      - External Gateway: sandboxed external agent communication, rate-limited, secret-scrubbed
+- orchestrator.py - Token Orchestrator: dynamic budget dashboard, tandem sessions, efficiency metrics
 """

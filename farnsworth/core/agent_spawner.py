@@ -40,6 +40,7 @@ class AgentInstance:
     output_file: Optional[Path] = None
     result: Optional[str] = None
     fallback_chain: List[str] = field(default_factory=list)  # Track handoff history
+    system_prompt: Optional[str] = None  # Identity-composed system prompt
 
 @dataclass
 class AgentTask:
@@ -164,6 +165,48 @@ class AgentSpawner:
 
         return None
 
+    def get_task_prompt(self, agent_name: str, task_type: TaskType, task_description: str) -> Optional[str]:
+        """
+        Get an identity-composed system prompt for a spawned agent instance.
+
+        Uses the IdentityComposer to generate a context-aware prompt based on
+        the agent's personality, the task type, and their capabilities.
+
+        Args:
+            agent_name: Which agent is being spawned
+            task_type: What kind of task
+            task_description: Description of the task
+
+        Returns:
+            Composed system prompt string, or None if composer unavailable
+        """
+        try:
+            from farnsworth.core.identity_composer import get_identity_composer
+            composer = get_identity_composer()
+
+            # Map TaskType to IdentityContext
+            from farnsworth.core.identity_composer import IdentityContext
+            context_map = {
+                TaskType.DEVELOPMENT: IdentityContext.DEVELOPMENT_IMPLEMENTATION,
+                TaskType.RESEARCH: IdentityContext.DEVELOPMENT_RESEARCH,
+                TaskType.AUDIT: IdentityContext.DEVELOPMENT_AUDIT,
+                TaskType.TESTING: IdentityContext.DEVELOPMENT_AUDIT,
+                TaskType.MEMORY: IdentityContext.AGENT_TASK,
+                TaskType.MCP: IdentityContext.AGENT_TASK,
+                TaskType.CHAT: IdentityContext.AGENT_CHAT,
+            }
+            context = context_map.get(task_type, IdentityContext.AGENT_TASK)
+
+            return composer.compose(
+                agent_id=agent_name,
+                context=context,
+                task_description=task_description,
+                include_skills=True,
+            )
+        except Exception as e:
+            logger.debug(f"Could not compose task prompt for {agent_name}: {e}")
+            return None
+
     def spawn_instance(self, agent_name: str, task_type: TaskType,
                        task_description: str,
                        allow_fallback: bool = True) -> Optional[AgentInstance]:
@@ -182,6 +225,9 @@ class AgentSpawner:
                 active = [i for i in current_instances if i.status == "running"]
 
                 if len(active) < self.max_instances.get(current_agent, 2):
+                    # Compose identity-aware system prompt
+                    system_prompt = self.get_task_prompt(current_agent, task_type, task_description)
+
                     # Can spawn this agent
                     instance = AgentInstance(
                         instance_id=f"{current_agent}_{task_type.value}_{uuid.uuid4().hex[:8]}",
@@ -189,7 +235,8 @@ class AgentSpawner:
                         task_type=task_type,
                         task_description=task_description,
                         output_file=self.staging_dir / "pending_audit" / f"{current_agent.lower()}_{task_type.value}_{datetime.now().strftime('%H%M%S')}.md",
-                        fallback_chain=tried_agents if len(tried_agents) > 1 else []
+                        fallback_chain=tried_agents if len(tried_agents) > 1 else [],
+                        system_prompt=system_prompt,
                     )
 
                     if current_agent not in self.instances:

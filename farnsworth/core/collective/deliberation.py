@@ -138,6 +138,18 @@ class DeliberationRoom:
         self._cross_agent_memory = None
         self._swarm_namespace_id = None
         self._context_injection_enabled = True
+        # Identity composer for per-agent persona injection
+        self._identity_composer = None
+
+    def _get_identity_composer(self):
+        """Lazy-load the IdentityComposer to avoid circular imports."""
+        if self._identity_composer is None:
+            try:
+                from farnsworth.core.identity_composer import get_identity_composer
+                self._identity_composer = get_identity_composer()
+            except Exception as e:
+                logger.debug(f"Could not load IdentityComposer: {e}")
+        return self._identity_composer
 
     def register_agent(self, agent_id: str, query_func: AgentQueryFunc):
         """Register an agent's query function for deliberation."""
@@ -584,6 +596,15 @@ class DeliberationRoom:
                     context = await self._get_context_for_prompt(prompt, agent_id)
                     enhanced_prompt = f"{context}{prompt}" if context else prompt
 
+                    # Identity injection: prepend agent persona for propose round
+                    try:
+                        composer = self._get_identity_composer()
+                        if composer:
+                            identity = composer.compose_for_deliberation(agent_id, "propose", prompt)
+                            enhanced_prompt = f"{identity}{enhanced_prompt}"
+                    except Exception as e:
+                        logger.debug(f"Identity injection failed for {agent_id} (propose): {e}")
+
                     result = await self._agent_funcs[agent_id](enhanced_prompt, max_tokens)
                     if result:
                         _, content = result
@@ -659,6 +680,15 @@ Be specific and constructive.{limit_instruction}"""
                     # AGI v1.8: Inject relevant context
                     context = await self._get_context_for_prompt(original_prompt, agent_id)
                     enhanced_prompt = f"{context}{critique_prompt}" if context else critique_prompt
+
+                    # Identity injection: prepend agent persona for critique round
+                    try:
+                        composer = self._get_identity_composer()
+                        if composer:
+                            identity = composer.compose_for_deliberation(agent_id, "critique", original_prompt)
+                            enhanced_prompt = f"{identity}{enhanced_prompt}"
+                    except Exception as e:
+                        logger.debug(f"Identity injection failed for {agent_id} (critique): {e}")
 
                     result = await self._agent_funcs[agent_id](enhanced_prompt, max_tokens // 2)
                     if result:
@@ -742,6 +772,15 @@ Output ONLY your final response.{refine_limit_instruction}"""
                     # AGI v1.8: Inject relevant context
                     context = await self._get_context_for_prompt(original_prompt, agent_id)
                     enhanced_prompt = f"{context}{refine_prompt}" if context else refine_prompt
+
+                    # Identity injection: prepend agent persona for refine round
+                    try:
+                        composer = self._get_identity_composer()
+                        if composer:
+                            identity = composer.compose_for_deliberation(agent_id, "refine", original_prompt)
+                            enhanced_prompt = f"{identity}{enhanced_prompt}"
+                    except Exception as e:
+                        logger.debug(f"Identity injection failed for {agent_id} (refine): {e}")
 
                     result = await self._agent_funcs[agent_id](enhanced_prompt, max_tokens)
                     if result:

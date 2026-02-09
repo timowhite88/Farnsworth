@@ -55,6 +55,9 @@ class AgentRegistry:
         # AGI v1.8: Register shadow agents (tmux persistent agents)
         await self._register_shadow_agents()
 
+        # AGI v2.0: Register CLI bridge agents
+        await self._register_cli_bridges()
+
         # Register with deliberation room
         from .deliberation import get_deliberation_room
         room = get_deliberation_room()
@@ -127,6 +130,61 @@ class AgentRegistry:
             logger.debug(f"Shadow agents not available: {e}")
         except Exception as e:
             logger.warning(f"Failed to register shadow agents: {e}")
+
+    async def _register_cli_bridges(self):
+        """
+        AGI v2.0: Register CLI bridge agents with deliberation room.
+
+        CLI bridges wrap AI CLIs (Claude Code, Gemini CLI) as swarm-native
+        providers with capability-based routing and fallback chains.
+        """
+        try:
+            from farnsworth.integration.cli_bridge.capability_router import get_cli_router
+            from farnsworth.integration.cli_bridge.base import CLICapability
+
+            router = await get_cli_router()
+            bridges = router.get_available_bridges()
+            registered_count = 0
+
+            for bridge_info in bridges:
+                cli_name = bridge_info.get("cli_name", "")
+                if not cli_name:
+                    continue
+
+                bridge = router.get_bridge(cli_name)
+                if bridge is None:
+                    continue
+
+                agent_id = f"CLI_{cli_name}"
+
+                async def query_cli(
+                    prompt: str,
+                    max_tokens: int,
+                    _bridge=bridge,
+                    _name=cli_name,
+                ) -> Optional[Tuple[str, str]]:
+                    try:
+                        response = await _bridge.query(
+                            prompt=prompt,
+                            max_tokens=max_tokens,
+                        )
+                        if response.success:
+                            return (_name, response.content)
+                    except Exception as e:
+                        logger.debug(f"CLI bridge {_name} query failed: {e}")
+                    return None
+
+                self._agent_funcs[agent_id] = query_cli
+                registered_count += 1
+                logger.debug(f"Registered CLI bridge agent: {agent_id}")
+
+            if registered_count > 0:
+                logger.info(f"Registered {registered_count} CLI bridge agents for deliberation")
+
+        except ImportError as e:
+            logger.debug(f"CLI bridges not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to register CLI bridges: {e}")
 
     async def _register_grok(self):
         """Register Grok (xAI) agent."""
@@ -229,13 +287,24 @@ class AgentRegistry:
         self._agent_funcs["Phi4"] = query_phi4
 
     async def _register_claude(self):
-        """Register Claude via Anthropic API."""
+        """Register Claude via Anthropic API.
+
+        Uses Sonnet 4.5 for general tasks, Opus 4.6 for coding/planning.
+        """
         async def query_claude(prompt: str, max_tokens: int) -> Optional[Tuple[str, str]]:
             try:
                 import httpx
                 api_key = os.environ.get("ANTHROPIC_API_KEY")
                 if not api_key:
                     return None
+
+                # Use Opus for coding/planning, Sonnet for everything else
+                coding_keywords = ["code", "implement", "function", "class", "debug", "fix",
+                                   "refactor", "build", "program", "script", "plan", "architect",
+                                   "design", "algorithm", "optimize", "deploy"]
+                is_coding = any(kw in prompt.lower() for kw in coding_keywords)
+                model = "claude-opus-4-6" if is_coding else "claude-sonnet-4-5-20250929"
+
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "https://api.anthropic.com/v1/messages",
@@ -245,16 +314,17 @@ class AgentRegistry:
                             "content-type": "application/json"
                         },
                         json={
-                            "model": "claude-3-haiku-20240307",
-                            "max_tokens": max_tokens,  # AGI v1.8: Use dynamic limit
+                            "model": model,
+                            "max_tokens": max_tokens,
                             "messages": [{"role": "user", "content": prompt}]
                         },
-                        timeout=45.0
+                        timeout=60.0
                     )
                     if resp.status_code == 200:
                         data = resp.json()
                         if data.get("content") and len(data["content"]) > 0:
-                            return ("Claude", data["content"][0].get("text", "").strip())
+                            label = "ClaudeOpus" if is_coding else "Claude"
+                            return (label, data["content"][0].get("text", "").strip())
             except Exception as e:
                 logger.debug(f"Claude query failed: {e}")
             return None
@@ -375,8 +445,34 @@ class AgentRegistry:
         self._agent_funcs["Perplexity"] = query_perplexity
 
     async def _register_deepseek_api(self):
-        """Register DeepSeek Cloud API."""
+        """Register DeepSeek - local Ollama first, API fallback."""
         async def query_deepseek_api(prompt: str, max_tokens: int) -> Optional[Tuple[str, str]]:
+            # Try local Ollama first (free, runs on GPU)
+            try:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        "http://localhost:11434/api/chat",
+                        json={
+                            "model": "deepseek-r1:8b",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "stream": False,
+                            "options": {"num_predict": min(max_tokens, 1500), "temperature": 0.7},
+                        },
+                        timeout=45.0,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        content = data.get("message", {}).get("content", "")
+                        if content:
+                            import re
+                            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+                            if content:
+                                return ("DeepSeekLocal", content)
+            except Exception as e:
+                logger.debug(f"DeepSeek local (Ollama) failed: {e}")
+
+            # Fallback to DeepSeek Cloud API
             try:
                 import httpx
                 api_key = os.environ.get("DEEPSEEK_API_KEY")
@@ -389,9 +485,9 @@ class AgentRegistry:
                         json={
                             "model": "deepseek-chat",
                             "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": max_tokens  # AGI v1.8: Use dynamic limit
+                            "max_tokens": max_tokens,
                         },
-                        timeout=45.0
+                        timeout=45.0,
                     )
                     if resp.status_code == 200:
                         data = resp.json()

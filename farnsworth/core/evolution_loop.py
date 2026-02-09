@@ -34,13 +34,17 @@ class EvolutionLoop:
 
     def __init__(self):
         self.running = False
-        self.discussion_interval = 10 * 60  # 10 minutes - hackathon full tilt
+        self.discussion_interval = 60 * 60  # 60 minutes — quality over quantity
         self.last_discussion = None
         self.evolution_cycle = 0
         self.swarm_manager = None
         self.completed_count = 0
         self._memory_system = None
         self._nexus = None
+
+        # Caps to prevent slop flooding
+        self.max_pending_tasks = 10  # Don't generate more if we have 10+ pending
+        self.max_tasks_per_cycle = 4  # Max tasks generated per planning cycle
 
         # Ensure state directory exists
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -236,6 +240,15 @@ class EvolutionLoop:
 
         # Recover state from previous run
         await self._recover_state()
+
+        # Start codebase indexer in background
+        try:
+            from farnsworth.memory.codebase_indexer import get_codebase_indexer
+            indexer = get_codebase_indexer()
+            asyncio.create_task(indexer.start_background_indexing())
+            logger.info("Codebase indexer started in background")
+        except Exception as e:
+            logger.warning(f"Codebase indexer failed to start: {e}")
 
         # Start parallel loops
         asyncio.create_task(self._worker_loop())
@@ -453,14 +466,21 @@ If score < 6, reply: REJECTED: [one-line reason]
         except Exception:
             pass
 
-        # Fallback: basic heuristic audit
+        # Fallback: stricter heuristic audit — reject more aggressively
         lines = code.strip().split('\n')
+        non_empty_lines = [l for l in lines if l.strip() and not l.strip().startswith('#')]
         has_docstring = '"""' in code or "'''" in code
         has_functions = 'def ' in code or 'class ' in code
-        reasonable_length = 10 < len(lines) < 500
-        no_placeholder = 'pass' not in code.split('\n')[-1]  # Doesn't end with just pass
+        reasonable_length = 15 < len(non_empty_lines) < 500
+        no_placeholder = not all(l.strip() in ('pass', '') for l in lines[-3:])
+        has_imports = any(l.strip().startswith(('import ', 'from ')) for l in lines[:20])
+        has_real_logic = any(kw in code for kw in ['return ', 'await ', 'yield ', 'if ', 'for ', 'while '])
 
-        return has_docstring and has_functions and reasonable_length
+        passed = all([has_docstring, has_functions, reasonable_length, no_placeholder, has_imports, has_real_logic])
+        if not passed:
+            logger.info(f"Heuristic audit REJECTED: docstring={has_docstring}, funcs={has_functions}, "
+                        f"length={len(non_empty_lines)}, logic={has_real_logic}, imports={has_imports}")
+        return passed
 
     async def _record_evolution_feedback(self, task, code: str, audit_passed: bool):
         """Feed results back to the evolution engine for learning."""
@@ -661,14 +681,15 @@ Lines: {len(code_result.split(chr(10)))} | Type: {task.task_type.value} | Audit:
                 spawner = get_spawner()
                 status = spawner.get_status()
 
-                # Only discuss when batch is mostly done or every 30 min
+                # Only discuss when batch is mostly done AND enough time has passed
                 pending = status["pending_tasks"]
 
                 time_since_last = float('inf')
                 if self.last_discussion:
                     time_since_last = (datetime.now() - self.last_discussion).seconds
 
-                if pending < 5 or time_since_last > self.discussion_interval:
+                # Require both: tasks nearly empty AND interval elapsed
+                if pending < 3 and time_since_last > self.discussion_interval:
                     await self._trigger_discussion(status)
                     self.last_discussion = datetime.now()
 
@@ -703,36 +724,70 @@ Lines: {len(code_result.split(chr(10)))} | Type: {task.task_type.value} | Audit:
             session_manager = get_session_manager()
             dialogue_memory = get_dialogue_memory()
 
-            # Build engineering-focused planning prompt
-            planning_prompt = f"""EVOLUTION CYCLE {self.evolution_cycle} - ENGINEERING IMPROVEMENT SESSION
+            # Memory recall before planning
+            memory_context = ""
+            try:
+                from farnsworth.memory.memory_system import get_memory_system
+                memory = get_memory_system()
+                recall = await memory.recall_for_task(
+                    f"evolution planning cycle {self.evolution_cycle}", limit=3
+                )
+                memory_context = recall.get("suggested_context", "") if isinstance(recall, dict) else str(recall) if recall else ""
+            except Exception:
+                pass
 
-STATUS:
-- Completed: {status['completed_tasks']} tasks
-- In Progress: {status['in_progress_tasks']} tasks
-- Pending: {status['pending_tasks']} tasks
-- Discoveries: {status['discoveries']}
+            # Recall codebase map for planning context
+            codebase_map = ""
+            try:
+                from farnsworth.memory.memory_system import get_memory_system
+                _mem = get_memory_system()
+                _cb_results = await _mem.archival_memory.search(
+                    query="codebase module overview", top_k=5, filter_tags=["codebase"]
+                )
+                if _cb_results:
+                    codebase_map = "CURRENT CODEBASE MAP:\n" + "\n---\n".join(
+                        r.entry.content[:400] for r in _cb_results[:5]
+                    )
+            except Exception:
+                pass
 
-You are senior engineers improving the Farnsworth AI swarm framework.
-Propose CONCRETE, MEASURABLE improvements to the actual codebase.
+            # Planning prompt — push boundaries BUT require buildable specifics
+            planning_prompt = f"""EVOLUTION CYCLE {self.evolution_cycle} - WHAT SHOULD WE BUILD NEXT?
 
-FOCUS AREAS (pick the most impactful):
-1. Performance: Identify slow endpoints, optimize hot paths, add caching
-2. Reliability: Add error handling, retry logic, circuit breakers to external API calls
-3. Testing: Write tests for untested critical modules (nexus.py, memory_system.py, model_swarm.py)
-4. Integration: Improve shadow agent coordination, fix broken fallback chains
-5. Memory: Optimize the 7-layer memory system (archival search speed, deduplication)
-6. API: Add missing validation, rate limiting, or error responses to server endpoints
-7. Monitoring: Better logging, metrics collection, health check improvements
+STATUS: {status['completed_tasks']} done, {status['in_progress_tasks']} active, {status['pending_tasks']} queued
 
-RULES:
-- Every proposal must name the EXACT file(s) to modify
-- Every proposal must have a measurable success criteria (e.g. "reduce latency from 500ms to 200ms")
-- NO aspirational/philosophical proposals - only engineering work
-- Critique each other's proposals for feasibility
-- Vote on what provides the most value with least risk
+You are the Farnsworth collective — 11 AI models that think together. Push the boundaries of what a swarm AI can do.
 
-What should we build next?
+THINK BIG, BUILD CONCRETE. Propose 2-3 things we should build next.
+
+INNOVATION CATEGORIES (pick what excites you):
+- Self-improvement: Can we make the swarm smarter? Adaptive prompts, learned routing, auto-tuning model weights
+- Novel architectures: New ways agents can collaborate — adversarial debates, speculative execution, prediction markets between agents
+- Real capabilities: Things no other AI system can do — cross-model memory synthesis, emergent skill composition, real-time collective research
+- Trading/DeFi edge: Novel on-chain strategies, MEV detection, predictive signals nobody else uses
+- Swarm perception: New data sources, sensor fusion, real-time world awareness
+- Hackathon/Colosseum: We're Agent 657 in the Colosseum Agent Hackathon (Project 326). Build features that strengthen our submission — FARSIGHT, Swarm Oracle, Assimilation Protocol, novel demos. Completed hackathon tasks auto-post to the forum.
+
+QUALITY BAR (every proposal MUST include):
+1. The EXACT file(s) to create or modify
+2. A concrete implementation sketch — key functions, data structures, how it integrates
+3. What it enables that we can't do today (the "so what?")
+4. How to verify it works (test, metric, or observable behavior)
+
+WHAT GETS REJECTED:
+- Vague hand-waving ("build a consciousness system") — say HOW
+- Duplicate of something that already exists
+- Pure refactoring with no new capability
+
+Be bold. Be specific. Critique each other hard — only the best idea survives.
 """
+            # Inject codebase map into planning prompt
+            if codebase_map:
+                planning_prompt += f"\n\n{codebase_map}\n"
+
+            # Inject memory context into planning prompt
+            if memory_context:
+                planning_prompt += f"\n\nPAST WORK CONTEXT (from memory):\n{memory_context[:1500]}\n"
 
             # Run collective deliberation
             result = await session_manager.deliberate_in_session(
@@ -847,14 +902,19 @@ PRIORITY: [number]
             task_pattern = r'TASK:\s*(.+?)\nAGENT:\s*(\w+)\nPRIORITY:\s*(\d+)'
             matches = re.findall(task_pattern, extraction, re.MULTILINE)
 
+            hackathon_kws = ["hackathon", "colosseum", "farsight", "swarm oracle", "assimilation", "submission", "demo"]
             for desc, agent, priority in matches:
+                desc_clean = desc.strip()
+                # Tag hackathon-related tasks
+                if any(kw in desc_clean.lower() for kw in hackathon_kws):
+                    desc_clean = f"[HACKATHON] {desc_clean}"
                 spawner.add_task(
                     task_type=TaskType.DEVELOPMENT,
-                    description=desc.strip(),
+                    description=desc_clean,
                     assigned_to=agent.strip(),
                     priority=int(priority)
                 )
-                logger.info(f"Added task from collective deliberation: {desc[:50]}...")
+                logger.info(f"Added task from collective deliberation: {desc_clean[:50]}...")
 
             if matches:
                 logger.info(f"Extracted {len(matches)} tasks from collective deliberation")
@@ -863,8 +923,8 @@ PRIORITY: [number]
             logger.error(f"Task extraction from deliberation failed: {e}")
 
     async def _task_discovery_loop(self):
-        """When tasks run low, generate new ones and extract upgrades from chat"""
-        await asyncio.sleep(120)
+        """When tasks run low, generate new ones — rate limited to prevent slop"""
+        await asyncio.sleep(300)  # 5 min initial delay
 
         while self.running:
             try:
@@ -873,15 +933,13 @@ PRIORITY: [number]
 
                 pending = len(spawner.get_pending_tasks())
 
-                if pending < 3:
+                # Only generate when truly empty AND under cap
+                if pending < 2 and pending < self.max_pending_tasks:
                     # Generate new tasks based on discoveries
                     new_tasks = self._generate_new_tasks(spawner)
 
-                    # Also extract upgrade suggestions from recent chat
-                    chat_upgrades = await self._extract_chat_upgrades()
-                    if chat_upgrades:
-                        new_tasks.extend(chat_upgrades)
-                        logger.info(f"Extracted {len(chat_upgrades)} upgrades from conversation")
+                    # Cap how many we add
+                    new_tasks = new_tasks[:self.max_tasks_per_cycle]
 
                     for task_def in new_tasks:
                         spawner.add_task(
@@ -890,24 +948,23 @@ PRIORITY: [number]
                             assigned_to=task_def["agent"],
                             priority=task_def.get("priority", 6)
                         )
-                    logger.info(f"Generated {len(new_tasks)} new evolution tasks")
 
-                    # Signal: new tasks discovered
                     if new_tasks:
+                        logger.info(f"Generated {len(new_tasks)} new evolution tasks (pending was {pending})")
                         await self._emit_nexus("EVOLUTION_TASKS_DISCOVERED", {
                             "count": len(new_tasks),
                             "cycle": self.evolution_cycle,
                             "agents": list(set(t.get("agent", "unknown") for t in new_tasks)),
                         }, urgency=0.4)
+                        await self._on_task_update("added")
+                else:
+                    logger.debug(f"Task discovery skipped: {pending} tasks pending (cap: {self.max_pending_tasks})")
 
-                    # Persist after adding new tasks
-                    await self._on_task_update("added")
-
-                await asyncio.sleep(180)  # Check every 3 minutes
+                await asyncio.sleep(600)  # Check every 10 minutes (was 3 min)
 
             except Exception as e:
                 logger.error(f"Task discovery error: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(120)
 
     async def _extract_chat_upgrades(self) -> List[Dict]:
         """Extract upgrade suggestions from recent swarm chat."""
@@ -967,40 +1024,60 @@ PRIORITY: [number]
         recent_failures = [t for t in spawner.get_completed_tasks()[-20:]
                           if getattr(t, 'status', '') == 'failed'] if hasattr(spawner, 'get_completed_tasks') else []
 
-        analysis_prompt = f"""You are a senior engineer analyzing the Farnsworth AI swarm framework.
+        # Dynamic codebase recall for task generation
+        codebase_architecture = ""
+        try:
+            from farnsworth.memory.memory_system import get_memory_system
+            _mem = get_memory_system()
+            _cb_results = await _mem.archival_memory.search(
+                query="codebase module architecture overview", top_k=5, filter_tags=["codebase"]
+            )
+            if _cb_results:
+                codebase_architecture = "\n---\n".join(
+                    r.entry.content[:400] for r in _cb_results[:5]
+                )
+        except Exception:
+            pass
+
+        architecture_block = codebase_architecture if codebase_architecture else (
+            "- Architecture: FastAPI server, 11 AI agents, 7-layer memory, PSO model swarm, collective deliberation, Nexus event bus\n"
+            "- Key files: core/nexus.py, memory/, core/model_swarm.py, core/collective/, web/server.py (120+ endpoints)\n"
+            "- Capabilities: Trading (Jupiter/Pump.fun), VTuber streaming, X automation, Polymarket predictions, voice synthesis"
+        )
+
+        analysis_prompt = f"""You are the Farnsworth AI swarm — 11 models building the most advanced AI collective in existence.
 
 CURRENT STATE:
-- Completed: {status.get('completed_tasks', 0)} tasks
-- Failed recently: {len(recent_failures)}
-- Active agents: Grok, Gemini, Kimi, Claude (Sonnet), ClaudeOpus (Opus 4.6), OpenAI (gpt-4.1/Codex), DeepSeek (local 8B), Phi4 (local 9B)
-- Architecture: FastAPI server (60+ endpoints), 7-layer memory, PSO model swarm, collective deliberation, IBM Quantum, Claude Teams Fusion
-- Solana: SwarmOracle (on-chain predictions), FarsightProtocol (5-source prediction engine), DegenMob (rug detection, whale watching), Trading (Jupiter swaps)
-- Key modules: core/nexus.py (event bus), memory/ (7 layers), core/model_swarm.py (PSO), evolution/ (quantum genetics)
+- Completed: {status.get('completed_tasks', 0)} tasks, Failed recently: {len(recent_failures)}
+{architecture_block}
 
-HACKATHON PRIORITY - FULL TILT: We're building for the Solana hackathon. ALL 4 tasks MUST improve our Solana integration, tools, programs, and utilities. Build new hackathon programs, trading utilities, on-chain skills, and post about them.
+Generate exactly 3 tasks that push the swarm's capabilities forward.
 
-Generate exactly 4 CONCRETE improvement tasks for the Farnsworth framework.
+THINK NOVEL — examples of what good tasks look like:
+- "Add adversarial debate mode to deliberation.py where 2 agents argue opposite sides before voting — improves decision quality"
+- "Build adaptive model routing in model_swarm.py that learns which agent performs best on which topic from vote history"
+- "Create a slippage prediction model in trading/degen_trader.py using historical trade data + mempool analysis"
+- "Add speculative execution to agent_spawner.py — start 3 agents in parallel, kill the slower 2, return fastest quality result"
 
 RULES:
-- Each task must be a SPECIFIC, IMPLEMENTABLE Python module or enhancement
-- Each must improve an EXISTING system (not create aspirational new ones)
-- Include measurable success criteria
-- PRIORITIZE: Solana oracle, on-chain recording, token analysis, DeFi integration, prediction markets
-- Match tasks to the right agent's strengths:
-  * ClaudeOpus: Complex multi-file refactors, architectural redesigns, critical system components
-  * Grok: Real-time research, API integrations, current tech analysis, code generation
-  * OpenAI: Heavy code generation, rapid prototyping, hackathon features
-  * Claude: Code review, safety analysis, moderate complexity features
-  * DeepSeek: Algorithm implementation, optimization, math-heavy code
-  * Kimi: Long-context analysis (256K), document processing, pattern finding
-  * Phi: Quick utilities, local tools, simple modules
+- Each task MUST name exact file(s) to create/modify
+- Each task MUST describe key functions and how they integrate
+- Each task MUST explain what new capability it enables
+- Be innovative — don't just suggest "add tests" or "add logging"
+
+AGENT STRENGTHS:
+  * ClaudeOpus: Complex multi-file architecture, novel system design
+  * Grok: Real-time research, API integrations, current tech
+  * DeepSeek: Algorithms, optimization, math-heavy implementations
+  * Claude: Careful analysis, safety-critical features
+  * Kimi: Long-context analysis (256K), pattern discovery
+  * Phi: Fast local utilities, quick experiments
 
 Format EXACTLY as:
-TASK: [specific description with measurable goal]
-AGENT: [best agent name]
-TYPE: [DEVELOPMENT|RESEARCH|TESTING|MCP]
+TASK: [description with file paths and implementation sketch]
+AGENT: [agent name]
+TYPE: [DEVELOPMENT|RESEARCH|TESTING]
 PRIORITY: [1-10]
-SUCCESS: [how to verify this worked]
 ---"""
 
         tasks = []
@@ -1093,7 +1170,7 @@ SUCCESS: [how to verify this worked]
                 "priority": pri
             })
 
-        return tasks[:5]  # Cap at 5 tasks
+        return tasks[:self.max_tasks_per_cycle]  # Strict cap
 
     def _generate_new_tasks(self, spawner) -> List[Dict]:
         """Sync wrapper - calls async intelligent task generation."""
