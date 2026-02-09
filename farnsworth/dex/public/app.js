@@ -641,6 +641,7 @@ function destroyChart() {
     currentCandle = null;
     liveLastPrice = null;
     livePriceDirection = 0;
+    liveEmaPrice = null;
     if (chartResizeObserver) {
         chartResizeObserver.disconnect();
         chartResizeObserver = null;
@@ -929,6 +930,14 @@ async function loadQuantum(address) {
    ============================================ */
 
 var liveCandleInterval = 5;   // seconds per candle
+var liveEmaAlpha = 0.3;       // EMA smoothing factor (0.3 = moderate smoothing)
+var liveEmaPrice = null;      // current EMA value
+
+function emaSmooth(price) {
+    if (liveEmaPrice === null) { liveEmaPrice = price; return price; }
+    liveEmaPrice = liveEmaAlpha * price + (1 - liveEmaAlpha) * liveEmaPrice;
+    return liveEmaPrice;
+}
 
 async function loadLiveChart(address) {
     destroyChart();
@@ -1039,6 +1048,7 @@ async function loadLiveChart(address) {
     currentCandle = null;
     liveLastPrice = null;
     livePriceDirection = 0;
+    liveEmaPrice = null;
 
     // Start 1-second live polling
     var pollAddress = address;
@@ -1091,12 +1101,13 @@ async function loadLiveChart(address) {
                 close: currentCandle.close,
             });
 
-            // Update area series (every tick for smooth line)
+            // Update area series with EMA-smoothed price (reduces jitter)
+            var smoothed = emaSmooth(price);
             var lineTime = now;
             if (liveDataPoints.length > 0 && lineTime <= liveDataPoints[liveDataPoints.length - 1].time) {
                 lineTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
             }
-            var linePoint = { time: lineTime, value: price };
+            var linePoint = { time: lineTime, value: smoothed };
             liveDataPoints.push(linePoint);
             liveSeries.update(linePoint);
 

@@ -1003,9 +1003,14 @@ async function fetchLivePrice(address) {
     // Fallback to Jupiter
     result = await fetchJupiterPrice(address);
     if (result) { livepriceCache.set(address, result); return result; }
-    // Fallback to token cache
+    // Fallback to last known LIVE price (not DexScreener cache — avoids bounce)
+    const lastLive = livepriceCache.get(address);
+    if (lastLive && Date.now() - lastLive.ts < 30000) {
+        return { price: lastLive.price, source: lastLive.source + '-cached', ts: lastLive.ts };
+    }
+    // Final fallback to DexScreener token cache
     const token = tokenCache.get(address);
-    if (token?.price) return { price: token.price, source: 'cache', ts: Date.now() };
+    if (token?.price) return { price: token.price, source: 'dexscreener', ts: Date.now() };
     return null;
 }
 
