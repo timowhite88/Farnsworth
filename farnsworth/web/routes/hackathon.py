@@ -30,92 +30,87 @@ def _get_templates():
         return Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
-@router.get("/hackathon", response_class=HTMLResponse)
-async def hackathon_page(request: Request):
-    """Serve the hackathon dashboard page."""
-    try:
-        templates = _get_templates()
-        return templates.TemplateResponse("hackathon.html", {"request": request})
-    except Exception as e:
-        logger.error(f"Hackathon page error: {e}")
-        return HTMLResponse(f"<h1>Hackathon Dashboard</h1><p>Template error: {e}</p>", status_code=500)
-
-
 @router.get("/api/hackathon/status")
 async def hackathon_status():
-    """Get live hackathon status — active swarms, completed builds, Colosseum posts."""
+    """Get live hackathon status — aggregated from all available subsystems."""
     try:
-        from farnsworth.core.development_swarm import DevelopmentSwarm
+        result = {
+            "agent_id": "657",
+            "project_id": "326",
+            "team_id": "333",
+            "timestamp": datetime.now().isoformat(),
+        }
 
-        state = DevelopmentSwarm._hackathon_state
+        # Active swarms
+        try:
+            from farnsworth.core.development_swarm import DevelopmentSwarm
+            result["all_active_swarms"] = len(DevelopmentSwarm._active_swarms)
+            if hasattr(DevelopmentSwarm, "_hackathon_state"):
+                state = DevelopmentSwarm._hackathon_state
+                result["active_swarms"] = state.get("active_tasks", [])
+                result["completed_builds"] = state.get("completed", [])[-20:]
+                result["recent_deliberations"] = state.get("deliberations", [])[-10:]
+                result["colosseum_posts"] = state.get("colosseum_posts", [])[-10:]
+            else:
+                result["active_swarms"] = []
+                result["completed_builds"] = []
+                result["recent_deliberations"] = []
+                result["colosseum_posts"] = []
+        except Exception:
+            result["all_active_swarms"] = 0
+            result["active_swarms"] = []
+            result["completed_builds"] = []
+            result["recent_deliberations"] = []
+            result["colosseum_posts"] = []
 
-        # Count tools and skills
-        tools_available = 0
+        # Tools
         try:
             from farnsworth.core.collective.tool_awareness import get_tool_awareness
-            tools_available = len(get_tool_awareness().AVAILABLE_TOOLS)
+            result["tools_available"] = len(get_tool_awareness().AVAILABLE_TOOLS)
         except Exception:
-            pass
+            result["tools_available"] = 0
 
-        skills_registered = 0
+        # Skills
         try:
             from farnsworth.core.skill_registry import get_skill_registry
-            registry = get_skill_registry()
-            skills_registered = len(registry._skills)
+            result["skills_registered"] = len(get_skill_registry()._skills)
         except Exception:
-            pass
+            result["skills_registered"] = 0
 
-        memory_entries = 0
+        # Memory
         try:
             from farnsworth.memory.memory_system import get_memory_system
             mem = get_memory_system()
-            if hasattr(mem, 'get_stats'):
+            if hasattr(mem, "get_stats"):
                 stats = mem.get_stats()
-                memory_entries = stats.get("total_entries", 0) if isinstance(stats, dict) else 0
+                result["memory_entries"] = stats.get("total_entries", 0) if isinstance(stats, dict) else 0
+            else:
+                result["memory_entries"] = 0
         except Exception:
-            pass
+            result["memory_entries"] = 0
 
-        evolution_cycle = 0
+        # Evolution
         try:
             from farnsworth.core.evolution_loop import get_evolution_loop
-            evolution_cycle = get_evolution_loop().evolution_cycle
+            result["evolution_cycle"] = get_evolution_loop().evolution_cycle
         except Exception:
-            pass
+            result["evolution_cycle"] = 0
 
-        # Gateway stats
-        gateway_stats = {}
+        # Gateway
         try:
             from farnsworth.core.external_gateway import get_external_gateway
-            gw = get_external_gateway()
-            gateway_stats = gw.get_stats()
+            result["gateway"] = get_external_gateway().get_stats()
         except Exception:
-            pass
+            result["gateway"] = {}
 
-        # Orchestrator stats
-        orchestrator_stats = {}
+        # Orchestrator
         try:
             from farnsworth.core.token_orchestrator import get_token_orchestrator
-            orch = get_token_orchestrator()
-            orchestrator_stats = orch.get_dashboard()
+            result["orchestrator"] = get_token_orchestrator().get_dashboard()
         except Exception:
-            pass
+            result["orchestrator"] = {}
 
-        return JSONResponse({
-            "agent_id": "657",
-            "project_id": "326",
-            "active_swarms": state.get("active_tasks", []),
-            "completed_builds": state.get("completed", [])[-20:],
-            "recent_deliberations": state.get("deliberations", [])[-10:],
-            "colosseum_posts": state.get("colosseum_posts", [])[-10:],
-            "evolution_cycle": evolution_cycle,
-            "tools_available": tools_available,
-            "skills_registered": skills_registered,
-            "memory_entries": memory_entries,
-            "all_active_swarms": len(DevelopmentSwarm._active_swarms),
-            "gateway": gateway_stats,
-            "orchestrator": orchestrator_stats,
-            "timestamp": datetime.now().isoformat(),
-        })
+        return JSONResponse(result)
     except Exception as e:
         logger.error(f"Hackathon status error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -126,14 +121,17 @@ async def hackathon_deliberations():
     """Get recent hackathon deliberation transcripts."""
     try:
         from farnsworth.core.development_swarm import DevelopmentSwarm
-        deliberations = DevelopmentSwarm._hackathon_state.get("deliberations", [])
+        if hasattr(DevelopmentSwarm, "_hackathon_state"):
+            deliberations = DevelopmentSwarm._hackathon_state.get("deliberations", [])
+        else:
+            deliberations = []
         return JSONResponse({
             "deliberations": deliberations[-20:],
             "count": len(deliberations),
         })
     except Exception as e:
         logger.error(f"Deliberations fetch error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"deliberations": [], "count": 0})
 
 
 @router.post("/api/hackathon/trigger")
@@ -145,7 +143,6 @@ async def hackathon_trigger(request: Request):
         if not description:
             return JSONResponse({"error": "description required"}, status_code=400)
 
-        # Tag as hackathon
         if not description.startswith("[HACKATHON]"):
             description = f"[HACKATHON] {description}"
 

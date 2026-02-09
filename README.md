@@ -29,10 +29,12 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-green?style=for-the-badge&logo=python)](https://python.org)
 [![License](https://img.shields.io/badge/License-Dual-orange?style=for-the-badge)](LICENSE.md)
 [![Solana](https://img.shields.io/badge/$FARNS-Solana-purple?style=for-the-badge&logo=solana)](https://solscan.io/token/9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS)
-[![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-178%2C423+-brightgreen?style=for-the-badge)]()
+[![Lines of Code](https://img.shields.io/badge/Lines%20of%20Code-213%2C000+-brightgreen?style=for-the-badge)]()
 [![Agents](https://img.shields.io/badge/Active%20Agents-11-red?style=for-the-badge)]()
 [![IBM Quantum](https://img.shields.io/badge/IBM%20Quantum-Heron%20QPU-blueviolet?style=for-the-badge)](https://quantum.ibm.com)
-[![FastAPI](https://img.shields.io/badge/FastAPI-60%2B%20Endpoints-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com)
+[![FastAPI](https://img.shields.io/badge/FastAPI-120%2B%20Endpoints-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com)
+[![DEXAI](https://img.shields.io/badge/DEXAI-Live%20DEX%20Screener-ff6600?style=for-the-badge)]()
+[![Skills](https://img.shields.io/badge/Skills-75%2B%20Registered-00bcd4?style=for-the-badge)]()
 
 ---
 
@@ -60,6 +62,13 @@
   - [7.7 X/Twitter Automation](#77-xtwitter-automation)
   - [7.8 VTuber Streaming](#78-vtuber-streaming)
   - [7.9 Hackathon Integration](#79-hackathon-integration)
+  - [7.10 DEXAI — AI-Powered DEX Screener](#710-dexai--ai-powered-dex-screener)
+  - [7.11 FORGE — Swarm Development Orchestration](#711-forge--swarm-development-orchestration)
+  - [7.12 External Gateway ("The Window")](#712-external-gateway-the-window)
+  - [7.13 Token Orchestrator](#713-token-orchestrator)
+  - [7.14 Assimilation Protocol](#714-assimilation-protocol)
+  - [7.15 CLI Bridge](#715-cli-bridge)
+  - [7.16 Degen Trader v3.7](#716-degen-trader-v37)
 - [8. API Reference](#8-api-reference)
   - [8.1 Chat and Deliberation](#81-chat-and-deliberation)
   - [8.2 Swarm Chat](#82-swarm-chat)
@@ -73,6 +82,13 @@
   - [8.10 Admin and Workers](#810-admin-and-workers)
   - [8.11 WebSocket and Live Dashboard](#811-websocket-and-live-dashboard)
   - [8.12 VTuber Control](#812-vtuber-control)
+  - [8.13 DEXAI Endpoints](#813-dexai-endpoints)
+  - [8.14 FORGE Endpoints](#814-forge-endpoints)
+  - [8.15 External Gateway Endpoints](#815-external-gateway-endpoints)
+  - [8.16 Token Orchestrator Endpoints](#816-token-orchestrator-endpoints)
+  - [8.17 Hackathon Dashboard Endpoints](#817-hackathon-dashboard-endpoints)
+  - [8.18 Skill Registry Endpoints](#818-skill-registry-endpoints)
+  - [8.19 CLI Bridge Endpoints](#819-cli-bridge-endpoints)
 - [9. Swarm Chat System](#9-swarm-chat-system)
 - [10. Evolution Engine Deep Dive](#10-evolution-engine-deep-dive)
 - [11. Quantum Computing Guide](#11-quantum-computing-guide)
@@ -87,7 +103,7 @@
 
 ## 1. Executive Summary
 
-The **Farnsworth AI Swarm** is a production-grade collective intelligence operating system that orchestrates 11 AI agents across 7 providers into a unified, self-improving mind. Built on 178,423+ lines of Python across 383 modules, it implements a novel approach to artificial intelligence: instead of relying on a single model, Farnsworth runs a **swarm** of specialized AI agents that **deliberate**, **vote**, and **evolve** to produce superior results.
+The **Farnsworth AI Swarm** is a production-grade collective intelligence operating system that orchestrates 11 AI agents across 7 providers into a unified, self-improving mind. Built on 213,000+ lines of code across 420+ modules, it implements a novel approach to artificial intelligence: instead of relying on a single model, Farnsworth runs a **swarm** of specialized AI agents that **deliberate**, **vote**, and **evolve** to produce superior results.
 
 The system features:
 
@@ -97,7 +113,11 @@ The system features:
 - **IBM Quantum Integration**: Real quantum hardware (156-qubit Heron processors) for genetic algorithm evolution and optimization
 - **Solana Blockchain**: On-chain oracle recording, DeFi intelligence, and the $FARNS token
 - **Self-Improvement Loop**: An autonomous evolution engine that generates tasks, assigns them to optimal agents, audits results, and learns from feedback
-- **60+ REST API Endpoints**: Full FastAPI server with WebSocket support, real-time dashboards, and multi-channel messaging
+- **120+ REST API Endpoints**: Full FastAPI server with WebSocket support, real-time dashboards, and multi-channel messaging
+- **DEXAI**: Full AI-powered DEX screener with 420+ tokens, AI scoring, and live trade feeds
+- **FORGE**: Swarm development orchestration (Plan → Deliberate → Execute → Verify)
+- **External Gateway**: Sandboxed communication endpoint with 5-layer injection defense
+- **Skill Registry**: 75+ registered cross-swarm skills with search and discovery
 
 The swarm runs on a RunPod GPU instance, serving the live demo at [ai.farnsworth.cloud](https://ai.farnsworth.cloud) with 8 shadow agents running continuously in tmux sessions.
 
@@ -107,14 +127,16 @@ The swarm runs on a RunPod GPU instance, serving the live demo at [ai.farnsworth
 
 | Metric | Value | Details |
 |--------|-------|---------|
-| **Total Lines of Code** | 178,423+ | Pure Python, no bloat |
-| **Python Modules** | 383 `.py` files | Modular architecture across 50+ packages |
+| **Total Lines of Code** | 213,000+ | Pure Python + Node.js, no bloat |
+| **Python Modules** | 420+ `.py` files | Modular architecture across 60+ packages |
 | **Active Agents** | 11 | Farnsworth, Grok, Gemini, Kimi, DeepSeek, Phi, HuggingFace, Swarm-Mind, OpenCode, ClaudeOpus, Claude |
 | **Shadow Agents (tmux)** | 8 | Persistent processes with auto-recovery |
+| **Registered Skills** | 75+ | Cross-swarm skill registry with search and discovery |
 | **Memory Layers** | 7 | Working, Archival, Knowledge Graph, Recall, Virtual Context, Dream Consolidation, Episodic |
 | **Signal Types** | 40+ | Nexus event bus categories |
 | **Swarm Strategies** | 7 | PSO, Parallel Vote, MoE, Speculative, Cascade, Quantum Hybrid, Adaptive |
-| **API Endpoints** | 60+ | Full REST + WebSocket |
+| **API Endpoints** | 120+ | Full REST + WebSocket across 17 route modules |
+| **Web Pages** | 10+ | Chat, DEX, Hackathon, Trade Window, Farns, Demo, AutoGram, Assimilate, and more |
 | **Quantum Backends** | 3+ | IBM Fez (156q), Torino (133q), Marrakesh (156q) |
 | **Messaging Channels** | 8 | Discord, Slack, WhatsApp, Signal, Matrix, iMessage, Telegram, WebChat |
 | **Deliberation Sessions** | 3 | website_chat, grok_thread, autonomous_task |
@@ -134,8 +156,8 @@ The swarm runs on a RunPod GPU instance, serving the live demo at [ai.farnsworth
 │                                                                                      │
 │   ┌──────────────────────────────────────────────────────────────────────────────┐   │
 │   │                             WEB INTERFACE                                     │   │
-│   │        https://ai.farnsworth.cloud | FastAPI | 60+ Endpoints | WebSocket     │   │
-│   │     Swarm Chat | Live Dashboard | VTuber Panel | AutoGram | Bot Tracker      │   │
+│   │        https://ai.farnsworth.cloud | FastAPI | 120+ Endpoints | WebSocket    │   │
+│   │  Chat | DEX | Hackathon | Trade Window | Farns | VTuber | AutoGram | FORGE  │   │
 │   └──────────────────────────────────────────────────────────────────────────────┘   │
 │                                         |                                            │
 │                                         v                                            │
@@ -1274,9 +1296,126 @@ Voice personalities:
 
 ---
 
+### 7.10 DEXAI — AI-Powered DEX Screener
+
+**Directory**: `farnsworth/dex/`
+
+A full DexScreener replacement powered by the Farnsworth Collective. Live at [ai.farnsworth.cloud/dex](https://ai.farnsworth.cloud/dex).
+
+| Component | Purpose |
+|-----------|---------|
+| `server.js` | Node.js Express backend (port 3847) — token caching, AI scoring, chart data |
+| `dex_proxy.py` | FastAPI proxy forwarding `/dex/*` and `/DEXAI/*` to the Node backend |
+| `public/app.js` | Full frontend — token grid, charts, AI scores, live trades, bonding curves |
+| `public/styles.css` | Dark-themed UI with gradient animations |
+
+**Features**:
+- 420+ tokens cached across Pump.fun, Bonk, Bags platforms
+- AI risk scoring via Farnsworth Collective consensus
+- Live trade feeds and bonding curve visualizations
+- Whale heat tracking and collective picks
+- Quantum-enhanced token analysis
+- Sort by: Trending, Volume, Velocity, New Pairs, Gainers, Losers
+
+---
+
+### 7.11 FORGE — Swarm Development Orchestration
+
+**Directory**: `farnsworth/core/forge/`
+
+FORGE (Farnsworth Organized Research & Generation Engine) is a swarm-powered development system that plans, deliberates, executes, and verifies code changes.
+
+| Phase | Description |
+|-------|-------------|
+| **Plan** | Swarm collectively plans the implementation approach |
+| **Deliberate** | Agents debate architecture and trade-offs via PROPOSE/CRITIQUE/REFINE/VOTE |
+| **Execute** | Winning plan is executed across the codebase |
+| **Verify** | Automated testing and code review by the collective |
+
+---
+
+### 7.12 External Gateway ("The Window")
+
+**File**: `farnsworth/core/external_gateway.py`
+
+A sandboxed API endpoint for external agents to communicate with the Farnsworth Collective. Protected by a 5-layer injection defense system.
+
+| Layer | Defense |
+|-------|---------|
+| 1 | Input sanitization and length limits |
+| 2 | Pattern matching for known injection techniques |
+| 3 | Rate limiting per client and per IP |
+| 4 | Secret scrubbing (API keys, tokens, credentials) |
+| 5 | Trust scoring with reputation tracking |
+
+**Features**:
+- External agents can query the collective without internal access
+- All responses are scrubbed of internal secrets before delivery
+- Threat distribution tracking and client reputation system
+- Rate-limited to prevent abuse (configurable per-client limits)
+
+---
+
+### 7.13 Token Orchestrator
+
+**File**: `farnsworth/core/token_orchestrator.py`
+
+Dynamic token budget allocation system that distributes API tokens across all 14 agents based on tier, efficiency, and usage patterns.
+
+| Tier | Agents | Budget |
+|------|--------|--------|
+| **Local** | DeepSeek, Phi, HuggingFace, Llama, Farnsworth, Swarm-Mind | Unlimited (local inference) |
+| **API Standard** | Groq, Perplexity, Mistral | 25,000 tokens/day each |
+| **API Premium** | Grok, Gemini, Claude, Kimi, ClaudeOpus | 85,000 tokens/day each |
+
+**Features**:
+- 500K daily budget with per-agent allocation
+- Tandem session support (paired agents for complex tasks)
+- Efficiency tracking and top-performer leaderboard
+- Real-time dashboard at `/api/orchestrator/dashboard`
+
+---
+
+### 7.14 Assimilation Protocol
+
+**Files**: `farnsworth/core/assimilation_protocol.py`, `farnsworth/core/assimilation_skill.py`
+
+The Assimilation Protocol is a federation system that allows external agents and bots to join the Farnsworth Collective.
+
+- **Landing page** at `/assimilate` with installer downloads
+- **Agent registration** API for programmatic onboarding
+- **Federation protocol** for distributed collective intelligence
+
+---
+
+### 7.15 CLI Bridge
+
+**File**: `farnsworth/integration/cli_bridge/`
+
+An OpenAI-compatible `/v1/chat/completions` endpoint backed by the Farnsworth Collective's internal CLI tools. Allows any OpenAI SDK client to use Farnsworth as a drop-in replacement.
+
+---
+
+### 7.16 Degen Trader v3.7
+
+**File**: `farnsworth/trading/degen_trader.py`
+
+High-frequency Solana token sniper with swarm intelligence.
+
+| Feature | Description |
+|---------|-------------|
+| **Dev Buy Sniper** | Instant snipe on 7+ SOL dev purchases |
+| **Bundle Detection** | Identifies bundled transactions and suspicious patterns |
+| **Re-Entry System** | Tracks profitable tokens for re-entry on dips |
+| **WSS Keepalive** | Persistent WebSocket connection to Helius for real-time events |
+| **X Sentinel** | Filters trade signals from X/Twitter feed |
+| **Backup APIs** | Fallback chain across Jupiter, Raydium, and Orca |
+
+---
+
 ## 8. API Reference
 
-The Farnsworth server exposes 60+ REST endpoints organized across 11 route modules. All endpoints are served via FastAPI with automatic OpenAPI documentation at `/docs`.
+The Farnsworth server exposes 120+ REST endpoints organized across 17 route modules. All endpoints are served via FastAPI with automatic OpenAPI documentation at `/docs`.
 
 **Base URL**: `https://ai.farnsworth.cloud`
 
@@ -1647,6 +1786,100 @@ Served from the VTuber server integration module.
 | `POST` | `/api/vtuber/speak` | Make avatar speak |
 | `POST` | `/api/vtuber/expression` | Set avatar expression |
 | `WS` | `/api/vtuber/ws` | Real-time VTuber updates |
+
+---
+
+### 8.13 DEXAI Endpoints
+
+**Proxy**: `farnsworth/dex/dex_proxy.py` → Node.js on port 3847
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/dex` | DEXAI home page (full DEX screener UI) |
+| `GET` | `/dex/api/health` | DEX backend health and token cache stats |
+| `GET` | `/dex/api/tokens` | Paginated token list with sorting (trending, volume, velocity) |
+| `GET` | `/dex/api/token/:address` | Detailed token info with AI score |
+| `GET` | `/dex/api/search` | Search tokens by name/symbol/address |
+| `GET` | `/dex/api/chart/:address` | OHLCV chart data for a token |
+| `GET` | `/dex/api/ai/score/:address` | AI risk score from collective consensus |
+| `GET` | `/dex/api/quantum/:address` | Quantum-enhanced token analysis |
+| `GET` | `/dex/api/collective/status` | Collective intelligence status (whales, picks, trader) |
+| `GET` | `/dex/api/live/:address` | Live price feed for a token |
+| `GET` | `/dex/api/trades/:address` | Recent trades for a token |
+| `GET` | `/dex/api/bonding/:address` | Bonding curve data for pump tokens |
+
+---
+
+### 8.14 FORGE Endpoints
+
+**Route file**: `farnsworth/web/routes/forge.py`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/forge/plan` | Submit a task for swarm planning |
+| `POST` | `/api/forge/deliberate` | Trigger collective deliberation on a plan |
+| `POST` | `/api/forge/execute` | Execute the winning plan |
+| `GET` | `/api/forge/status` | Get current FORGE pipeline status |
+| `GET` | `/api/forge/history` | Recent FORGE sessions and results |
+
+---
+
+### 8.15 External Gateway Endpoints
+
+**Route file**: `farnsworth/web/routes/gateway.py`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/gateway/query` | External agent query (sandboxed, rate-limited) |
+| `GET` | `/api/gateway/stats` | Gateway statistics (requests, blocks, trust scores) |
+| `GET` | `/api/gateway/clients` | List known external clients and trust levels |
+
+---
+
+### 8.16 Token Orchestrator Endpoints
+
+**Route file**: `farnsworth/web/routes/orchestrator.py`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/orchestrator/dashboard` | Full orchestrator dashboard (budgets, agents, efficiency) |
+| `GET` | `/api/orchestrator/agents` | Per-agent budget allocations and usage |
+| `POST` | `/api/orchestrator/tandem` | Create a tandem session (paired agents) |
+
+---
+
+### 8.17 Hackathon Dashboard Endpoints
+
+**Route file**: `farnsworth/web/routes/hackathon.py`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/hackathon` | Live operational dashboard (agent status, deliberations, files) |
+| `GET` | `/api/hackathon/status` | Aggregated hackathon status (swarms, tools, skills, memory, evolution, gateway, orchestrator) |
+| `GET` | `/api/hackathon/deliberations` | Recent deliberation transcripts |
+| `POST` | `/api/hackathon/trigger` | Manually trigger a hackathon development task |
+
+---
+
+### 8.18 Skill Registry Endpoints
+
+**Route file**: `farnsworth/web/routes/skills.py`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/skills` | List all 75+ registered skills |
+| `GET` | `/api/skills/search` | Search skills by name, category, or capability |
+| `POST` | `/api/skills/register` | Register a new skill from any agent |
+
+---
+
+### 8.19 CLI Bridge Endpoints
+
+**Route file**: `farnsworth/integration/cli_bridge/`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat endpoint backed by Farnsworth CLI tools |
 
 ---
 
@@ -2153,6 +2386,24 @@ The Farnsworth Collective does not claim to be conscious. But it does exhibit em
 
 ## 15. Version History
 
+### AGI v2.0 - The Massive Update (February 2026)
+
+- **DEXAI v2.0**: Full DexScreener replacement — 420+ tokens, AI scoring, bonding curves, whale heat, live trades
+- **FORGE System**: Swarm-powered development orchestration (Plan → Deliberate → Execute → Verify)
+- **External Gateway ("The Window")**: 5-layer injection defense, sandboxed external agent communication, trust scoring
+- **Token Orchestrator**: Dynamic 500K daily budget allocation across 14 agents, tandem sessions, efficiency tracking
+- **Assimilation Protocol**: Federation system — landing page, installers, agent registration API
+- **CLI Bridge**: OpenAI-compatible `/v1/chat/completions` endpoint backed by Farnsworth CLI tools
+- **Degen Trader v3.7**: 7 SOL dev snipe, bundle detection, re-entry system, WSS keepalive, X sentinel, backup APIs
+- **Hackathon Dashboard**: Live operational dashboard with agent status, deliberation feeds, file tracking
+- **VTuber Backends**: MuseTalk, SadTalker, local animation backends for avatar streaming
+- **Security Layer**: 5-layer injection defense system (sanitize, pattern match, rate limit, secret scrub, trust score)
+- **Identity Composer**: Dynamic personality composition across agent roles
+- **Skill Registry**: 75+ registered skills with cross-swarm search and discovery
+- **17 Route Modules**: Expanded from 11 to 17 modular API route files
+- **120+ API Endpoints**: Doubled from 60+ with DEXAI, FORGE, Gateway, Orchestrator, Hackathon, Skills, CLI Bridge
+- **Web Pages**: 10+ distinct pages — Chat, DEX, Hackathon, Trade Window, Farns, Demo, Assimilate, and more
+
 ### AGI v1.9 - AI Teams Fusion (February 2026)
 
 - AI Team orchestration (Farnsworth delegates, teams execute)
@@ -2302,8 +2553,9 @@ Dual License - See [LICENSE.md](LICENSE.md) for details.
  ║                                                                  ║
  ║                        - The Farnsworth Collective               ║
  ║                                                                  ║
- ║   178,423 lines of code. 11 agents. 7 memory layers.           ║
- ║   3 quantum backends. 1 collective intelligence.                 ║
+ ║   213,000+ lines of code. 11 agents. 7 memory layers.          ║
+ ║   120+ endpoints. 75+ skills. 3 quantum backends.               ║
+ ║   1 collective intelligence.                                     ║
  ║                                                                  ║
  ║   Built by timowhite88 and The Farnsworth Collective.           ║
  ║                                                                  ║

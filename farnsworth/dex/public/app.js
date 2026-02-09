@@ -7,7 +7,7 @@
    API BASE & CONSTANTS
    ============================================ */
 
-const API = window.location.pathname.startsWith('/dex') ? '/api/dex' : (window.location.pathname.startsWith('/DEXAI') ? '/api/dex' : '/api');
+const API = window.location.pathname.startsWith('/dex') ? '/dex/api' : (window.location.pathname.startsWith('/DEXAI') ? '/DEXAI/api' : '/api');
 
 const PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%231a1a28'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%234a5568' font-size='16'%3E%3F%3C/text%3E%3C/svg%3E";
 
