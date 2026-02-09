@@ -26,7 +26,13 @@ let lastFetchTime = null;
 let chartResizeObserver = null;
 let liveInterval = null;
 let liveSeries = null;
+let liveCandleSeries = null;
+let liveVolumeSeries = null;
 let liveDataPoints = [];
+let liveCandles = [];
+let currentCandle = null;
+let liveLastPrice = null;
+let livePriceDirection = 0;
 let tradesInterval = null;
 
 /* Wallet & Boost */
@@ -445,8 +451,8 @@ async function viewToken(address) {
         currentToken = token;
         renderDetail(token);
 
-        // Load supplementary data in parallel
-        loadChart(address, '15m');
+        // Load supplementary data in parallel — default to LIVE 1s chart
+        loadLiveChart(address);
         loadAI(address);
         loadQuantum(address);
         loadTrades(address);
@@ -628,7 +634,13 @@ function renderPairPanel(token) {
 function destroyChart() {
     if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
     liveSeries = null;
+    liveCandleSeries = null;
+    liveVolumeSeries = null;
     liveDataPoints = [];
+    liveCandles = [];
+    currentCandle = null;
+    liveLastPrice = null;
+    livePriceDirection = 0;
     if (chartResizeObserver) {
         chartResizeObserver.disconnect();
         chartResizeObserver = null;
@@ -913,28 +925,35 @@ async function loadQuantum(address) {
 }
 
 /* ============================================
-   LIVE CHART (real-time area/line chart)
+   LIVE CHART (real-time 1-second candlestick + area)
    ============================================ */
+
+var liveCandleInterval = 5;   // seconds per candle
 
 async function loadLiveChart(address) {
     destroyChart();
-    const container = document.getElementById('chartContainer');
+    var container = document.getElementById('chartContainer');
     if (!container || typeof LightweightCharts === 'undefined') return;
 
     // Update timeframe tab active state
     var tfBtns = document.querySelectorAll('#tfTabs .tf');
     tfBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tf') === 'live'); });
 
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Connecting 1s live feed (Birdeye/Jupiter)...</div>';
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#00ff88;font-size:14px;gap:8px;"><div class="live-tf-dot" style="width:8px;height:8px;border-radius:50%;background:#00ff88;animation:pulse-dot 1s infinite"></div>Connecting 1-second feed...</div>';
 
-    // Seed with 1m candle data for context
+    // Seed with 1m candle data for historical context
     var seedCandles = [];
     try {
         var seedRes = await fetch(API + '/chart/' + encodeURIComponent(address) + '?timeframe=1m');
         if (seedRes.ok) {
             var seedData = await seedRes.json();
             seedCandles = (seedData.candles || []).map(function(c) {
-                return { time: typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000), value: Number(c.close) };
+                return {
+                    time: typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000),
+                    open: Number(c.open), high: Number(c.high),
+                    low: Number(c.low), close: Number(c.close),
+                    volume: Number(c.volume || 0)
+                };
             }).sort(function(a, b) { return a.time - b.time; });
         }
     } catch (e) { /* ignore */ }
@@ -945,65 +964,183 @@ async function loadLiveChart(address) {
         width: container.clientWidth,
         height: 450,
         layout: { background: { type: 'solid', color: '#0a0a14' }, textColor: '#8892a4' },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.02)' }, horzLines: { color: 'rgba(255,255,255,0.02)' } },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
         crosshair: { mode: 0 },
         rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
-        timeScale: { borderColor: 'rgba(255,255,255,0.06)', timeVisible: true, secondsVisible: true, rightOffset: 5 },
+        timeScale: {
+            borderColor: 'rgba(255,255,255,0.06)',
+            timeVisible: true,
+            secondsVisible: true,
+            rightOffset: 5,
+            barSpacing: 6,
+        },
     });
     chartInstance = chart;
 
-    liveSeries = chart.addAreaSeries({
-        topColor: 'rgba(0, 255, 136, 0.35)',
-        bottomColor: 'rgba(0, 255, 136, 0.0)',
-        lineColor: '#00ff88',
-        lineWidth: 2,
-        crosshairMarkerVisible: true,
-        crosshairMarkerRadius: 4,
-        crosshairMarkerBackgroundColor: '#00ff88',
+    // Candlestick series — 5-second candles built from 1s ticks
+    liveCandleSeries = chart.addCandlestickSeries({
+        upColor: '#00ff88',
+        downColor: '#ff3366',
+        borderUpColor: '#00ff88',
+        borderDownColor: '#ff3366',
+        wickUpColor: 'rgba(0,255,136,0.5)',
+        wickDownColor: 'rgba(255,51,102,0.5)',
         priceFormat: { type: 'price', minMove: 0.0000001, precision: 10 },
     });
 
-    // Deduplicate and set seed data
+    // Area overlay for smooth price line
+    liveSeries = chart.addAreaSeries({
+        topColor: 'rgba(0, 255, 136, 0.08)',
+        bottomColor: 'rgba(0, 255, 136, 0.0)',
+        lineColor: 'rgba(0, 255, 136, 0.4)',
+        lineWidth: 1,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 3,
+        crosshairMarkerBackgroundColor: '#00ff88',
+        priceFormat: { type: 'price', minMove: 0.0000001, precision: 10 },
+        priceScaleId: 'right',
+        lastValueVisible: false,
+    });
+
+    // Volume histogram
+    liveVolumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'volume',
+    });
+    chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+
+    // Seed with historical candle data
+    liveCandles = [];
     liveDataPoints = [];
     var seenTimes = {};
     for (var i = 0; i < seedCandles.length; i++) {
         var sc = seedCandles[i];
-        if (!seenTimes[sc.time] && sc.value > 0) {
+        if (!seenTimes[sc.time] && sc.close > 0) {
             seenTimes[sc.time] = true;
-            liveDataPoints.push(sc);
+            liveCandles.push({ time: sc.time, open: sc.open, high: sc.high, low: sc.low, close: sc.close });
+            liveDataPoints.push({ time: sc.time, value: sc.close });
         }
     }
-    if (liveDataPoints.length > 0) liveSeries.setData(liveDataPoints);
+    if (liveCandles.length > 0) {
+        liveCandleSeries.setData(liveCandles);
+        liveSeries.setData(liveDataPoints);
+        // Volume from seed
+        var volData = seedCandles.filter(function(c) { return !seenTimes['v' + c.time]; }).map(function(c) {
+            seenTimes['v' + c.time] = true;
+            return {
+                time: c.time,
+                value: c.volume,
+                color: c.close >= c.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)'
+            };
+        });
+        if (volData.length > 0) liveVolumeSeries.setData(volData);
+    }
 
-    // Start live polling
+    currentCandle = null;
+    liveLastPrice = null;
+    livePriceDirection = 0;
+
+    // Start 1-second live polling
     var pollAddress = address;
+    var tickCount = 0;
+
     liveInterval = setInterval(async function() {
         try {
             var res = await fetch(API + '/live/' + encodeURIComponent(pollAddress));
             if (!res.ok) return;
             var data = await res.json();
             if (!data.price || data.price <= 0) return;
-            var t = Math.floor(Date.now() / 1000);
-            var point = { time: t, value: data.price };
-            // Ensure time is strictly greater than last
-            if (liveDataPoints.length > 0 && t <= liveDataPoints[liveDataPoints.length - 1].time) {
-                t = liveDataPoints[liveDataPoints.length - 1].time + 1;
-                point.time = t;
+
+            var price = data.price;
+            var now = Math.floor(Date.now() / 1000);
+            var candleTime = now - (now % liveCandleInterval); // Align to 5-second boundary
+            tickCount++;
+
+            // Track price direction for UI
+            if (liveLastPrice !== null) {
+                livePriceDirection = price > liveLastPrice ? 1 : (price < liveLastPrice ? -1 : livePriceDirection);
             }
-            liveDataPoints.push(point);
-            if (liveDataPoints.length > 3600) {
-                liveDataPoints = liveDataPoints.slice(-3000);
-                liveSeries.setData(liveDataPoints);
+            liveLastPrice = price;
+
+            // Update or create candle
+            if (!currentCandle || currentCandle.time !== candleTime) {
+                // Finalize previous candle
+                if (currentCandle) {
+                    // Ensure new candle time is strictly after previous
+                    if (liveCandles.length > 0 && candleTime <= liveCandles[liveCandles.length - 1].time) {
+                        candleTime = liveCandles[liveCandles.length - 1].time + liveCandleInterval;
+                    }
+                }
+                // Start new candle
+                currentCandle = { time: candleTime, open: price, high: price, low: price, close: price, ticks: 1 };
+                liveCandles.push(currentCandle);
             } else {
-                liveSeries.update(point);
+                // Update current candle
+                currentCandle.high = Math.max(currentCandle.high, price);
+                currentCandle.low = Math.min(currentCandle.low, price);
+                currentCandle.close = price;
+                currentCandle.ticks++;
             }
+
+            // Update candlestick series
+            liveCandleSeries.update({
+                time: currentCandle.time,
+                open: currentCandle.open,
+                high: currentCandle.high,
+                low: currentCandle.low,
+                close: currentCandle.close,
+            });
+
+            // Update area series (every tick for smooth line)
+            var lineTime = now;
+            if (liveDataPoints.length > 0 && lineTime <= liveDataPoints[liveDataPoints.length - 1].time) {
+                lineTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
+            }
+            var linePoint = { time: lineTime, value: price };
+            liveDataPoints.push(linePoint);
+            liveSeries.update(linePoint);
+
+            // Update volume bar for current candle
+            liveVolumeSeries.update({
+                time: currentCandle.time,
+                value: currentCandle.ticks,
+                color: currentCandle.close >= currentCandle.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)',
+            });
+
+            // Trim old data
+            if (liveCandles.length > 2000) {
+                liveCandles = liveCandles.slice(-1500);
+                liveCandleSeries.setData(liveCandles);
+            }
+            if (liveDataPoints.length > 5000) {
+                liveDataPoints = liveDataPoints.slice(-4000);
+                liveSeries.setData(liveDataPoints);
+            }
+
+            // Auto-scroll to latest
             chart.timeScale().scrollToRealTime();
-            // Update price display
-            setText('dPrice', formatPrice(data.price));
+
+            // Update price display with flash animation
+            var priceEl = document.getElementById('dPrice');
+            if (priceEl) {
+                priceEl.textContent = formatPrice(price);
+                priceEl.classList.remove('price-flash-up', 'price-flash-down');
+                if (livePriceDirection === 1) {
+                    priceEl.classList.add('price-flash-up');
+                } else if (livePriceDirection === -1) {
+                    priceEl.classList.add('price-flash-down');
+                }
+                setTimeout(function() { priceEl.classList.remove('price-flash-up', 'price-flash-down'); }, 600);
+            }
+
+            // Update 5m change from live data
+            if (data.priceChange && data.priceChange.m5 !== undefined) {
+                setChg('dChg5m', data.priceChange.m5);
+            }
         } catch (e) { /* ignore */ }
     }, 1000);
 
-    // Resize
+    // Resize observer
     chartResizeObserver = new ResizeObserver(function(entries) {
         for (var j = 0; j < entries.length; j++) {
             var cr = entries[j].contentRect;
