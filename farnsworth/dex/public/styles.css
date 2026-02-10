@@ -998,6 +998,8 @@ img { display: block; }
 .card-chart {
     grid-column: 1 / 2;
     grid-row: span 2;
+    position: relative;
+    overflow: hidden;
 }
 
 .chart-box {
@@ -1005,6 +1007,45 @@ img { display: block; }
     border-radius: 8px;
     overflow: hidden;
     background: rgba(6, 6, 18, 0.5);
+    transition: height 0.3s ease;
+}
+
+/* Chart controls wrapper */
+.chart-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Chart type toggle (candle/line/bar) */
+.chart-type-toggle {
+    display: flex;
+    gap: 2px;
+    background: rgba(14, 14, 28, 0.7);
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.ct-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.ct-btn:hover {
+    color: var(--text-sec);
+    background: rgba(255,255,255,0.05);
+}
+.ct-btn.active {
+    background: rgba(0, 255, 136, 0.15);
+    color: var(--green);
 }
 
 /* Timeframe tabs */
@@ -1030,6 +1071,43 @@ img { display: block; }
 .tf.active {
     background: var(--green);
     color: #000;
+}
+
+/* Pump overlay - rainbow flash for high velocity pumps */
+.pump-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    border-radius: 12px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.pump-overlay.pumping {
+    opacity: 1;
+    animation: pumpRainbow 0.3s linear infinite;
+}
+
+.pump-overlay.pumping-mild {
+    opacity: 1;
+    animation: pumpGlow 0.8s ease-in-out infinite;
+}
+
+@keyframes pumpRainbow {
+    0%   { box-shadow: inset 0 0 30px rgba(255,0,0,0.15), 0 0 20px rgba(255,0,0,0.1); }
+    14%  { box-shadow: inset 0 0 30px rgba(255,127,0,0.15), 0 0 20px rgba(255,127,0,0.1); }
+    28%  { box-shadow: inset 0 0 30px rgba(255,255,0,0.15), 0 0 20px rgba(255,255,0,0.1); }
+    42%  { box-shadow: inset 0 0 30px rgba(0,255,0,0.15), 0 0 20px rgba(0,255,0,0.1); }
+    57%  { box-shadow: inset 0 0 30px rgba(0,127,255,0.15), 0 0 20px rgba(0,127,255,0.1); }
+    71%  { box-shadow: inset 0 0 30px rgba(75,0,130,0.15), 0 0 20px rgba(75,0,130,0.1); }
+    85%  { box-shadow: inset 0 0 30px rgba(148,0,211,0.15), 0 0 20px rgba(148,0,211,0.1); }
+    100% { box-shadow: inset 0 0 30px rgba(255,0,0,0.15), 0 0 20px rgba(255,0,0,0.1); }
+}
+
+@keyframes pumpGlow {
+    0%, 100% { box-shadow: inset 0 0 20px rgba(0,255,136,0.08), 0 0 10px rgba(0,255,136,0.05); }
+    50% { box-shadow: inset 0 0 40px rgba(0,255,136,0.18), 0 0 20px rgba(0,255,136,0.12); }
 }
 
 /* ---- Buy / Sell Pressure ---- */

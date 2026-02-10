@@ -142,17 +142,25 @@
     <div class="card card-chart">
       <div class="card-head">
         <span>Chart</span>
-        <div class="tf-tabs" id="tfTabs">
-          <button class="tf tf-live" data-tf="live"><span class="live-tf-dot"></span>LIVE</button>
-          <button class="tf" data-tf="1m">1m</button>
-          <button class="tf" data-tf="5m">5m</button>
-          <button class="tf active" data-tf="15m">15m</button>
-          <button class="tf" data-tf="1h">1H</button>
-          <button class="tf" data-tf="4h">4H</button>
-          <button class="tf" data-tf="1d">1D</button>
+        <div class="chart-controls">
+          <div class="chart-type-toggle" id="chartTypeToggle">
+            <button class="ct-btn active" data-type="candle" title="Candlestick"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="3" y="2" width="2" height="12" rx="0.5" fill="currentColor" opacity="0.4"/><rect x="3" y="5" width="2" height="6" rx="0.5" fill="currentColor"/><rect x="7" y="4" width="2" height="10" rx="0.5" fill="currentColor" opacity="0.4"/><rect x="7" y="6" width="2" height="5" rx="0.5" fill="currentColor"/><rect x="11" y="1" width="2" height="13" rx="0.5" fill="currentColor" opacity="0.4"/><rect x="11" y="3" width="2" height="7" rx="0.5" fill="currentColor"/></svg></button>
+            <button class="ct-btn" data-type="line" title="Line Chart"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 12 L4 8 L7 10 L10 4 L15 2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button class="ct-btn" data-type="bar" title="Bar Chart"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="1" y="9" width="3" height="6" rx="0.5" fill="currentColor"/><rect x="5" y="5" width="3" height="10" rx="0.5" fill="currentColor"/><rect x="9" y="7" width="3" height="8" rx="0.5" fill="currentColor"/><rect x="13" y="3" width="2" height="12" rx="0.5" fill="currentColor"/></svg></button>
+          </div>
+          <div class="tf-tabs" id="tfTabs">
+            <button class="tf tf-live" data-tf="live"><span class="live-tf-dot"></span>LIVE</button>
+            <button class="tf" data-tf="1m">1m</button>
+            <button class="tf" data-tf="5m">5m</button>
+            <button class="tf active" data-tf="15m">15m</button>
+            <button class="tf" data-tf="1h">1H</button>
+            <button class="tf" data-tf="4h">4H</button>
+            <button class="tf" data-tf="1d">1D</button>
+          </div>
         </div>
       </div>
       <div id="chartContainer" class="chart-box"></div>
+      <div id="pumpOverlay" class="pump-overlay"></div>
     </div>
 
     <!-- Buy/Sell pressure -->

@@ -33,6 +33,9 @@ let liveCandles = [];
 let currentCandle = null;
 let liveLastPrice = null;
 let livePriceDirection = 0;
+let chartType = 'candle'; // 'candle', 'line', 'bar'
+let pumpHistory = [];     // recent price changes for velocity detection
+let pumpOverlayActive = false;
 let tradesInterval = null;
 
 /* Wallet & Boost */
@@ -650,6 +653,10 @@ function destroyChart() {
     liveLastPrice = null;
     livePriceDirection = 0;
     liveEmaPrice = null;
+    pumpHistory = [];
+    pumpOverlayActive = false;
+    var overlay = document.getElementById('pumpOverlay');
+    if (overlay) { overlay.className = 'pump-overlay'; }
     if (chartResizeObserver) {
         chartResizeObserver.disconnect();
         chartResizeObserver = null;
@@ -662,10 +669,82 @@ function destroyChart() {
     if (container) container.innerHTML = '';
 }
 
+// Chart type toggle handler
+function initChartTypeToggle() {
+    var toggle = document.getElementById('chartTypeToggle');
+    if (!toggle) return;
+    toggle.querySelectorAll('.ct-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var newType = btn.getAttribute('data-type');
+            if (newType === chartType) return;
+            chartType = newType;
+            toggle.querySelectorAll('.ct-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            // Reload current chart with new type
+            if (window.currentDetailAddress) {
+                var activeTf = document.querySelector('#tfTabs .tf.active');
+                var tf = activeTf ? activeTf.getAttribute('data-tf') : '15m';
+                if (tf === 'live') {
+                    loadLiveChart(window.currentDetailAddress);
+                } else {
+                    loadChart(window.currentDetailAddress, tf);
+                }
+            }
+        });
+    });
+}
+
+// Pump velocity detection — returns 'none', 'mild', or 'extreme'
+function detectPumpLevel(price) {
+    var now = Date.now();
+    pumpHistory.push({ price: price, ts: now });
+    // Keep last 15 seconds of data
+    pumpHistory = pumpHistory.filter(function(p) { return now - p.ts < 15000; });
+    if (pumpHistory.length < 3) return 'none';
+    var oldest = pumpHistory[0];
+    var newest = pumpHistory[pumpHistory.length - 1];
+    var pctChange = ((newest.price - oldest.price) / oldest.price) * 100;
+    // Extreme pump: >5% in 15 seconds
+    if (pctChange > 5) return 'extreme';
+    // Mild pump: >2% in 15 seconds
+    if (pctChange > 2) return 'mild';
+    return 'none';
+}
+
+function updatePumpOverlay(level) {
+    var overlay = document.getElementById('pumpOverlay');
+    if (!overlay) return;
+    if (level === 'extreme') {
+        overlay.className = 'pump-overlay pumping';
+        pumpOverlayActive = true;
+    } else if (level === 'mild') {
+        overlay.className = 'pump-overlay pumping-mild';
+        pumpOverlayActive = true;
+    } else {
+        if (pumpOverlayActive) {
+            overlay.className = 'pump-overlay';
+            pumpOverlayActive = false;
+        }
+    }
+}
+
+// Get auto-height based on container
+function getChartHeight() {
+    var container = document.getElementById('chartContainer');
+    if (!container) return 450;
+    var card = container.closest('.card-chart');
+    if (!card) return 450;
+    var headEl = card.querySelector('.card-head');
+    var headH = headEl ? headEl.offsetHeight : 40;
+    var available = card.clientHeight - headH - 16; // 16px for padding
+    return Math.max(available, 280);
+}
+
 async function loadChart(address, timeframe) {
     timeframe = timeframe || '15m';
     const container = document.getElementById('chartContainer');
     if (!container) return;
+    window.currentDetailAddress = address;
 
     // Update active timeframe tab
     const tfBtns = document.querySelectorAll('#tfTabs .tf');
@@ -673,11 +752,11 @@ async function loadChart(address, timeframe) {
         btn.classList.toggle('active', btn.getAttribute('data-tf') === timeframe);
     });
 
-    // Destroy previous chart
     destroyChart();
 
-    // Show loading state
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Loading chart...</div>';
+    var chartH = getChartHeight();
+    container.style.height = chartH + 'px';
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666680;">Loading chart...</div>';
 
     try {
         const res = await fetch(API + '/chart/' + encodeURIComponent(address) + '?timeframe=' + timeframe);
@@ -686,32 +765,33 @@ async function loadChart(address, timeframe) {
         const candles = data.candles || [];
 
         if (candles.length === 0) {
-            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">No chart data available</div>';
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666680;">No chart data available</div>';
             return;
         }
 
-        // Clear container
         container.innerHTML = '';
 
-        // Check that LightweightCharts is available
         if (typeof LightweightCharts === 'undefined') {
-            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Chart library not loaded</div>';
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666680;">Chart library not loaded</div>';
             return;
         }
 
-        // Create chart
         const chart = LightweightCharts.createChart(container, {
             width: container.clientWidth,
-            height: 450,
+            height: chartH,
             layout: {
                 background: { type: 'solid', color: '#0a0a14' },
                 textColor: '#8892a4'
             },
             grid: {
-                vertLines: { color: 'rgba(255,255,255,0.03)' },
-                horzLines: { color: 'rgba(255,255,255,0.03)' }
+                vertLines: { color: 'rgba(255,255,255,0.04)' },
+                horzLines: { color: 'rgba(255,255,255,0.04)' }
             },
-            crosshair: { mode: 0 },
+            crosshair: {
+                mode: 0,
+                vertLine: { color: 'rgba(0,255,136,0.2)', width: 1, style: 2 },
+                horzLine: { color: 'rgba(0,255,136,0.2)', width: 1, style: 2 }
+            },
             rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
             timeScale: {
                 borderColor: 'rgba(255,255,255,0.06)',
@@ -722,28 +802,16 @@ async function loadChart(address, timeframe) {
 
         chartInstance = chart;
 
-        // Candlestick series
-        const candleSeries = chart.addCandlestickSeries({
-            upColor: '#00ff88',
-            downColor: '#ff3366',
-            borderUpColor: '#00ff88',
-            borderDownColor: '#ff3366',
-            wickUpColor: '#00ff88',
-            wickDownColor: '#ff3366'
-        });
-
-        // Prepare candle data (ensure time is ascending and unique)
+        // Prepare candle data
         const candleData = candles
             .map(c => ({
                 time: typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000),
-                open: Number(c.open),
-                high: Number(c.high),
-                low: Number(c.low),
-                close: Number(c.close)
+                open: Number(c.open), high: Number(c.high),
+                low: Number(c.low), close: Number(c.close),
+                volume: Number(c.volume || 0)
             }))
             .sort((a, b) => a.time - b.time);
 
-        // Deduplicate by time
         const dedupedCandles = [];
         const seenTimes = new Set();
         for (const c of candleData) {
@@ -753,53 +821,80 @@ async function loadChart(address, timeframe) {
             }
         }
 
-        candleSeries.setData(dedupedCandles);
+        // Render based on chart type
+        if (chartType === 'line') {
+            // Thick animated line chart with gradient fill
+            var lineSeries = chart.addAreaSeries({
+                topColor: 'rgba(0, 255, 136, 0.25)',
+                bottomColor: 'rgba(0, 255, 136, 0.0)',
+                lineColor: '#00ff88',
+                lineWidth: 3,
+                crosshairMarkerVisible: true,
+                crosshairMarkerRadius: 5,
+                crosshairMarkerBorderColor: '#00ff88',
+                crosshairMarkerBackgroundColor: 'rgba(0,255,136,0.3)',
+            });
+            lineSeries.setData(dedupedCandles.map(c => ({ time: c.time, value: c.close })));
+        } else if (chartType === 'bar') {
+            // Bar chart — each candle as a colored bar
+            var barSeries = chart.addHistogramSeries({
+                priceFormat: { type: 'price', minMove: 0.0000001, precision: 10 },
+            });
+            barSeries.setData(dedupedCandles.map(c => ({
+                time: c.time,
+                value: c.close,
+                color: c.close >= c.open ? 'rgba(0,255,136,0.8)' : 'rgba(255,51,102,0.8)'
+            })));
+        } else {
+            // Candlestick (default)
+            var candleSeries = chart.addCandlestickSeries({
+                upColor: '#00ff88',
+                downColor: '#ff3366',
+                borderUpColor: '#00ff88',
+                borderDownColor: '#ff3366',
+                wickUpColor: 'rgba(0,255,136,0.6)',
+                wickDownColor: 'rgba(255,51,102,0.6)'
+            });
+            candleSeries.setData(dedupedCandles);
+        }
 
-        // Volume histogram series
+        // Volume histogram (shown for all chart types)
         const volumeSeries = chart.addHistogramSeries({
             priceFormat: { type: 'volume' },
             priceScaleId: 'volume'
         });
+        chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-        chart.priceScale('volume').applyOptions({
-            scaleMargins: { top: 0.8, bottom: 0 }
-        });
-
-        const volumeData = candles
-            .map(c => ({
-                time: typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000),
-                value: Number(c.volume || 0),
-                color: Number(c.close) >= Number(c.open) ? 'rgba(0,255,136,0.3)' : 'rgba(255,51,102,0.3)'
-            }))
-            .sort((a, b) => a.time - b.time);
-
-        // Deduplicate volume data by time
         const dedupedVolume = [];
         const seenVolTimes = new Set();
-        for (const v of volumeData) {
-            if (!seenVolTimes.has(v.time)) {
-                seenVolTimes.add(v.time);
-                dedupedVolume.push(v);
+        for (const c of dedupedCandles) {
+            if (!seenVolTimes.has(c.time)) {
+                seenVolTimes.add(c.time);
+                dedupedVolume.push({
+                    time: c.time,
+                    value: c.volume,
+                    color: c.close >= c.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)'
+                });
             }
         }
-
         volumeSeries.setData(dedupedVolume);
 
-        // Fit content
         chart.timeScale().fitContent();
 
-        // Resize observer
+        // Responsive resize
         chartResizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
-                const { width, height } = entry.contentRect;
-                chart.applyOptions({ width: width, height: Math.max(height, 300) });
+                const { width } = entry.contentRect;
+                var h = getChartHeight();
+                chart.applyOptions({ width: width, height: Math.max(h, 280) });
+                container.style.height = Math.max(h, 280) + 'px';
             }
         });
         chartResizeObserver.observe(container);
 
     } catch (err) {
         console.error('Failed to load chart:', err);
-        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#666680;">Chart unavailable</div>';
+        container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666680;">Chart unavailable</div>';
     }
 }
 
@@ -1106,14 +1201,16 @@ async function loadLiveChart(address) {
     destroyChart();
     var container = document.getElementById('chartContainer');
     if (!container || typeof LightweightCharts === 'undefined') return;
+    window.currentDetailAddress = address;
 
-    // Update timeframe tab active state
     var tfBtns = document.querySelectorAll('#tfTabs .tf');
     tfBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tf') === 'live'); });
 
-    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:450px;color:#00ff88;font-size:14px;gap:8px;"><div class="live-tf-dot" style="width:8px;height:8px;border-radius:50%;background:#00ff88;animation:pulse-dot 1s infinite"></div>Connecting 1-second feed...</div>';
+    var chartH = getChartHeight();
+    container.style.height = chartH + 'px';
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#00ff88;font-size:14px;gap:8px;"><div class="live-tf-dot" style="width:8px;height:8px;border-radius:50%;background:#00ff88;animation:pulse-dot 1s infinite"></div>Connecting 1-second feed...</div>';
 
-    // Seed with 1m candle data for historical context
+    // Seed with 1m candle data
     var seedCandles = [];
     try {
         var seedRes = await fetch(API + '/chart/' + encodeURIComponent(address) + '?timeframe=1m');
@@ -1134,10 +1231,14 @@ async function loadLiveChart(address) {
 
     var chart = LightweightCharts.createChart(container, {
         width: container.clientWidth,
-        height: 450,
+        height: chartH,
         layout: { background: { type: 'solid', color: '#0a0a14' }, textColor: '#8892a4' },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
-        crosshair: { mode: 0 },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+        crosshair: {
+            mode: 0,
+            vertLine: { color: 'rgba(0,255,136,0.2)', width: 1, style: 2 },
+            horzLine: { color: 'rgba(0,255,136,0.2)', width: 1, style: 2 }
+        },
         rightPriceScale: { borderColor: 'rgba(255,255,255,0.06)' },
         timeScale: {
             borderColor: 'rgba(255,255,255,0.06)',
@@ -1149,30 +1250,65 @@ async function loadLiveChart(address) {
     });
     chartInstance = chart;
 
-    // Candlestick series — 5-second candles built from 1s ticks
-    liveCandleSeries = chart.addCandlestickSeries({
-        upColor: '#00ff88',
-        downColor: '#ff3366',
-        borderUpColor: '#00ff88',
-        borderDownColor: '#ff3366',
-        wickUpColor: 'rgba(0,255,136,0.5)',
-        wickDownColor: 'rgba(255,51,102,0.5)',
-        priceFormat: { type: 'price', minMove: 0.0000001, precision: 10 },
-    });
+    var priceOpts = { type: 'price', minMove: 0.0000001, precision: 10 };
+    var isLineMode = (chartType === 'line');
+    var isBarMode = (chartType === 'bar');
 
-    // Area overlay for smooth price line
-    liveSeries = chart.addAreaSeries({
-        topColor: 'rgba(0, 255, 136, 0.08)',
-        bottomColor: 'rgba(0, 255, 136, 0.0)',
-        lineColor: 'rgba(0, 255, 136, 0.4)',
-        lineWidth: 1,
-        crosshairMarkerVisible: true,
-        crosshairMarkerRadius: 3,
-        crosshairMarkerBackgroundColor: '#00ff88',
-        priceFormat: { type: 'price', minMove: 0.0000001, precision: 10 },
-        priceScaleId: 'right',
-        lastValueVisible: false,
-    });
+    // Main price series — depends on chart type
+    if (isLineMode) {
+        // Thick animated line with gradient fill
+        liveSeries = chart.addAreaSeries({
+            topColor: 'rgba(0, 255, 136, 0.2)',
+            bottomColor: 'rgba(0, 255, 136, 0.0)',
+            lineColor: '#00ff88',
+            lineWidth: 3,
+            crosshairMarkerVisible: true,
+            crosshairMarkerRadius: 5,
+            crosshairMarkerBorderColor: '#00ff88',
+            crosshairMarkerBackgroundColor: 'rgba(0,255,136,0.3)',
+            priceFormat: priceOpts,
+        });
+        liveCandleSeries = null;
+    } else if (isBarMode) {
+        // Bar chart — each tick is a bar
+        liveCandleSeries = chart.addHistogramSeries({
+            priceFormat: priceOpts,
+        });
+        // Also add thin line overlay for continuity
+        liveSeries = chart.addAreaSeries({
+            topColor: 'rgba(0, 255, 136, 0.05)',
+            bottomColor: 'rgba(0, 255, 136, 0.0)',
+            lineColor: 'rgba(0, 255, 136, 0.3)',
+            lineWidth: 1,
+            crosshairMarkerVisible: false,
+            priceFormat: priceOpts,
+            priceScaleId: 'right',
+            lastValueVisible: false,
+        });
+    } else {
+        // Candlestick + area overlay (default)
+        liveCandleSeries = chart.addCandlestickSeries({
+            upColor: '#00ff88',
+            downColor: '#ff3366',
+            borderUpColor: '#00ff88',
+            borderDownColor: '#ff3366',
+            wickUpColor: 'rgba(0,255,136,0.5)',
+            wickDownColor: 'rgba(255,51,102,0.5)',
+            priceFormat: priceOpts,
+        });
+        liveSeries = chart.addAreaSeries({
+            topColor: 'rgba(0, 255, 136, 0.08)',
+            bottomColor: 'rgba(0, 255, 136, 0.0)',
+            lineColor: 'rgba(0, 255, 136, 0.4)',
+            lineWidth: 1,
+            crosshairMarkerVisible: true,
+            crosshairMarkerRadius: 3,
+            crosshairMarkerBackgroundColor: '#00ff88',
+            priceFormat: priceOpts,
+            priceScaleId: 'right',
+            lastValueVisible: false,
+        });
+    }
 
     // Volume histogram
     liveVolumeSeries = chart.addHistogramSeries({
@@ -1181,7 +1317,7 @@ async function loadLiveChart(address) {
     });
     chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
 
-    // Seed with historical candle data
+    // Seed with historical data
     liveCandles = [];
     liveDataPoints = [];
     var seenTimes = {};
@@ -1194,16 +1330,20 @@ async function loadLiveChart(address) {
         }
     }
     if (liveCandles.length > 0) {
-        liveCandleSeries.setData(liveCandles);
-        liveSeries.setData(liveDataPoints);
-        // Volume from seed
+        if (isLineMode) {
+            liveSeries.setData(liveDataPoints);
+        } else if (isBarMode) {
+            liveCandleSeries.setData(liveCandles.map(function(c) {
+                return { time: c.time, value: c.close, color: c.close >= c.open ? 'rgba(0,255,136,0.7)' : 'rgba(255,51,102,0.7)' };
+            }));
+            liveSeries.setData(liveDataPoints);
+        } else {
+            liveCandleSeries.setData(liveCandles);
+            liveSeries.setData(liveDataPoints);
+        }
         var volData = seedCandles.filter(function(c) { return !seenTimes['v' + c.time]; }).map(function(c) {
             seenTimes['v' + c.time] = true;
-            return {
-                time: c.time,
-                value: c.volume,
-                color: c.close >= c.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)'
-            };
+            return { time: c.time, value: c.volume, color: c.close >= c.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)' };
         });
         if (volData.length > 0) liveVolumeSeries.setData(volData);
     }
@@ -1212,8 +1352,8 @@ async function loadLiveChart(address) {
     liveLastPrice = null;
     livePriceDirection = 0;
     liveEmaPrice = null;
+    pumpHistory = [];
 
-    // Start 1-second live polling
     var pollAddress = address;
     var tickCount = 0;
 
@@ -1226,79 +1366,142 @@ async function loadLiveChart(address) {
 
             var price = data.price;
             var now = Math.floor(Date.now() / 1000);
-            var candleTime = now - (now % liveCandleInterval); // Align to 5-second boundary
+            var candleTime = now - (now % liveCandleInterval);
             tickCount++;
 
-            // Track price direction for UI
             if (liveLastPrice !== null) {
                 livePriceDirection = price > liveLastPrice ? 1 : (price < liveLastPrice ? -1 : livePriceDirection);
             }
             liveLastPrice = price;
 
-            // Update or create candle
-            if (!currentCandle || currentCandle.time !== candleTime) {
-                // Finalize previous candle
-                if (currentCandle) {
-                    // Ensure new candle time is strictly after previous
-                    if (liveCandles.length > 0 && candleTime <= liveCandles[liveCandles.length - 1].time) {
-                        candleTime = liveCandles[liveCandles.length - 1].time + liveCandleInterval;
-                    }
+            // Pump detection
+            var pumpLevel = detectPumpLevel(price);
+            updatePumpOverlay(pumpLevel);
+
+            // Update main series based on chart type
+            if (isLineMode) {
+                // Line mode: every tick is a data point with thick animated line
+                var smoothed = emaSmooth(price);
+                var lineTime = now;
+                if (liveDataPoints.length > 0 && lineTime <= liveDataPoints[liveDataPoints.length - 1].time) {
+                    lineTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
                 }
-                // Start new candle
-                currentCandle = { time: candleTime, open: price, high: price, low: price, close: price, ticks: 1 };
-                liveCandles.push(currentCandle);
+                liveDataPoints.push({ time: lineTime, value: smoothed });
+                liveSeries.update({ time: lineTime, value: smoothed });
+
+                // Dynamic line color on pump
+                if (pumpLevel === 'extreme') {
+                    var hue = (Date.now() / 5) % 360;
+                    liveSeries.applyOptions({
+                        lineColor: 'hsl(' + hue + ', 100%, 60%)',
+                        topColor: 'hsla(' + hue + ', 100%, 50%, 0.25)',
+                    });
+                } else if (pumpLevel === 'mild') {
+                    liveSeries.applyOptions({
+                        lineColor: '#00ff88',
+                        topColor: 'rgba(0, 255, 136, 0.3)',
+                    });
+                } else {
+                    liveSeries.applyOptions({
+                        lineColor: '#00ff88',
+                        topColor: 'rgba(0, 255, 136, 0.2)',
+                    });
+                }
+            } else if (isBarMode) {
+                // Bar mode: every tick is a bar
+                var barTime = now;
+                if (liveCandles.length > 0 && barTime <= liveCandles[liveCandles.length - 1].time) {
+                    barTime = liveCandles[liveCandles.length - 1].time + 1;
+                }
+                var barColor = livePriceDirection >= 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,51,102,0.7)';
+                if (pumpLevel === 'extreme') {
+                    var hue2 = (Date.now() / 5) % 360;
+                    barColor = 'hsl(' + hue2 + ', 100%, 60%)';
+                }
+                liveCandles.push({ time: barTime, value: price, color: barColor });
+                liveCandleSeries.update({ time: barTime, value: price, color: barColor });
+
+                // Also update thin line overlay
+                var smoothed2 = emaSmooth(price);
+                if (liveDataPoints.length > 0 && barTime <= liveDataPoints[liveDataPoints.length - 1].time) {
+                    barTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
+                }
+                liveDataPoints.push({ time: barTime, value: smoothed2 });
+                liveSeries.update({ time: barTime, value: smoothed2 });
             } else {
-                // Update current candle
-                currentCandle.high = Math.max(currentCandle.high, price);
-                currentCandle.low = Math.min(currentCandle.low, price);
-                currentCandle.close = price;
-                currentCandle.ticks++;
+                // Candlestick mode (default)
+                if (!currentCandle || currentCandle.time !== candleTime) {
+                    if (currentCandle) {
+                        if (liveCandles.length > 0 && candleTime <= liveCandles[liveCandles.length - 1].time) {
+                            candleTime = liveCandles[liveCandles.length - 1].time + liveCandleInterval;
+                        }
+                    }
+                    currentCandle = { time: candleTime, open: price, high: price, low: price, close: price, ticks: 1 };
+                    liveCandles.push(currentCandle);
+                } else {
+                    currentCandle.high = Math.max(currentCandle.high, price);
+                    currentCandle.low = Math.min(currentCandle.low, price);
+                    currentCandle.close = price;
+                    currentCandle.ticks++;
+                }
+
+                // Dynamic candle colors on pump
+                if (pumpLevel === 'extreme') {
+                    var hue3 = (Date.now() / 5) % 360;
+                    liveCandleSeries.applyOptions({
+                        upColor: 'hsl(' + hue3 + ', 100%, 60%)',
+                        borderUpColor: 'hsl(' + hue3 + ', 100%, 60%)',
+                        wickUpColor: 'hsl(' + hue3 + ', 100%, 40%)',
+                    });
+                } else {
+                    liveCandleSeries.applyOptions({
+                        upColor: '#00ff88', borderUpColor: '#00ff88', wickUpColor: 'rgba(0,255,136,0.5)',
+                    });
+                }
+
+                liveCandleSeries.update({
+                    time: currentCandle.time,
+                    open: currentCandle.open, high: currentCandle.high,
+                    low: currentCandle.low, close: currentCandle.close,
+                });
+
+                var smoothed3 = emaSmooth(price);
+                var lineTime3 = now;
+                if (liveDataPoints.length > 0 && lineTime3 <= liveDataPoints[liveDataPoints.length - 1].time) {
+                    lineTime3 = liveDataPoints[liveDataPoints.length - 1].time + 1;
+                }
+                liveDataPoints.push({ time: lineTime3, value: smoothed3 });
+                liveSeries.update({ time: lineTime3, value: smoothed3 });
+
+                liveVolumeSeries.update({
+                    time: currentCandle.time,
+                    value: currentCandle.ticks,
+                    color: currentCandle.close >= currentCandle.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)',
+                });
             }
-
-            // Update candlestick series
-            liveCandleSeries.update({
-                time: currentCandle.time,
-                open: currentCandle.open,
-                high: currentCandle.high,
-                low: currentCandle.low,
-                close: currentCandle.close,
-            });
-
-            // Update area series with EMA-smoothed price (reduces jitter)
-            var smoothed = emaSmooth(price);
-            var lineTime = now;
-            if (liveDataPoints.length > 0 && lineTime <= liveDataPoints[liveDataPoints.length - 1].time) {
-                lineTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
-            }
-            var linePoint = { time: lineTime, value: smoothed };
-            liveDataPoints.push(linePoint);
-            liveSeries.update(linePoint);
-
-            // Update volume bar for current candle
-            liveVolumeSeries.update({
-                time: currentCandle.time,
-                value: currentCandle.ticks,
-                color: currentCandle.close >= currentCandle.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)',
-            });
 
             // Trim old data
             if (liveCandles.length > 2000) {
                 liveCandles = liveCandles.slice(-1500);
-                liveCandleSeries.setData(liveCandles);
+                if (liveCandleSeries) liveCandleSeries.setData(liveCandles);
             }
             if (liveDataPoints.length > 5000) {
                 liveDataPoints = liveDataPoints.slice(-4000);
-                liveSeries.setData(liveDataPoints);
+                if (liveSeries) liveSeries.setData(liveDataPoints);
             }
 
-            // Auto-scroll to latest
             chart.timeScale().scrollToRealTime();
 
-            // Update price display with flash animation
+            // Price display flash
             var priceEl = document.getElementById('dPrice');
             if (priceEl) {
                 priceEl.textContent = formatPrice(price);
                 priceEl.classList.remove('price-flash-up', 'price-flash-down');
+                if (pumpLevel === 'extreme') {
+                    priceEl.style.textShadow = '0 0 20px rgba(0,255,136,0.8), 0 0 40px rgba(0,255,136,0.4)';
+                } else {
+                    priceEl.style.textShadow = '';
+                }
                 if (livePriceDirection === 1) {
                     priceEl.classList.add('price-flash-up');
                 } else if (livePriceDirection === -1) {
@@ -1307,18 +1510,19 @@ async function loadLiveChart(address) {
                 setTimeout(function() { priceEl.classList.remove('price-flash-up', 'price-flash-down'); }, 600);
             }
 
-            // Update 5m change from live data
             if (data.priceChange && data.priceChange.m5 !== undefined) {
                 setChg('dChg5m', data.priceChange.m5);
             }
         } catch (e) { /* ignore */ }
     }, 1000);
 
-    // Resize observer
+    // Responsive resize
     chartResizeObserver = new ResizeObserver(function(entries) {
         for (var j = 0; j < entries.length; j++) {
             var cr = entries[j].contentRect;
-            chart.applyOptions({ width: cr.width, height: Math.max(cr.height, 300) });
+            var h = getChartHeight();
+            chart.applyOptions({ width: cr.width, height: Math.max(h, 280) });
+            container.style.height = Math.max(h, 280) + 'px';
         }
     });
     chartResizeObserver.observe(container);
@@ -2194,6 +2398,9 @@ function handleWsMessage(msg) {
    ============================================ */
 
 document.addEventListener('DOMContentLoaded', function () {
+    // 0. Init chart type toggle
+    initChartTypeToggle();
+
     // 1. Init particles
     initParticles();
 
