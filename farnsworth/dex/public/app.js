@@ -1482,9 +1482,15 @@ async function loadLiveChart(address) {
             var pumpLevel = detectPumpLevel(price);
             updatePumpOverlay(pumpLevel);
 
+            // Pick per-bar pump color (cheap — no applyOptions, no re-render)
+            var pumpColor = null;
+            if (pumpLevel === 'extreme') {
+                var hue = (Date.now() / 8) % 360;
+                pumpColor = 'hsl(' + hue + ', 100%, 60%)';
+            }
+
             // Update main series based on chart type
             if (isLineMode) {
-                // Line mode: every tick is a data point with thick animated line
                 var smoothed = emaSmooth(price);
                 var lineTime = now;
                 if (liveDataPoints.length > 0 && lineTime <= liveDataPoints[liveDataPoints.length - 1].time) {
@@ -1492,38 +1498,17 @@ async function loadLiveChart(address) {
                 }
                 liveDataPoints.push({ time: lineTime, value: smoothed });
                 liveSeries.update({ time: lineTime, value: smoothed });
-
-                // Dynamic line color on pump — only applyOptions on state change (expensive!)
-                var nowMs = Date.now();
-                if (pumpLevel === 'extreme' && nowMs - lastRainbowUpdate > 250) {
-                    var hue = (nowMs / 5) % 360;
-                    liveSeries.applyOptions({
-                        lineColor: 'hsl(' + hue + ', 100%, 60%)',
-                        topColor: 'hsla(' + hue + ', 100%, 50%, 0.25)',
-                    });
-                    lastRainbowUpdate = nowMs;
-                } else if (pumpLevel !== lastPumpLevel && pumpLevel !== 'extreme') {
-                    liveSeries.applyOptions({
-                        lineColor: '#00ff88',
-                        topColor: pumpLevel === 'mild' ? 'rgba(0, 255, 136, 0.3)' : 'rgba(0, 255, 136, 0.2)',
-                    });
-                }
-                lastPumpLevel = pumpLevel;
+                // Line/area series doesn't support per-point colors — pump overlay handles the visual
             } else if (isBarMode) {
-                // Bar mode: every tick is a bar
                 var barTime = now;
                 if (liveCandles.length > 0 && barTime <= liveCandles[liveCandles.length - 1].time) {
                     barTime = liveCandles[liveCandles.length - 1].time + 1;
                 }
-                var barColor = livePriceDirection >= 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,51,102,0.7)';
-                if (pumpLevel === 'extreme') {
-                    var hue2 = (Date.now() / 5) % 360;
-                    barColor = 'hsl(' + hue2 + ', 100%, 60%)';
-                }
+                // Per-bar color: rainbow during pump, normal green/red otherwise
+                var barColor = pumpColor || (livePriceDirection >= 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,51,102,0.7)');
                 liveCandles.push({ time: barTime, value: price, color: barColor });
                 liveCandleSeries.update({ time: barTime, value: price, color: barColor });
 
-                // Also update thin line overlay
                 var smoothed2 = emaSmooth(price);
                 if (liveDataPoints.length > 0 && barTime <= liveDataPoints[liveDataPoints.length - 1].time) {
                     barTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
@@ -1547,28 +1532,18 @@ async function loadLiveChart(address) {
                     currentCandle.ticks++;
                 }
 
-                // Dynamic candle colors on pump — throttled to avoid stalling
-                var nowMs3 = Date.now();
-                if (pumpLevel === 'extreme' && nowMs3 - lastRainbowUpdate > 250) {
-                    var hue3 = (nowMs3 / 5) % 360;
-                    liveCandleSeries.applyOptions({
-                        upColor: 'hsl(' + hue3 + ', 100%, 60%)',
-                        borderUpColor: 'hsl(' + hue3 + ', 100%, 60%)',
-                        wickUpColor: 'hsl(' + hue3 + ', 100%, 40%)',
-                    });
-                    lastRainbowUpdate = nowMs3;
-                } else if (pumpLevel !== lastPumpLevel && pumpLevel !== 'extreme') {
-                    liveCandleSeries.applyOptions({
-                        upColor: '#00ff88', borderUpColor: '#00ff88', wickUpColor: 'rgba(0,255,136,0.5)',
-                    });
-                }
-                lastPumpLevel = pumpLevel;
-
-                liveCandleSeries.update({
+                // Per-candle color: rainbow during pump, no applyOptions needed
+                var candleUpdate = {
                     time: currentCandle.time,
                     open: currentCandle.open, high: currentCandle.high,
                     low: currentCandle.low, close: currentCandle.close,
-                });
+                };
+                if (pumpColor) {
+                    candleUpdate.color = pumpColor;
+                    candleUpdate.borderColor = pumpColor;
+                    candleUpdate.wickColor = pumpColor;
+                }
+                liveCandleSeries.update(candleUpdate);
 
                 var smoothed3 = emaSmooth(price);
                 var lineTime3 = now;
@@ -1581,7 +1556,7 @@ async function loadLiveChart(address) {
                 liveVolumeSeries.update({
                     time: currentCandle.time,
                     value: currentCandle.ticks,
-                    color: currentCandle.close >= currentCandle.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)',
+                    color: pumpColor || (currentCandle.close >= currentCandle.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)'),
                 });
             }
 
