@@ -370,14 +370,14 @@ class TraderConfig:
     helius_rpc_url: str = ""        # v4.2: Helius staked RPC for sendTransaction (better landing)
     helius_api_key: str = ""        # v4.2: Helius API key for priority fee estimation + webhooks
     max_position_sol: float = 0.02   # v4.1: conservative 0.02 SOL until profitable
-    max_positions: int = 8           # v4.0: tighter — fewer positions, higher quality
+    max_positions: int = 3           # v4.4: max 3 positions — concentrate on quality over quantity
     min_liquidity: float = 2000.0    # v4.0: raised from 1000 — skip ultra-thin pools
     max_liquidity: float = 150000.0  # v4.0: tightened from 200k
     max_fdv: float = 300000.0        # v4.0: tightened from 500k — focus on true low caps
-    min_age_minutes: float = 0.5
-    max_age_minutes: float = 12.0    # v4.0: tighter from 15 — only ultra-fresh
-    min_score: float = 50.0          # v4.1: raised from 45 — only buy strong setups
-    scan_interval: int = 3           # v4.0: 3s scan — max rate without hitting limits
+    min_age_minutes: float = 2.0     # v4.4: raised from 0.5 — <2min tokens had 0% win rate
+    max_age_minutes: float = 10.0    # v4.4: tighter — proven tokens only
+    min_score: float = 65.0          # v4.4: raised from 50 — only high-quality setups
+    scan_interval: int = 5           # v4.4: slower scan — trade less, win more
     slippage_bps: int = 500
     priority_fee_lamports: int = 100000
     reserve_sol: float = 0.05
@@ -387,7 +387,7 @@ class TraderConfig:
     use_pumpfun: bool = True        # pump.fun WebSocket monitoring
     use_wallet_analysis: bool = True  # wallet graph/cabal detection
     cabal_is_bullish: bool = True   # treat coordinated wallets as positive signal
-    max_rug_probability: float = 0.35  # v4.1: tighter from 0.45 — skip anything > 35% rug chance
+    max_rug_probability: float = 0.20  # v4.4: 20% max — creator_rug was #1 loss cause (6/9 sells)
     # v3: Copy trading
     use_copy_trading: bool = True   # track and copy top wallets
     copy_trade_max_sol: float = 0.02  # v4.1: 0.02 SOL for copy trades
@@ -398,26 +398,26 @@ class TraderConfig:
     # v3.5: Bonding curve sniper
     use_bonding_curve: bool = True     # direct pump.fun bonding curve buys
     bonding_curve_max_sol: float = 0.02  # v4.1: 0.02 SOL for sniper buys
-    bonding_curve_min_buys: int = 3    # v4.0: raised from 2 — need 3 buys for confirmation
-    bonding_curve_max_progress: float = 40.0  # v4.0: tighter from 50 — get in earlier
-    bonding_curve_min_velocity: float = 1.5  # v4.0: raised from 1.0 — need real momentum
+    bonding_curve_min_buys: int = 8    # v4.4: raised from 3 — need strong confirmation before buying
+    bonding_curve_max_progress: float = 30.0  # v4.4: tighter — don't chase pumped curves
+    bonding_curve_min_velocity: float = 3.0  # v4.4: raised from 1.5 — need real sustained momentum
     use_pumpportal: bool = True        # use PumpPortal API for faster execution
     graduation_sell_pct: float = 0.5   # sell 50% at graduation for guaranteed profit
-    sniper_mode: bool = True           # ultra-fast path: skip deep analysis for hot launches
+    sniper_mode: bool = False          # v4.4: DISABLED — skipping analysis caused most losses
     # v3.6: Cabal coordination tracking
     use_cabal_follow: bool = True       # follow connected wallets into low-cap tokens
     cabal_follow_max_fdv: float = 80000.0   # v4.0: tighter from 100k — only follow into sub-80k FDV
-    cabal_follow_min_wallets: int = 3    # v4.0: raised from 2 — need 3+ connected wallets
+    cabal_follow_min_wallets: int = 5    # v4.4: raised from 3 — need strong cabal signal
     cabal_follow_max_sol: float = 0.02   # v4.1: 0.02 SOL for cabal follows
     velocity_drop_sell_pct: float = 0.30 # v4.1: tighter from 0.35 — sell even faster on vel death
     # v3.7: Instant snipe on big dev buy / bundle at pool creation
-    instant_snipe: bool = True             # snipe pool the moment it launches if dev buy is big
-    instant_snipe_min_dev_sol: float = 3.0 # v4.0: raised from 2.0 — need bigger dev buy for confidence
-    instant_snipe_max_sol: float = 0.02    # v4.1: 0.02 SOL for instant snipes
-    bundle_snipe: bool = True              # snipe when bundle detected (multiple buys within seconds)
-    bundle_min_buys: int = 3               # min buys within bundle_window_sec to trigger
+    instant_snipe: bool = False            # v4.4: DISABLED — instant buys on fresh tokens = rug bait
+    instant_snipe_min_dev_sol: float = 5.0 # v4.4: raised from 3.0 — only massive dev commits
+    instant_snipe_max_sol: float = 0.01    # v4.4: halved — less risk per snipe
+    bundle_snipe: bool = False             # v4.4: DISABLED — bundles on fresh tokens too risky
+    bundle_min_buys: int = 5               # v4.4: raised from 3 — need stronger bundle signal
     bundle_window_sec: float = 5.0         # time window to detect bundle (coordinated buys)
-    bundle_snipe_max_sol: float = 0.02     # v4.1: 0.02 SOL per bundle snipe
+    bundle_snipe_max_sol: float = 0.01     # v4.4: halved
     # v3.7: Re-entry after velocity dump
     reentry_enabled: bool = True           # watch dumped tokens, re-enter on strength
     reentry_velocity_min: float = 2.0      # v3.8: lowered from 3.0
