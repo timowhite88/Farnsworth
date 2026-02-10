@@ -728,16 +728,12 @@ function updatePumpOverlay(level) {
     }
 }
 
-// Get auto-height based on container
+// Fixed chart height — responsive via CSS media queries, not JS feedback loops
+var CHART_HEIGHT = 450;
 function getChartHeight() {
-    var container = document.getElementById('chartContainer');
-    if (!container) return 450;
-    var card = container.closest('.card-chart');
-    if (!card) return 450;
-    var headEl = card.querySelector('.card-head');
-    var headH = headEl ? headEl.offsetHeight : 40;
-    var available = card.clientHeight - headH - 16; // 16px for padding
-    return Math.max(available, 280);
+    if (window.innerWidth <= 768) return 320;
+    if (window.innerWidth <= 1200) return 380;
+    return CHART_HEIGHT;
 }
 
 async function loadChart(address, timeframe) {
@@ -755,7 +751,7 @@ async function loadChart(address, timeframe) {
     destroyChart();
 
     var chartH = getChartHeight();
-    container.style.height = chartH + 'px';
+    container.style.height = '';
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666680;">Loading chart...</div>';
 
     try {
@@ -881,13 +877,11 @@ async function loadChart(address, timeframe) {
 
         chart.timeScale().fitContent();
 
-        // Responsive resize
+        // Responsive resize — only update width, height is fixed
         chartResizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
                 const { width } = entry.contentRect;
-                var h = getChartHeight();
-                chart.applyOptions({ width: width, height: Math.max(h, 280) });
-                container.style.height = Math.max(h, 280) + 'px';
+                if (width > 0) chart.applyOptions({ width: width });
             }
         });
         chartResizeObserver.observe(container);
@@ -1207,7 +1201,7 @@ async function loadLiveChart(address) {
     tfBtns.forEach(function(b) { b.classList.toggle('active', b.getAttribute('data-tf') === 'live'); });
 
     var chartH = getChartHeight();
-    container.style.height = chartH + 'px';
+    container.style.height = '';
     container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#00ff88;font-size:14px;gap:8px;"><div class="live-tf-dot" style="width:8px;height:8px;border-radius:50%;background:#00ff88;animation:pulse-dot 1s infinite"></div>Connecting 1-second feed...</div>';
 
     // Seed with 1m candle data
@@ -1516,13 +1510,11 @@ async function loadLiveChart(address) {
         } catch (e) { /* ignore */ }
     }, 1000);
 
-    // Responsive resize
+    // Responsive resize — only update width, height is fixed
     chartResizeObserver = new ResizeObserver(function(entries) {
         for (var j = 0; j < entries.length; j++) {
             var cr = entries[j].contentRect;
-            var h = getChartHeight();
-            chart.applyOptions({ width: cr.width, height: Math.max(h, 280) });
-            container.style.height = Math.max(h, 280) + 'px';
+            if (cr.width > 0) chart.applyOptions({ width: cr.width });
         }
     });
     chartResizeObserver.observe(container);

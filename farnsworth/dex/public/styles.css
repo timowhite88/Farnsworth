@@ -1004,10 +1004,10 @@ img { display: block; }
 
 .chart-box {
     height: 450px;
+    max-height: 450px;
     border-radius: 8px;
     overflow: hidden;
     background: rgba(6, 6, 18, 0.5);
-    transition: height 0.3s ease;
 }
 
 /* Chart controls wrapper */
