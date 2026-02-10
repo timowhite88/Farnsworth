@@ -4589,6 +4589,21 @@ async def trading_status(request: Request):
         return {"running": False, "message": "Trader not started"}
     return await _trader_instance.status()
 
+@app.get("/api/trading/dashboard")
+async def trading_dashboard():
+    """Public read-only dashboard view — no auth needed."""
+    if _trader_instance is None:
+        return {"running": False}
+    return await _trader_instance.status()
+
+@app.get("/api/trading/dashboard/wallet")
+async def trading_dashboard_wallet():
+    """Public read-only wallet balance — no auth needed."""
+    if _trader_instance:
+        balance = await _trader_instance.get_sol_balance()
+        return {"wallet": _trader_instance.pubkey, "balance_sol": balance}
+    return {"wallet": None, "balance_sol": None}
+
 @app.post("/api/trading/start")
 async def trading_start(request: Request):
     """Start the degen trader."""

@@ -596,7 +596,7 @@ let isLive=false;
 
 async function poll(){
   try{
-    const r=await fetch(`${API}/api/trading/status`);
+    const r=await fetch(`${API}/api/trading/dashboard`);
     if(!r.ok)throw 0;
     const d=await r.json();
     if(d.running){
@@ -607,7 +607,7 @@ async function poll(){
       document.getElementById('cmdDot')&&(document.getElementById('cmdDot').className='cmd-dot live');
 
       // Balance
-      try{const br=await fetch(`${API}/api/trading/wallet`);if(br.ok){const bd=await br.json();document.getElementById('sBalance').textContent=bd.balance_sol!=null?bd.balance_sol.toFixed(4)+' SOL':'--'}}catch(e){}
+      try{const br=await fetch(`${API}/api/trading/dashboard/wallet`);if(br.ok){const bd=await br.json();document.getElementById('sBalance').textContent=bd.balance_sol!=null?bd.balance_sol.toFixed(4)+' SOL':'--'}}catch(e){}
 
       // Stats
       const pnl=d.total_pnl_sol||0;const pe=document.getElementById('sPnl');
