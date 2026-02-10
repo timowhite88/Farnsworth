@@ -6337,30 +6337,33 @@ async def quantum_optimizer_history():
 
 
 # =============================================================================
-# x402 PREMIUM QUANTUM TRADING API — Pay 1 SOL per query
+# x402 PREMIUM QUANTUM TRADING API — Two Tiers
 # =============================================================================
-# HTTP 402 protocol: pay in SOL, get quantum trading intelligence
-# Discoverable via x402 hubs, bazaars, and i1l.store
+# Simulated Quantum: 0.25 SOL | Real Quantum Hardware: 1 SOL
+# Supports: Any Solana memecoin + BTC, ETH, SOL majors
 
 @app.post("/api/x402/quantum/analyze")
 async def x402_quantum_analyze(request: Request):
     """
-    x402 Premium Quantum Trading Signal.
+    x402 Premium Quantum Trading Signal (Tiered).
 
-    Pay 1 SOL → submit any Solana token address → get full quantum analysis.
+    Two tiers: 0.25 SOL (simulated) or 1 SOL (real quantum hardware).
+    Supports: Any Solana memecoin mint address, or BTC/ETH/SOL tickers.
 
     x402 flow:
-    1. First request (no payment): returns 402 with PAYMENT-REQUIRED header
-    2. Client pays 1 SOL to ecosystem wallet
+    1. First request (no payment): returns 402 with both tier options
+    2. Client pays 0.25 SOL or 1 SOL to ecosystem wallet
     3. Retry with X-PAYMENT header containing base64 JSON {signature: "tx_sig"}
-    4. Server verifies on-chain, returns data with PAYMENT-RESPONSE header
+    4. Server verifies on-chain, determines tier from amount, returns data
     """
     from farnsworth.integration.x402.solana_gate import (
         get_solana_verifier, get_x402_stats,
         build_payment_required_payload, encode_x402_header,
         decode_x402_header, build_payment_response,
-        run_premium_quantum_analysis, PaymentReceipt,
+        run_premium_quantum_analysis, PaymentReceipt, determine_tier,
         QUERY_PRICE_LAMPORTS, QUERY_PRICE_SOL,
+        TIER_SIMULATED_SOL, TIER_SIMULATED_LAMPORTS,
+        TIER_HARDWARE_SOL, TIER_HARDWARE_LAMPORTS,
     )
 
     verifier = get_solana_verifier()
@@ -6370,26 +6373,34 @@ async def x402_quantum_analyze(request: Request):
     payment_header = request.headers.get("X-PAYMENT") or request.headers.get("x-payment")
 
     if not payment_header:
-        # No payment — return 402 Payment Required
+        # No payment — return 402 Payment Required with both tiers
         stats.record_402()
-        payment_payload = build_payment_required_payload(
-            "/api/x402/quantum/analyze",
-            "Quantum trading signal for any Solana token — EMA + quantum simulation + collective AI"
-        )
+        payment_payload = build_payment_required_payload("/api/x402/quantum/analyze")
         encoded = encode_x402_header(payment_payload)
 
         return JSONResponse(
             status_code=402,
             content={
                 "error": "Payment Required",
-                "message": f"This endpoint requires {QUERY_PRICE_SOL} SOL per query",
-                "price_sol": QUERY_PRICE_SOL,
-                "price_lamports": QUERY_PRICE_LAMPORTS,
+                "message": "This endpoint offers two pricing tiers",
+                "tiers": {
+                    "simulated": {
+                        "price_sol": TIER_SIMULATED_SOL,
+                        "price_lamports": TIER_SIMULATED_LAMPORTS,
+                        "description": "Quantum simulator with hardware-optimized algo weights (fast, 5-15s)",
+                    },
+                    "hardware": {
+                        "price_sol": TIER_HARDWARE_SOL,
+                        "price_lamports": TIER_HARDWARE_LAMPORTS,
+                        "description": "Real IBM Quantum QPU circuit execution (30-90s processing)",
+                    },
+                },
                 "pay_to": payment_payload["accepts"][0]["payTo"],
                 "network": payment_payload["accepts"][0]["network"],
+                "supported_assets": ["Any Solana memecoin", "BTC", "ETH", "SOL"],
                 "how_to_pay": (
-                    "Send 1 SOL to the pay_to address, then retry this request "
-                    "with header X-PAYMENT containing base64-encoded JSON: "
+                    "Send 0.25 SOL (simulated) or 1 SOL (hardware) to the pay_to address, "
+                    "then retry this request with header X-PAYMENT containing base64-encoded JSON: "
                     '{"signature": "<your_tx_signature>"}'
                 ),
             },
@@ -6397,7 +6408,7 @@ async def x402_quantum_analyze(request: Request):
                 "X-PAYMENT": encoded,
                 "X-Payment-Required": "true",
                 "X-Payment-Network": "solana",
-                "X-Payment-Amount": str(QUERY_PRICE_LAMPORTS),
+                "X-Payment-Amount": str(TIER_SIMULATED_LAMPORTS),
                 "X-Payment-Currency": "SOL",
             },
         )
@@ -6433,7 +6444,22 @@ async def x402_quantum_analyze(request: Request):
             content={
                 "error": "Payment verification failed",
                 "reason": verification.get("error", "Unknown"),
-                "message": "Transaction could not be verified. Ensure you sent >= 1 SOL to the ecosystem wallet.",
+                "message": f"Transaction could not be verified. Minimum payment: {TIER_SIMULATED_SOL} SOL.",
+            },
+            headers={"X-Payment-Required": "true"},
+        )
+
+    # Determine tier from payment amount
+    tier = determine_tier(verification["amount_lamports"])
+    if tier == "insufficient":
+        stats.record_rejected()
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "Insufficient payment",
+                "amount_received_sol": verification["amount_lamports"] / 1e9,
+                "minimum_sol": TIER_SIMULATED_SOL,
+                "message": f"Minimum payment is {TIER_SIMULATED_SOL} SOL. You sent {verification['amount_lamports'] / 1e9:.4f} SOL.",
             },
             headers={"X-Payment-Required": "true"},
         )
@@ -6449,16 +6475,18 @@ async def x402_quantum_analyze(request: Request):
 
     token_address = body.get("token_address", "")
     if not token_address:
-        # Check query params as fallback
         token_address = request.query_params.get("token_address", "")
 
     if not token_address:
         return JSONResponse(
             status_code=400,
-            content={"error": "token_address required in request body or query params"},
+            content={
+                "error": "token_address required in request body or query params",
+                "examples": ["9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS", "BTC", "ETH", "SOL"],
+            },
         )
 
-    # Record payment
+    # Record payment with tier
     receipt = PaymentReceipt(
         tx_signature=tx_signature,
         payer_wallet=verification["payer"],
@@ -6467,53 +6495,76 @@ async def x402_quantum_analyze(request: Request):
         endpoint="/api/x402/quantum/analyze",
         token_queried=token_address,
         verified_at=datetime.now().isoformat(),
+        tier=tier,
         slot=verification.get("slot", 0),
     )
     stats.record_verified(receipt)
 
-    # Run the full quantum analysis
-    analysis = await run_premium_quantum_analysis(token_address)
+    # Run quantum analysis with appropriate tier
+    analysis = await run_premium_quantum_analysis(token_address, tier=tier)
 
     # Build payment response header
     response_payload = build_payment_response(receipt)
     response_encoded = encode_x402_header(response_payload)
 
+    response_headers = {"X-PAYMENT-RESPONSE": response_encoded}
+    if tier == "hardware":
+        response_headers["X-Processing-Time"] = str(analysis.get("processing_time_ms", 0))
+
     return JSONResponse(
         content=analysis,
-        headers={
-            "X-PAYMENT-RESPONSE": response_encoded,
-        },
+        headers=response_headers,
     )
 
 
 @app.get("/api/x402/quantum/pricing")
 async def x402_quantum_pricing():
-    """Public pricing info for the x402 quantum API."""
+    """Public pricing info for the x402 quantum API — both tiers."""
     from farnsworth.integration.x402.solana_gate import (
-        QUERY_PRICE_SOL, QUERY_PRICE_LAMPORTS, ECOSYSTEM_WALLET,
-        SOLANA_NETWORK, SOL_ASSET,
+        ECOSYSTEM_WALLET, SOLANA_NETWORK, SOL_ASSET,
+        TIER_SIMULATED_SOL, TIER_SIMULATED_LAMPORTS,
+        TIER_HARDWARE_SOL, TIER_HARDWARE_LAMPORTS,
     )
     return {
         "service": "Farnsworth Quantum Trading Intelligence",
-        "price_sol": QUERY_PRICE_SOL,
-        "price_lamports": QUERY_PRICE_LAMPORTS,
-        "pay_to": ECOSYSTEM_WALLET,
-        "network": SOLANA_NETWORK,
-        "asset": SOL_ASSET,
         "protocol": "x402",
         "endpoint": "/api/x402/quantum/analyze",
         "method": "POST",
-        "description": (
-            "Submit any Solana token address, receive quantum-enhanced trading intelligence: "
-            "EMA momentum, quantum simulation, collective AI deliberation, "
-            "signal fusion, scenario analysis, and accuracy stats."
-        ),
+        "pay_to": ECOSYSTEM_WALLET,
+        "network": SOLANA_NETWORK,
+        "asset": SOL_ASSET,
+        "tiers": {
+            "simulated": {
+                "price_sol": TIER_SIMULATED_SOL,
+                "price_lamports": TIER_SIMULATED_LAMPORTS,
+                "description": "Quantum simulator with hardware-optimized algo weights",
+                "estimated_time": "5-15 seconds",
+                "features": [
+                    "ema_momentum", "quantum_simulation",
+                    "hardware_optimized_weights", "collective_intelligence",
+                    "signal_fusion", "scenario_analysis",
+                ],
+            },
+            "hardware": {
+                "price_sol": TIER_HARDWARE_SOL,
+                "price_lamports": TIER_HARDWARE_LAMPORTS,
+                "description": "Real IBM Quantum QPU circuit execution",
+                "estimated_time": "30-90 seconds",
+                "features": [
+                    "ema_momentum", "ibm_quantum_hardware",
+                    "higher_qubit_count", "increased_shot_count",
+                    "collective_intelligence", "signal_fusion",
+                    "scenario_analysis", "bell_correlation_verification",
+                ],
+            },
+        },
+        "supported_assets": ["Any Solana memecoin", "BTC", "ETH", "SOL"],
         "how_to_use": {
-            "step_1": "POST to /api/x402/quantum/analyze with {\"token_address\": \"...\"}",
-            "step_2": "Receive 402 with payment requirements",
-            "step_3": f"Send {QUERY_PRICE_SOL} SOL to {ECOSYSTEM_WALLET}",
+            "step_1": "POST to /api/x402/quantum/analyze with {\"token_address\": \"BTC\"} or any Solana mint",
+            "step_2": "Receive 402 with both tier options",
+            "step_3": f"Send {TIER_SIMULATED_SOL} SOL (simulated) or {TIER_HARDWARE_SOL} SOL (hardware) to {ECOSYSTEM_WALLET}",
             "step_4": "Retry POST with X-PAYMENT header: base64({\"signature\": \"<tx_sig>\"})",
-            "step_5": "Receive full quantum analysis response",
+            "step_5": "Tier auto-detected from payment amount. Receive full quantum analysis.",
         },
     }
 

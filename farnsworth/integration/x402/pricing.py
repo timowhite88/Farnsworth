@@ -41,10 +41,11 @@ ENDPOINT_PRICING: Dict[str, Decimal] = {
     "/api/trade/execute": Decimal("0.25"),
     "/api/trade/swap": Decimal("0.25"),
 
-    # Premium quantum trading (x402 Solana-native — 1 SOL, handled by solana_gate)
+    # Premium quantum trading (x402 Solana-native, handled by solana_gate)
+    # Two tiers: Simulated (0.25 SOL) and Real Quantum Hardware (1 SOL)
     # Listed here for pricing catalog completeness; actual gating is in solana_gate.py
-    "/api/x402/quantum/analyze": Decimal("0"),  # Gated by SOL payment, not USDC middleware
-    "/api/x402/quantum/pricing": Decimal("0"),  # Free — pricing info
+    "/api/x402/quantum/analyze": Decimal("0"),  # Gated by SOL payment (0.25 or 1 SOL), not USDC middleware
+    "/api/x402/quantum/pricing": Decimal("0"),  # Free — pricing info (shows both tiers)
     "/api/x402/quantum/stats": Decimal("0"),    # Free — public stats
 }
 

@@ -449,7 +449,7 @@ class QuantumTradingCortex:
 
     async def generate_signal(
         self, token_address: str, price_history: Optional[List[float]] = None,
-        current_price: float = 0.0
+        current_price: float = 0.0, use_hardware: bool = False
     ) -> QuantumTradingSignal:
         """
         Generate a fused quantum trading signal for a token.
@@ -486,7 +486,7 @@ class QuantumTradingCortex:
         momentum_score = ema_result["momentum_score"]
 
         # --- Step 2: Quantum Simulation ---
-        quantum_result = await self._quantum_simulate(token_address, price_history)
+        quantum_result = await self._quantum_simulate(token_address, price_history, use_hardware=use_hardware)
 
         # --- Step 3: Collective Deliberation ---
         collective_result = await self._collective_deliberate(token_address, current_price, ema_result, quantum_result)
@@ -574,7 +574,8 @@ class QuantumTradingCortex:
         return signal
 
     async def _quantum_simulate(
-        self, token_address: str, price_history: List[float]
+        self, token_address: str, price_history: List[float],
+        use_hardware: bool = False
     ) -> dict:
         """
         Run quantum simulation for price prediction.
@@ -591,12 +592,11 @@ class QuantumTradingCortex:
         if not price_history or len(price_history) < 5:
             return result
 
-        # Quantum simulation — ALWAYS simulator (hardware reserved for algo optimization)
+        # Quantum simulation — simulator by default, hardware if requested (x402 premium tier)
         if self.quantum:
             try:
-                # Run quantum Monte Carlo on simulator (unlimited, no budget cost)
                 qmc_result = await self._quantum_monte_carlo(
-                    price_history, use_hardware=False
+                    price_history, use_hardware=use_hardware
                 )
                 if qmc_result:
                     result.update(qmc_result)
@@ -639,7 +639,9 @@ class QuantumTradingCortex:
                 return None
 
             # Quantum circuit: encode returns as rotation angles
-            num_qubits = min(4, max(2, len(returns) // 4))
+            # Hardware tier: more qubits (up to 6) and more shots for better fidelity
+            max_qubits = 6 if use_hardware else 4
+            num_qubits = min(max_qubits, max(2, len(returns) // 4))
             qc = QuantumCircuit(num_qubits, num_qubits)
 
             # Hadamard for superposition
@@ -666,9 +668,10 @@ class QuantumTradingCortex:
             # Measure
             qc.measure(range(num_qubits), range(num_qubits))
 
-            # Execute
+            # Execute — hardware tier gets more shots for better results
+            shots = 2048 if use_hardware else 1024
             job_result = await self.quantum.run_circuit(
-                qc, shots=1024,
+                qc, shots=shots,
                 task_type=QuantumTaskType.INFERENCE,
                 prefer_hardware=use_hardware
             )
@@ -928,7 +931,8 @@ class QuantumTradingCortex:
         return False
 
     async def quantum_scenario_analysis(
-        self, token_address: str, price_history: Optional[List[float]] = None
+        self, token_address: str, price_history: Optional[List[float]] = None,
+        use_hardware: bool = False
     ) -> dict:
         """
         Superposition-based multi-scenario analysis.
@@ -942,8 +946,7 @@ class QuantumTradingCortex:
         if len(price_history) < 10:
             return {"scenarios": [], "method": "insufficient_data"}
 
-        # Scenario analysis — simulator only (hardware reserved for algo optimization)
-        use_hardware = False
+        # Scenario analysis — simulator by default, hardware if x402 premium tier requested
 
         try:
             from qiskit import QuantumCircuit
@@ -977,8 +980,10 @@ class QuantumTradingCortex:
 
             qc.measure([0, 1, 2], [0, 1, 2])
 
+            # Hardware tier: 4096 shots for higher fidelity scenario probabilities
+            scenario_shots = 4096 if use_hardware else 2048
             result = await self.quantum.run_circuit(
-                qc, shots=2048,
+                qc, shots=scenario_shots,
                 task_type=QuantumTaskType.OPTIMIZATION,
                 prefer_hardware=use_hardware
             )

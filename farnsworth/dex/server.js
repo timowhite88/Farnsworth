@@ -1647,25 +1647,49 @@ const X402_DISCOVERY = {
     x402Version: 2,
     provider: {
         name: "Farnsworth AI Swarm",
-        description: "Quantum-enhanced trading intelligence powered by IBM Quantum simulation, EMA momentum, and multi-agent collective deliberation. Submit any Solana token address, receive comprehensive trading signals.",
+        description: "Quantum-enhanced trading intelligence powered by IBM Quantum (simulator + real QPU hardware). Two tiers: Simulated Quantum (0.25 SOL) with hardware-optimized weights, and Real Quantum Hardware (1 SOL) on IBM QPU. Supports any Solana memecoin + BTC, ETH, SOL majors.",
         url: process.env.FARNSWORTH_API_URL || "https://ai.farnsworth.cloud",
         category: "trading",
-        tags: ["solana", "quantum", "trading", "defi", "ai", "signals"],
+        tags: ["solana", "quantum", "trading", "defi", "ai", "signals", "ibm-quantum", "x402"],
     },
-    endpoints: [{
-        path: "/api/x402/quantum/analyze",
-        method: "POST",
-        description: "Quantum trading signal for any Solana token — 1 SOL per query",
-        price: "1000000000",
-        asset: "native",
-        network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-        payTo: ECOSYSTEM_WALLET,
-        requestSchema: {
-            type: "object",
-            required: ["token_address"],
-            properties: { token_address: { type: "string", description: "Solana token mint address" } },
+    endpoints: [
+        {
+            path: "/api/x402/quantum/analyze",
+            method: "POST",
+            description: "Simulated Quantum Analysis (0.25 SOL) — Quantum simulator with hardware-optimized algo weights from real QPU runs. Fast 5-15s response.",
+            price: "250000000",
+            asset: "native",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: ECOSYSTEM_WALLET,
+            extra: { tier: "simulated", estimated_time: "5-15 seconds" },
+            requestSchema: {
+                type: "object",
+                required: ["token_address"],
+                properties: {
+                    token_address: { type: "string", description: "Solana token mint address, or ticker: BTC, ETH, SOL" },
+                    tier: { type: "string", enum: ["simulated", "hardware"], description: "Tier preference (auto-detected from payment amount)" },
+                },
+            },
         },
-    }],
+        {
+            path: "/api/x402/quantum/analyze",
+            method: "POST",
+            description: "Real Quantum Hardware Analysis (1 SOL) — Actual IBM Quantum QPU circuit execution. Higher fidelity, 30-90s processing.",
+            price: "1000000000",
+            asset: "native",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: ECOSYSTEM_WALLET,
+            extra: { tier: "hardware", estimated_time: "30-90 seconds" },
+            requestSchema: {
+                type: "object",
+                required: ["token_address"],
+                properties: {
+                    token_address: { type: "string", description: "Solana token mint address, or ticker: BTC, ETH, SOL" },
+                    tier: { type: "string", enum: ["simulated", "hardware"], description: "Tier preference (auto-detected from payment amount)" },
+                },
+            },
+        },
+    ],
     networks: ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
 };
 
@@ -1692,6 +1716,7 @@ app.post('/api/x402/quantum/analyze', async (req, res) => {
         if (resp.headers.get('x-payment')) res.set('X-PAYMENT', resp.headers.get('x-payment'));
         if (resp.headers.get('x-payment-response')) res.set('X-PAYMENT-RESPONSE', resp.headers.get('x-payment-response'));
         if (resp.headers.get('x-payment-required')) res.set('X-Payment-Required', resp.headers.get('x-payment-required'));
+        if (resp.headers.get('x-processing-time')) res.set('X-Processing-Time', resp.headers.get('x-processing-time'));
 
         res.status(resp.status).json(data);
     } catch (err) {
@@ -1703,15 +1728,29 @@ app.post('/api/x402/quantum/analyze', async (req, res) => {
 app.get('/api/x402/quantum/pricing', async (req, res) => {
     res.json({
         service: "Farnsworth Quantum Trading Intelligence",
-        price_sol: 1.0,
-        price_lamports: 1000000000,
+        tiers: {
+            simulated: {
+                price_sol: 0.25,
+                price_lamports: 250000000,
+                description: "Quantum simulator with hardware-optimized algo weights from real QPU runs. Fast response.",
+                estimated_time: "5-15 seconds",
+                features: ["ema_momentum", "quantum_simulation", "collective_intelligence", "signal_fusion", "scenario_analysis"],
+            },
+            hardware: {
+                price_sol: 1.0,
+                price_lamports: 1000000000,
+                description: "Real IBM Quantum QPU circuit execution. Higher fidelity, more qubits, more shots.",
+                estimated_time: "30-90 seconds",
+                features: ["ema_momentum", "quantum_hardware", "collective_intelligence", "signal_fusion", "scenario_analysis", "bell_correlations", "higher_qubit_count"],
+            },
+        },
+        supported_assets: ["Any Solana memecoin (mint address)", "BTC", "ETH", "SOL"],
         pay_to: ECOSYSTEM_WALLET,
         network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
         asset: "native",
         protocol: "x402",
         endpoint: "/api/x402/quantum/analyze",
         method: "POST",
-        description: "Submit any Solana token address, receive quantum-enhanced trading intelligence.",
     });
 });
 

@@ -4,7 +4,7 @@ Farnsworth x402 Protocol Integration.
 HTTP 402 Payment Required protocol for micropayments:
 - Client-side: Uses Bankr x402 SDK for paying for external APIs
 - Server-side: Custom middleware for monetizing Farnsworth's endpoints
-- Solana-native: Premium quantum API at 1 SOL per query via x402
+- Solana-native: Premium quantum API (0.25 SOL simulated / 1 SOL hardware) via x402
 
 See: https://www.x402.org/
 """
@@ -18,8 +18,14 @@ from .solana_gate import (
     get_x402_stats,
     get_x402_discovery_manifest,
     run_premium_quantum_analysis,
+    determine_tier,
+    resolve_asset,
     SolanaPaymentVerifier,
     X402SolanaStats,
+    TIER_SIMULATED_SOL,
+    TIER_SIMULATED_LAMPORTS,
+    TIER_HARDWARE_SOL,
+    TIER_HARDWARE_LAMPORTS,
 )
 
 __all__ = [
