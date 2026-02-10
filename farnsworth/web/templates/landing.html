@@ -34,7 +34,9 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet"></noscript>
     <style>
         * {
             margin: 0;
@@ -819,6 +821,17 @@
                 padding-bottom: 2rem;
             }
 
+            /* Kill GPU-heavy blur backgrounds on mobile */
+            .bg-gradient {
+                filter: blur(60px) !important;
+                width: 100vmax !important;
+                height: 100vmax !important;
+                animation: none !important;
+                will-change: auto !important;
+            }
+            .bg-gradient-3 { display: none; }
+            .grid-overlay { display: none; }
+
             .choices-container {
                 flex-direction: column;
                 gap: 1.5rem;
@@ -835,7 +848,18 @@
             .choice-card:hover { transform: none; }
             .choice-card:active { transform: scale(0.98); }
 
-            .card-inner { padding: 1.5rem; }
+            /* Kill backdrop-filter and border spin on mobile */
+            .card-inner {
+                padding: 1.5rem;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
+            .card-border::before { animation: none !important; }
+            .icon-ring { animation: none !important; }
+            .nav-card-inner {
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
 
             .card-icon { width: 60px; height: 60px; margin-bottom: 1rem; }
             .icon-ring { width: 60px; height: 60px; }
@@ -1148,8 +1172,11 @@
             }
         }
 
-        createParticles();
-        createLightRays();
+        // Skip expensive DOM creation on mobile — CSS hides these anyway
+        if (window.innerWidth > 768) {
+            createParticles();
+            createLightRays();
+        }
 
         // Electric arcs for featured cards
         function createElectricArcs(container) {
