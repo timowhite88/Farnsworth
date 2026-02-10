@@ -1394,6 +1394,339 @@ app.post('/api/x/disconnect', (req, res) => {
 });
 
 // ============================================================
+// QUANTUM TRADING INTELLIGENCE — Token-Gated Premium Signals
+// ============================================================
+
+const SOLANA_RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const MIN_FARNS_HOLDING = 100000; // 100K FARNS minimum for quantum access
+const SPL_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+
+// Quantum signal cache (populated by Python backend via /api/quantum/internal/*)
+const quantumSignals = new Map();     // address -> { signal_id, direction, confidence, strength, ... }
+const quantumSignalHistory = [];      // recent signals (max 500)
+const quantumCorrelations = [];       // cross-token correlations
+const quantumAccuracy = { win_rate: 0, total_signals: 0, resolved: 0, pending: 0 };
+
+// FARNS balance cache: wallet -> { balance, ts }
+const farnsBalanceCache = new Map();
+const FARNS_CACHE_TTL = 120000; // 2 minutes
+
+/**
+ * Check FARNS token balance for a wallet via Solana RPC.
+ * Read-only — no burn required, just holding check.
+ */
+async function checkFarnsBalance(walletAddress, minAmount = MIN_FARNS_HOLDING) {
+    // Check cache first
+    const cached = farnsBalanceCache.get(walletAddress);
+    if (cached && Date.now() - cached.ts < FARNS_CACHE_TTL) {
+        return { hasAccess: cached.balance >= minAmount, balance: cached.balance, required: minAmount };
+    }
+
+    try {
+        const payload = {
+            jsonrpc: '2.0', id: 1,
+            method: 'getTokenAccountsByOwner',
+            params: [
+                walletAddress,
+                { mint: FARNS_TOKEN },
+                { encoding: 'jsonParsed' }
+            ]
+        };
+
+        const resp = await fetch(SOLANA_RPC, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(10000),
+        });
+        const data = await resp.json();
+        const accounts = data?.result?.value || [];
+
+        let totalBalance = 0;
+        for (const account of accounts) {
+            const info = account?.account?.data?.parsed?.info || {};
+            const tokenAmount = info.tokenAmount || {};
+            const amount = parseInt(tokenAmount.amount || '0', 10);
+            const decimals = tokenAmount.decimals || 9;
+            totalBalance += amount / (10 ** decimals);
+        }
+
+        farnsBalanceCache.set(walletAddress, { balance: totalBalance, ts: Date.now() });
+        return { hasAccess: totalBalance >= minAmount, balance: totalBalance, required: minAmount };
+    } catch (e) {
+        console.error('[DEXAI] FARNS balance check failed:', e.message);
+        return { hasAccess: false, balance: 0, required: minAmount, error: e.message };
+    }
+}
+
+/**
+ * Token gate middleware — verifies FARNS balance from wallet query param or header.
+ */
+async function quantumTokenGate(req, res, next) {
+    const wallet = req.query.wallet || req.headers['x-wallet-address'] || '';
+    if (!wallet || wallet.length < 32) {
+        return res.status(401).json({
+            error: 'Wallet address required',
+            message: 'Connect wallet and hold 100K+ FARNS to access quantum signals',
+            gated: true,
+        });
+    }
+
+    const result = await checkFarnsBalance(wallet);
+    if (!result.hasAccess) {
+        return res.status(403).json({
+            error: 'Insufficient FARNS balance',
+            message: `Hold at least ${MIN_FARNS_HOLDING.toLocaleString()} FARNS to unlock quantum signals`,
+            balance: result.balance,
+            required: MIN_FARNS_HOLDING,
+            gated: true,
+        });
+    }
+
+    req.farnsBalance = result.balance;
+    next();
+}
+
+// --- Quantum Signal Internal API (called by Python backend to push data) ---
+
+app.post('/api/quantum/internal/signal', (req, res) => {
+    const signal = req.body;
+    if (!signal || !signal.token_address) return res.status(400).json({ error: 'Invalid signal' });
+
+    quantumSignals.set(signal.token_address, signal);
+    quantumSignalHistory.unshift(signal);
+    if (quantumSignalHistory.length > 500) quantumSignalHistory.length = 500;
+
+    // Broadcast to quantum WS subscribers
+    broadcastQuantum({ type: 'quantum_signal', data: signal });
+
+    res.json({ ok: true });
+});
+
+app.post('/api/quantum/internal/correlations', (req, res) => {
+    const { correlations } = req.body || {};
+    if (Array.isArray(correlations)) {
+        quantumCorrelations.length = 0;
+        quantumCorrelations.push(...correlations);
+    }
+    res.json({ ok: true });
+});
+
+app.post('/api/quantum/internal/accuracy', (req, res) => {
+    const stats = req.body;
+    if (stats) Object.assign(quantumAccuracy, stats);
+    res.json({ ok: true });
+});
+
+// --- Quantum Signal Public API (token-gated) ---
+
+// Latest signal for a specific token (gated)
+app.get('/api/quantum/signal/:address', quantumTokenGate, (req, res) => {
+    const signal = quantumSignals.get(req.params.address);
+    if (signal) {
+        res.json({ available: true, ...signal });
+    } else {
+        res.json({ available: false, message: 'No quantum signal for this token yet' });
+    }
+});
+
+// Recent signals across all tokens (gated)
+app.get('/api/quantum/signals', quantumTokenGate, (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    res.json({
+        signals: quantumSignalHistory.slice(0, limit),
+        total: quantumSignalHistory.length,
+    });
+});
+
+// Cross-token correlations (gated)
+app.get('/api/quantum/correlations', quantumTokenGate, (req, res) => {
+    res.json({ correlations: quantumCorrelations });
+});
+
+// Public accuracy stats (NOT gated — proves value to drive demand)
+app.get('/api/quantum/accuracy', (req, res) => {
+    res.json({
+        ...quantumAccuracy,
+        min_farns: MIN_FARNS_HOLDING,
+        token_mint: FARNS_TOKEN,
+    });
+});
+
+// Balance check endpoint for frontend
+app.get('/api/quantum/check-access', async (req, res) => {
+    const wallet = req.query.wallet || '';
+    if (!wallet) return res.json({ hasAccess: false, balance: 0 });
+    const result = await checkFarnsBalance(wallet);
+    res.json(result);
+});
+
+// --- Quantum WebSocket (/ws/quantum) ---
+const quantumWss = new WebSocketServer({ server, path: '/ws/quantum' });
+const quantumWsClients = new Set();
+
+quantumWss.on('connection', async (ws, req) => {
+    // Parse wallet from query string for auth
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const wallet = url.searchParams.get('wallet') || '';
+
+    if (!wallet || wallet.length < 32) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Wallet address required' }));
+        ws.close(4001, 'No wallet');
+        return;
+    }
+
+    // Verify FARNS balance
+    const balance = await checkFarnsBalance(wallet);
+    if (!balance.hasAccess) {
+        ws.send(JSON.stringify({
+            type: 'access_denied',
+            message: `Hold ${MIN_FARNS_HOLDING.toLocaleString()} FARNS to access quantum feed`,
+            balance: balance.balance,
+            required: MIN_FARNS_HOLDING,
+        }));
+        ws.close(4003, 'Insufficient FARNS');
+        return;
+    }
+
+    quantumWsClients.add(ws);
+    ws.isAlive = true;
+    ws.subs = new Set(); // subscribed token addresses
+
+    ws.send(JSON.stringify({
+        type: 'connected',
+        message: 'Quantum feed connected',
+        balance: balance.balance,
+        signals_available: quantumSignals.size,
+    }));
+
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('message', (msg) => {
+        try {
+            const data = JSON.parse(msg);
+            if (data.type === 'subscribe' && data.token) ws.subs.add(data.token);
+            if (data.type === 'unsubscribe' && data.token) ws.subs.delete(data.token);
+            // Request latest signal
+            if (data.type === 'get_signal' && data.token) {
+                const signal = quantumSignals.get(data.token);
+                if (signal) ws.send(JSON.stringify({ type: 'quantum_signal', data: signal }));
+            }
+        } catch {}
+    });
+    ws.on('close', () => quantumWsClients.delete(ws));
+});
+
+function broadcastQuantum(data) {
+    const msg = JSON.stringify(data);
+    for (const ws of quantumWsClients) {
+        if (ws.readyState === 1) {
+            // If client has subscriptions, only send matching signals
+            if (ws.subs && ws.subs.size > 0 && data.data?.token_address) {
+                if (ws.subs.has(data.data.token_address)) ws.send(msg);
+            } else {
+                ws.send(msg);
+            }
+        }
+    }
+}
+
+// Quantum WS heartbeat
+setInterval(() => {
+    for (const ws of quantumWsClients) {
+        if (!ws.isAlive) { ws.terminate(); quantumWsClients.delete(ws); continue; }
+        ws.isAlive = false; ws.ping();
+    }
+}, 30000);
+
+// ============================================================
+// x402 DISCOVERY — Premium Quantum API (1 SOL per query)
+// ============================================================
+// Serves the x402 discovery manifest so hubs/bazaars/i1l.store can find us
+
+const X402_DISCOVERY = {
+    x402Version: 2,
+    provider: {
+        name: "Farnsworth AI Swarm",
+        description: "Quantum-enhanced trading intelligence powered by IBM Quantum simulation, EMA momentum, and multi-agent collective deliberation. Submit any Solana token address, receive comprehensive trading signals.",
+        url: process.env.FARNSWORTH_API_URL || "https://ai.farnsworth.cloud",
+        category: "trading",
+        tags: ["solana", "quantum", "trading", "defi", "ai", "signals"],
+    },
+    endpoints: [{
+        path: "/api/x402/quantum/analyze",
+        method: "POST",
+        description: "Quantum trading signal for any Solana token — 1 SOL per query",
+        price: "1000000000",
+        asset: "native",
+        network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        payTo: ECOSYSTEM_WALLET,
+        requestSchema: {
+            type: "object",
+            required: ["token_address"],
+            properties: { token_address: { type: "string", description: "Solana token mint address" } },
+        },
+    }],
+    networks: ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
+};
+
+app.get('/.well-known/x402.json', (req, res) => res.json(X402_DISCOVERY));
+app.get('/api/x402/discovery', (req, res) => res.json(X402_DISCOVERY));
+
+// x402 proxy — forward paid requests to the FastAPI backend
+app.post('/api/x402/quantum/analyze', async (req, res) => {
+    try {
+        const fetch = (await import('node-fetch')).default;
+        const headers = { 'Content-Type': 'application/json' };
+        if (req.headers['x-payment']) headers['X-PAYMENT'] = req.headers['x-payment'];
+
+        const upstream = `${FARNSWORTH_API}/api/x402/quantum/analyze`;
+        const resp = await fetch(upstream, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(req.body || {}),
+        });
+
+        const data = await resp.json();
+
+        // Forward x402 headers
+        if (resp.headers.get('x-payment')) res.set('X-PAYMENT', resp.headers.get('x-payment'));
+        if (resp.headers.get('x-payment-response')) res.set('X-PAYMENT-RESPONSE', resp.headers.get('x-payment-response'));
+        if (resp.headers.get('x-payment-required')) res.set('X-Payment-Required', resp.headers.get('x-payment-required'));
+
+        res.status(resp.status).json(data);
+    } catch (err) {
+        console.error('x402 proxy error:', err.message);
+        res.status(502).json({ error: 'Upstream x402 service unavailable' });
+    }
+});
+
+app.get('/api/x402/quantum/pricing', async (req, res) => {
+    res.json({
+        service: "Farnsworth Quantum Trading Intelligence",
+        price_sol: 1.0,
+        price_lamports: 1000000000,
+        pay_to: ECOSYSTEM_WALLET,
+        network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        asset: "native",
+        protocol: "x402",
+        endpoint: "/api/x402/quantum/analyze",
+        method: "POST",
+        description: "Submit any Solana token address, receive quantum-enhanced trading intelligence.",
+    });
+});
+
+app.get('/api/x402/quantum/stats', async (req, res) => {
+    try {
+        const fetch = (await import('node-fetch')).default;
+        const resp = await fetch(`${FARNSWORTH_API}/api/x402/quantum/stats`);
+        const data = await resp.json();
+        res.json(data);
+    } catch (err) {
+        res.json({ total_queries: 0, total_revenue_sol: 0, message: "Stats unavailable" });
+    }
+});
+
+// ============================================================
 // SPA ROUTING
 // ============================================================
 app.get('/token/:address', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -1406,7 +1739,9 @@ server.listen(PORT, () => {
     console.log(`\n  DEXAI v2.1 — Farnsworth Collective DEX Screener`);
     console.log(`  Port: ${PORT} | Ecosystem: ${ECOSYSTEM_WALLET.slice(0, 8)}... | FARNS: ${FARNS_TOKEN.slice(0, 8)}...`);
     console.log(`  Trending: Market(35%) + Collective(25%) + Quantum(15%) + Whale(15%) + Burn(10%)`);
-    console.log(`  Platforms: ${ALLOWED_SUFFIXES.join(', ')} | Burn boost = 3x SOL boost\n`);
+    console.log(`  Quantum Trading: Token-gated (${MIN_FARNS_HOLDING.toLocaleString()} FARNS) | WS /ws/quantum`);
+    console.log(`  Platforms: ${ALLOWED_SUFFIXES.join(', ')} | Burn boost = 3x SOL boost`);
+    console.log(`  x402 Premium: /api/x402/quantum/analyze (1 SOL/query) | Discovery: /.well-known/x402.json\n`);
 
     // Initial data fetch
     fetchCollectiveData();
@@ -1419,4 +1754,4 @@ server.listen(PORT, () => {
     setTimeout(() => { batchQuantumScore(); setInterval(batchQuantumScore, 300000); }, 60000);
 });
 
-module.exports = { app, server, broadcastAll };
+module.exports = { app, server, broadcastAll, broadcastQuantum, checkFarnsBalance };

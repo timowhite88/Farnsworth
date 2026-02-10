@@ -455,6 +455,7 @@ async function viewToken(address) {
         loadLiveChart(address);
         loadAI(address);
         loadQuantum(address);
+        loadQuantumTrading(address);
         loadTrades(address);
         loadBonding(address);
         loadXBadge(address);
@@ -473,6 +474,13 @@ function resetDetailPanels() {
     if (qPanel) {
         qPanel.innerHTML = '<div class="q-loading"><div class="q-spinner"></div><span>Running simulations...</span></div>';
     }
+    // Reset quantum trading panel
+    var qtGated = document.getElementById('qtGated');
+    var qtSignal = document.getElementById('qtSignal');
+    if (qtGated) qtGated.classList.remove('hidden');
+    if (qtSignal) qtSignal.classList.add('hidden');
+    currentQuantumSignal = null;
+    if (quantumWs) { try { quantumWs.close(); } catch {} quantumWs = null; }
 }
 
 /* ============================================
@@ -923,6 +931,161 @@ async function loadQuantum(address) {
         console.error('Failed to load quantum simulation:', err);
         panel.innerHTML = '<div class="q-unavailable"><span class="no-data">Quantum simulation unavailable.</span></div>';
     }
+}
+
+/* ============================================
+   QUANTUM TRADING INTELLIGENCE (premium, token-gated)
+   ============================================ */
+
+var quantumWs = null;          // WebSocket to /ws/quantum
+var quantumAccess = false;     // whether user has FARNS access
+var currentQuantumSignal = null;
+
+async function checkQuantumAccess() {
+    if (!walletAddress) { quantumAccess = false; return false; }
+    try {
+        const res = await fetch(API + '/quantum/check-access?wallet=' + encodeURIComponent(walletAddress));
+        const data = await res.json();
+        quantumAccess = data.hasAccess || false;
+        return quantumAccess;
+    } catch { quantumAccess = false; return false; }
+}
+
+async function loadQuantumTrading(address) {
+    var panel = document.getElementById('quantumTradingPanel');
+    var gated = document.getElementById('qtGated');
+    var signal = document.getElementById('qtSignal');
+    if (!panel || !gated || !signal) return;
+
+    // Load public accuracy teaser regardless of access
+    loadQuantumAccuracyTeaser();
+
+    // Check access
+    var hasAccess = await checkQuantumAccess();
+
+    if (!hasAccess) {
+        gated.classList.remove('hidden');
+        signal.classList.add('hidden');
+        return;
+    }
+
+    // User has FARNS — show signal
+    gated.classList.add('hidden');
+    signal.classList.remove('hidden');
+
+    try {
+        var res = await fetch(API + '/quantum/signal/' + encodeURIComponent(address) + '?wallet=' + encodeURIComponent(walletAddress));
+        var data = await res.json();
+        if (data.available) {
+            renderQuantumSignal(data);
+        } else {
+            signal.innerHTML = '<div class="q-unavailable"><span class="no-data">Generating quantum signal...</span></div>';
+        }
+    } catch (err) {
+        console.error('Quantum trading signal load failed:', err);
+        signal.innerHTML = '<div class="q-unavailable"><span class="no-data">Quantum signal unavailable</span></div>';
+    }
+
+    // Connect quantum WebSocket for live updates
+    connectQuantumWs(address);
+}
+
+function renderQuantumSignal(data) {
+    var dirEl = document.getElementById('qtDirection');
+    var confEl = document.getElementById('qtConfidence');
+    var strEl = document.getElementById('qtStrength');
+    var emaEl = document.getElementById('qtEma');
+    var qEl = document.getElementById('qtQuantum');
+    var collEl = document.getElementById('qtCollective');
+    var methEl = document.getElementById('qtMethod');
+    var reasonEl = document.getElementById('qtReasoning');
+
+    if (!dirEl) return;
+    currentQuantumSignal = data;
+
+    // Direction
+    var dir = data.direction || 'HOLD';
+    dirEl.textContent = dir;
+    dirEl.className = 'qt-direction ' + dir.toLowerCase();
+
+    // Confidence
+    var conf = Math.round((data.confidence || 0) * 100);
+    confEl.textContent = conf + '%';
+
+    // Strength bars (1-5)
+    var strength = data.strength || 1;
+    var barsHtml = '';
+    for (var i = 1; i <= 5; i++) {
+        var cls = 'qt-strength-bar';
+        if (i <= strength) {
+            cls += ' active';
+            if (strength >= 4) cls += ' hot';
+            else if (strength >= 3) cls += ' warn';
+        }
+        barsHtml += '<div class="' + cls + '"></div>';
+    }
+    strEl.innerHTML = barsHtml;
+
+    // Details
+    var cross = data.ema_crossover || '--';
+    var mom = data.momentum_score !== undefined ? (data.momentum_score > 0 ? '+' : '') + data.momentum_score.toFixed(2) : '--';
+    emaEl.innerHTML = '<span class="' + (cross === 'bullish' ? 'pos' : (cross === 'bearish' ? 'neg' : '')) + '">' + cross + '</span> (' + mom + ')';
+
+    var bull = data.quantum_bull_prob !== undefined ? Math.round(data.quantum_bull_prob * 100) + '% bull' : '--';
+    var qConf = data.quantum_confidence !== undefined ? Math.round(data.quantum_confidence * 100) + '%' : '';
+    qEl.innerHTML = bull + (qConf ? ' <span class="qt-label">' + qConf + ' conf</span>' : '');
+
+    var collDir = data.collective_direction || '--';
+    var agents = (data.agents_consulted || []).join(', ');
+    collEl.innerHTML = '<span class="' + (collDir === 'bullish' ? 'pos' : (collDir === 'bearish' ? 'neg' : '')) + '">' + collDir + '</span>' + (agents ? ' <span class="qt-label">(' + agents + ')</span>' : '');
+
+    methEl.textContent = data.quantum_method || 'classical';
+
+    // Reasoning
+    if (data.reasoning) {
+        reasonEl.textContent = data.reasoning;
+        reasonEl.classList.remove('hidden');
+    } else {
+        reasonEl.classList.add('hidden');
+    }
+}
+
+async function loadQuantumAccuracyTeaser() {
+    var el = document.getElementById('qtAccuracyTeaser');
+    if (!el) return;
+    try {
+        var res = await fetch(API + '/quantum/accuracy');
+        var data = await res.json();
+        if (data.win_rate > 0) {
+            el.textContent = 'Signal accuracy: ' + Math.round(data.win_rate * 100) + '% | ' + data.resolved + ' resolved signals';
+        } else if (data.total_signals > 0) {
+            el.textContent = data.total_signals + ' signals generated — tracking accuracy...';
+        }
+    } catch {}
+}
+
+function connectQuantumWs(address) {
+    if (quantumWs) { try { quantumWs.close(); } catch {} quantumWs = null; }
+    if (!quantumAccess || !walletAddress) return;
+
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var wsUrl = proto + '//' + location.host + '/ws/quantum?wallet=' + encodeURIComponent(walletAddress);
+    try {
+        quantumWs = new WebSocket(wsUrl);
+        quantumWs.onopen = function() {
+            if (address) quantumWs.send(JSON.stringify({ type: 'subscribe', token: address }));
+        };
+        quantumWs.onmessage = function(evt) {
+            try {
+                var msg = JSON.parse(evt.data);
+                if (msg.type === 'quantum_signal' && msg.data) {
+                    renderQuantumSignal(msg.data);
+                }
+            } catch {}
+        };
+        quantumWs.onclose = function() { quantumWs = null; };
+        quantumWs.onerror = function() { quantumWs = null; };
+    } catch {}
 }
 
 /* ============================================

@@ -5000,6 +5000,9 @@ class DegenTrader:
         self._last_collective_query = 0.0  # timestamp of last collective query
         # v4.3: Real-time DEX price feed via Raydium pool vault WebSocket
         self.dex_price_feed: Optional[DexPriceFeed] = None
+        # v4.4: Quantum Trading Cortex — fused quantum+EMA+collective signals
+        self._quantum_signals: Dict[str, dict] = {}  # token_address -> latest quantum signal
+        self._quantum_signal_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         # v3.8: Dynamic adaptation state
         self._quiet_cycles = 0          # consecutive cycles with 0 qualifying tokens
         self._hot_cycles = 0            # consecutive cycles with 3+ qualifying tokens
@@ -5124,8 +5127,87 @@ class DegenTrader:
         await self.dex_price_feed.start()
         logger.info(f"DexPriceFeed v4.3 enabled — real-time Raydium pool vault subscriptions")
 
+        # v4.4: Subscribe to Quantum Trading Cortex signals via Nexus
+        try:
+            from farnsworth.core.nexus import Nexus, SignalType
+            nexus = Nexus._instance
+            if nexus:
+                await nexus.subscribe(
+                    SignalType.QUANTUM_SIGNAL_GENERATED,
+                    self._on_quantum_signal
+                )
+                logger.info("DegenTrader: Subscribed to quantum trading signals via Nexus")
+        except Exception as e:
+            logger.debug(f"DegenTrader: Quantum signal subscription skipped: {e}")
+
         self._load_state()
         return self.pubkey
+
+    async def _on_quantum_signal(self, signal):
+        """
+        v4.4: Handle quantum trading signals from QuantumTradingCortex.
+        Factors quantum signals into trade decisions as an additional input.
+        High confidence LONG + existing buy conditions = stronger entry.
+        High confidence SHORT = exit or skip.
+        """
+        try:
+            payload = signal.payload if hasattr(signal, 'payload') else signal
+            if not isinstance(payload, dict):
+                return
+
+            token_address = payload.get("token_address", "")
+            direction = payload.get("direction", "HOLD")
+            confidence = float(payload.get("confidence", 0))
+            strength = int(payload.get("strength", 1))
+
+            # Store latest signal for this token
+            self._quantum_signals[token_address] = {
+                "direction": direction,
+                "confidence": confidence,
+                "strength": strength,
+                "quantum_bull_prob": float(payload.get("quantum_bull_prob", 0.5)),
+                "momentum_score": float(payload.get("momentum_score", 0)),
+                "reasoning": payload.get("reasoning", ""),
+                "ts": time.time(),
+            }
+
+            # High-confidence SHORT on a held position → consider exiting
+            if direction == "SHORT" and confidence > 0.7 and strength >= 3:
+                if token_address in self.positions:
+                    logger.info(
+                        f"[QUANTUM] Strong SHORT signal for held position "
+                        f"{token_address[:8]}.. (confidence={confidence:.0%}, strength={strength})"
+                    )
+
+            # Queue signal for main trading loop to process
+            try:
+                self._quantum_signal_queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                self._quantum_signal_queue.get_nowait()
+                self._quantum_signal_queue.put_nowait(payload)
+
+        except Exception as e:
+            logger.debug(f"DegenTrader: Quantum signal handler error: {e}")
+
+    def get_quantum_boost(self, token_address: str) -> float:
+        """
+        v4.4: Get quantum signal boost for a token's buy/sell score.
+        Returns a score modifier: positive = bullish boost, negative = bearish.
+        Called by the main trading logic to factor quantum signals.
+        """
+        sig = self._quantum_signals.get(token_address)
+        if not sig or time.time() - sig.get("ts", 0) > 600:  # signals expire after 10 min
+            return 0.0
+
+        direction = sig.get("direction", "HOLD")
+        confidence = sig.get("confidence", 0)
+        strength = sig.get("strength", 1)
+
+        if direction == "LONG":
+            return confidence * strength * 2  # max ~10 point boost
+        elif direction == "SHORT":
+            return -confidence * strength * 2  # max ~-10 penalty
+        return 0.0
 
     async def shutdown(self):
         """Clean shutdown of all systems."""

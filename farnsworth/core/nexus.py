@@ -205,6 +205,12 @@ class SignalType(Enum):
     QUANTUM_PROOF_GENERATED = "quantum.proof_generated"      # Proof image generated
     QUANTUM_PROOF_POSTED = "quantum.proof_posted"            # Proof posted to X
 
+    # Quantum Trading Intelligence Signals (AGI v2.1)
+    QUANTUM_SIGNAL_GENERATED = "quantum.signal_generated"    # New trading signal available
+    QUANTUM_CORRELATION_DISCOVERED = "quantum.correlation_discovered"  # Cross-token correlation found
+    QUANTUM_ACCURACY_UPDATED = "quantum.accuracy_updated"    # Accuracy stats changed
+    QUANTUM_WEIGHT_EVOLVED = "quantum.weight_evolved"        # Fusion weights evolved via QGA
+
     # Multi-Channel Messaging Signals (AGI v1.8.3)
     CHANNEL_CONNECTED = "channel.connected"                  # Channel adapter connected
     CHANNEL_DISCONNECTED = "channel.disconnected"            # Channel adapter disconnected

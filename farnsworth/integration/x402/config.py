@@ -18,7 +18,7 @@ class X402Config:
     # Enable/disable
     enabled: bool = False
 
-    # Network (Base is primary for x402)
+    # Network (Base for USDC, Solana for SOL)
     network: str = "base"
 
     # Client-side (paying for APIs via Bankr)
@@ -29,6 +29,11 @@ class X402Config:
     # Server-side (receiving payments)
     receiver_wallet: str = ""  # Your wallet address on Base
     default_endpoint_price: Decimal = Decimal("0.001")  # USDC
+
+    # Solana x402 (premium quantum API)
+    solana_enabled: bool = True  # Solana x402 always on (separate from Base USDC gating)
+    solana_receiver: str = ""  # Solana wallet for SOL payments
+    solana_query_price_sol: Decimal = Decimal("1.0")  # 1 SOL per query
 
     # Verification
     require_verification: bool = True
@@ -45,6 +50,9 @@ class X402Config:
             daily_spend_limit=Decimal(os.environ.get("X402_DAILY_SPEND_LIMIT", "10.00")),
             receiver_wallet=os.environ.get("X402_RECEIVER_WALLET", ""),
             default_endpoint_price=Decimal(os.environ.get("X402_DEFAULT_PRICE", "0.001")),
+            solana_enabled=os.environ.get("X402_SOLANA_ENABLED", "true").lower() == "true",
+            solana_receiver=os.environ.get("X402_SOLANA_RECEIVER", "3fSS5RVErbgcJEDCQmCXpKsD2tWqfhxFZtkDUB8qw"),
+            solana_query_price_sol=Decimal(os.environ.get("X402_SOLANA_QUERY_PRICE", "1.0")),
         )
 
     def validate(self) -> list:

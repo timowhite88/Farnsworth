@@ -1710,6 +1710,161 @@ img { display: block; }
 .warn { color: var(--yellow); }
 
 /* ============================================================
+   QUANTUM TRADING INTELLIGENCE PANEL (premium, token-gated)
+   ============================================================ */
+.card-quantum-trading {
+    border: 1px solid rgba(168, 85, 247, 0.15);
+    background: linear-gradient(135deg, rgba(16, 16, 30, 0.95), rgba(20, 12, 35, 0.95));
+    position: relative;
+    overflow: hidden;
+}
+.card-quantum-trading::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--purple), var(--cyan), var(--green));
+    opacity: 0.7;
+}
+.qt-icon {
+    font-size: 1.1rem;
+    filter: drop-shadow(0 0 4px rgba(168, 85, 247, 0.5));
+}
+.qt-live-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.7rem;
+    font-family: var(--mono);
+    color: var(--green);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.qt-live-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+}
+.qt-panel {
+    min-height: 100px;
+}
+
+/* Gated state (blurred, locked) */
+.qt-gated {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    gap: 8px;
+}
+.qt-lock {
+    font-size: 2rem;
+    opacity: 0.6;
+}
+.qt-gate-msg {
+    color: var(--text-sec);
+    font-size: 0.9rem;
+}
+.qt-gate-msg strong {
+    color: var(--purple);
+}
+.qt-gate-sub {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+.qt-accuracy-teaser {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--cyan);
+}
+
+/* Signal display (unlocked) */
+.qt-signal {
+    padding: 12px 0;
+}
+.qt-direction-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.qt-direction {
+    font-family: var(--orbit);
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+}
+.qt-direction.long { color: var(--green); text-shadow: 0 0 20px rgba(0, 255, 136, 0.3); }
+.qt-direction.short { color: var(--red); text-shadow: 0 0 20px rgba(255, 51, 102, 0.3); }
+.qt-direction.hold { color: var(--yellow); }
+.qt-confidence {
+    font-family: var(--mono);
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-sec);
+}
+.qt-strength {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+.qt-strength-bar {
+    width: 20px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    transition: background 0.3s;
+}
+.qt-strength-bar.active {
+    background: var(--green);
+    box-shadow: 0 0 6px rgba(0, 255, 136, 0.3);
+}
+.qt-strength-bar.active.warn { background: var(--yellow); box-shadow: 0 0 6px rgba(240, 180, 41, 0.3); }
+.qt-strength-bar.active.hot { background: var(--red); box-shadow: 0 0 6px rgba(255, 51, 102, 0.3); }
+.qt-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.qt-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 0.82rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.qt-row:last-child { border-bottom: none; }
+.qt-label {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+.qt-val {
+    font-family: var(--mono);
+    font-weight: 500;
+    color: var(--text-sec);
+}
+.qt-reasoning {
+    margin-top: 10px;
+    padding: 8px 10px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    border-left: 2px solid var(--purple);
+    line-height: 1.4;
+}
+
+/* ============================================================
    LIVE CHART INDICATOR
    ============================================================ */
 .tf-live {

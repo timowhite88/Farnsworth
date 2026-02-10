@@ -40,6 +40,12 @@ ENDPOINT_PRICING: Dict[str, Decimal] = {
     # Trading operations (higher due to potential value)
     "/api/trade/execute": Decimal("0.25"),
     "/api/trade/swap": Decimal("0.25"),
+
+    # Premium quantum trading (x402 Solana-native — 1 SOL, handled by solana_gate)
+    # Listed here for pricing catalog completeness; actual gating is in solana_gate.py
+    "/api/x402/quantum/analyze": Decimal("0"),  # Gated by SOL payment, not USDC middleware
+    "/api/x402/quantum/pricing": Decimal("0"),  # Free — pricing info
+    "/api/x402/quantum/stats": Decimal("0"),    # Free — public stats
 }
 
 # Pattern-based pricing for dynamic endpoints

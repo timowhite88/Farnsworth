@@ -198,11 +198,42 @@
       </div>
     </div>
 
-    <!-- Quantum -->
+    <!-- Quantum Simulation (existing) -->
     <div class="card card-quantum">
       <div class="card-head"><span class="q-icon">&#9883;</span> Quantum Simulation</div>
       <div id="quantumPanel" class="quantum-panel">
         <div class="q-loading"><div class="q-spinner"></div><span>Running simulations...</span></div>
+      </div>
+    </div>
+
+    <!-- Quantum Trading Intelligence (NEW — token-gated premium) -->
+    <div class="card card-quantum-trading" id="quantumTradingCard">
+      <div class="card-head">
+        <span><span class="qt-icon">&#9889;</span> Quantum Trading Signal</span>
+        <span class="qt-live-badge" id="qtLiveBadge"><span class="qt-live-dot"></span>LIVE</span>
+      </div>
+      <div id="quantumTradingPanel" class="qt-panel">
+        <!-- Populated by JS: either gated blur or signal display -->
+        <div class="qt-gated" id="qtGated">
+          <div class="qt-lock">&#128274;</div>
+          <div class="qt-gate-msg">Hold <strong>100K+ FARNS</strong> to unlock quantum trading signals</div>
+          <div class="qt-gate-sub">EMA momentum + IBM Quantum simulation + Collective AI deliberation</div>
+          <div class="qt-accuracy-teaser" id="qtAccuracyTeaser"></div>
+        </div>
+        <div class="qt-signal hidden" id="qtSignal">
+          <div class="qt-direction-wrap">
+            <div class="qt-direction" id="qtDirection">HOLD</div>
+            <div class="qt-confidence" id="qtConfidence">0%</div>
+          </div>
+          <div class="qt-strength" id="qtStrength"></div>
+          <div class="qt-details">
+            <div class="qt-row"><span class="qt-label">EMA</span><span class="qt-val" id="qtEma">--</span></div>
+            <div class="qt-row"><span class="qt-label">Quantum</span><span class="qt-val" id="qtQuantum">--</span></div>
+            <div class="qt-row"><span class="qt-label">Collective</span><span class="qt-val" id="qtCollective">--</span></div>
+            <div class="qt-row"><span class="qt-label">Method</span><span class="qt-val" id="qtMethod">--</span></div>
+          </div>
+          <div class="qt-reasoning" id="qtReasoning"></div>
+        </div>
       </div>
     </div>
 

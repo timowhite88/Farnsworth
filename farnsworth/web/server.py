@@ -6178,6 +6178,372 @@ async def start_polymarket_predictor():
         logger.error(f"Failed to start Polymarket predictor: {e}")
 
 
+@app.on_event("startup")
+async def start_quantum_trading_cortex():
+    """Initialize the Quantum Trading Cortex and Broadcaster (AGI v2.1)."""
+    try:
+        from farnsworth.core.quantum_trading import initialize_quantum_cortex, get_quantum_cortex
+        from farnsworth.integration.quantum_broadcaster import initialize_quantum_broadcaster
+
+        # Get existing infrastructure
+        nexus = None
+        memory_system = None
+        ibm_quantum = None
+
+        try:
+            from farnsworth.core.nexus import Nexus
+            nexus = Nexus._instance
+        except Exception:
+            pass
+
+        try:
+            from farnsworth.memory.memory_system import MemorySystem
+            memory_system = MemorySystem._instance if hasattr(MemorySystem, '_instance') else None
+        except Exception:
+            pass
+
+        try:
+            from farnsworth.integration.quantum.ibm_quantum import get_quantum_provider
+            ibm_quantum = get_quantum_provider()
+        except Exception:
+            pass
+
+        # Initialize cortex
+        cortex = await initialize_quantum_cortex(
+            nexus=nexus,
+            memory_system=memory_system,
+            ibm_quantum=ibm_quantum,
+        )
+        logger.info("Quantum Trading Cortex initialized (EMA + Quantum + Collective fusion)")
+
+        # Initialize broadcaster
+        broadcaster = await initialize_quantum_broadcaster(
+            cortex=cortex,
+            nexus=nexus,
+        )
+        logger.info("Quantum Trading Broadcaster initialized (Nexus + WS + REST + Agent)")
+
+    except Exception as e:
+        logger.error(f"Failed to start Quantum Trading Cortex: {e}")
+
+
+@app.get("/api/quantum/trading/status")
+async def quantum_trading_status():
+    """Get Quantum Trading Intelligence status + algo optimizer status."""
+    try:
+        from farnsworth.integration.quantum_broadcaster import get_quantum_broadcaster
+        broadcaster = get_quantum_broadcaster()
+        status = broadcaster.get_full_status()
+
+        # Add algo optimizer status
+        try:
+            from farnsworth.core.quantum_trading import get_algo_optimizer
+            optimizer = get_algo_optimizer()
+            status["algo_optimizer"] = {
+                "current_best": optimizer.get_current_best(),
+                "optimization_count": len(optimizer.get_optimization_history()),
+                "hardware_budget": optimizer.get_hardware_budget_status(),
+            }
+        except Exception:
+            pass
+
+        return status
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/quantum/trading/generate")
+async def quantum_trading_generate(request: Request):
+    """Generate a quantum trading signal for a token (uses simulator only)."""
+    try:
+        body = await request.json()
+        token_address = body.get("token_address", "")
+        price_history = body.get("price_history", [])
+        current_price = float(body.get("current_price", 0))
+
+        if not token_address:
+            raise HTTPException(status_code=400, detail="token_address required")
+
+        from farnsworth.core.quantum_trading import get_quantum_cortex
+        cortex = get_quantum_cortex()
+        signal = await cortex.generate_signal(token_address, price_history, current_price)
+        return signal.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/quantum/trading/optimize")
+async def quantum_algo_optimize(request: Request):
+    """
+    Trigger QPU-powered algo optimization of DegenTrader parameters.
+    THIS uses real IBM Quantum hardware (~30-60s per run).
+    Use sparingly — 10 min total per 28-day window.
+
+    Body (optional):
+    {
+        "method": "qaoa" | "qga",  // default: qaoa (faster, ~30s)
+        "trades": [...]            // trade history, or auto-pulled from trader
+    }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    method = body.get("method", "qaoa")
+    trades = body.get("trades", [])
+
+    try:
+        from farnsworth.core.quantum_trading import get_algo_optimizer
+        optimizer = get_algo_optimizer()
+        if not optimizer._initialized:
+            await optimizer.initialize()
+
+        # Check budget first
+        budget = optimizer.get_hardware_budget_status()
+
+        if method == "qga":
+            result = await optimizer.optimize_with_qga(trades)
+        else:
+            result = await optimizer.optimize_with_qaoa(trades)
+
+        if result:
+            return {
+                "success": True,
+                "optimization": result,
+                "hardware_budget_remaining": budget,
+            }
+        else:
+            return {"success": False, "error": "Optimization returned no result"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/quantum/trading/optimizer/history")
+async def quantum_optimizer_history():
+    """Get history of all QPU algo optimization runs."""
+    try:
+        from farnsworth.core.quantum_trading import get_algo_optimizer
+        optimizer = get_algo_optimizer()
+        return {
+            "history": optimizer.get_optimization_history(),
+            "current_best": optimizer.get_current_best(),
+            "hardware_budget": optimizer.get_hardware_budget_status(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# =============================================================================
+# x402 PREMIUM QUANTUM TRADING API — Pay 1 SOL per query
+# =============================================================================
+# HTTP 402 protocol: pay in SOL, get quantum trading intelligence
+# Discoverable via x402 hubs, bazaars, and i1l.store
+
+@app.post("/api/x402/quantum/analyze")
+async def x402_quantum_analyze(request: Request):
+    """
+    x402 Premium Quantum Trading Signal.
+
+    Pay 1 SOL → submit any Solana token address → get full quantum analysis.
+
+    x402 flow:
+    1. First request (no payment): returns 402 with PAYMENT-REQUIRED header
+    2. Client pays 1 SOL to ecosystem wallet
+    3. Retry with X-PAYMENT header containing base64 JSON {signature: "tx_sig"}
+    4. Server verifies on-chain, returns data with PAYMENT-RESPONSE header
+    """
+    from farnsworth.integration.x402.solana_gate import (
+        get_solana_verifier, get_x402_stats,
+        build_payment_required_payload, encode_x402_header,
+        decode_x402_header, build_payment_response,
+        run_premium_quantum_analysis, PaymentReceipt,
+        QUERY_PRICE_LAMPORTS, QUERY_PRICE_SOL,
+    )
+
+    verifier = get_solana_verifier()
+    stats = get_x402_stats()
+
+    # Check for payment header
+    payment_header = request.headers.get("X-PAYMENT") or request.headers.get("x-payment")
+
+    if not payment_header:
+        # No payment — return 402 Payment Required
+        stats.record_402()
+        payment_payload = build_payment_required_payload(
+            "/api/x402/quantum/analyze",
+            "Quantum trading signal for any Solana token — EMA + quantum simulation + collective AI"
+        )
+        encoded = encode_x402_header(payment_payload)
+
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "Payment Required",
+                "message": f"This endpoint requires {QUERY_PRICE_SOL} SOL per query",
+                "price_sol": QUERY_PRICE_SOL,
+                "price_lamports": QUERY_PRICE_LAMPORTS,
+                "pay_to": payment_payload["accepts"][0]["payTo"],
+                "network": payment_payload["accepts"][0]["network"],
+                "how_to_pay": (
+                    "Send 1 SOL to the pay_to address, then retry this request "
+                    "with header X-PAYMENT containing base64-encoded JSON: "
+                    '{"signature": "<your_tx_signature>"}'
+                ),
+            },
+            headers={
+                "X-PAYMENT": encoded,
+                "X-Payment-Required": "true",
+                "X-Payment-Network": "solana",
+                "X-Payment-Amount": str(QUERY_PRICE_LAMPORTS),
+                "X-Payment-Currency": "SOL",
+            },
+        )
+
+    # Payment header present — verify it
+    payment_data = decode_x402_header(payment_header)
+    if not payment_data:
+        # Try as plain JSON (compatibility)
+        try:
+            payment_data = json.loads(payment_header)
+        except Exception:
+            pass
+
+    if not payment_data or not payment_data.get("signature"):
+        stats.record_rejected()
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Invalid payment header",
+                "message": "X-PAYMENT header must be base64 JSON with 'signature' field",
+            },
+        )
+
+    tx_signature = payment_data["signature"]
+
+    # Verify the SOL transfer on-chain
+    verification = await verifier.verify_sol_transfer(tx_signature)
+
+    if not verification["valid"]:
+        stats.record_rejected()
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "Payment verification failed",
+                "reason": verification.get("error", "Unknown"),
+                "message": "Transaction could not be verified. Ensure you sent >= 1 SOL to the ecosystem wallet.",
+            },
+            headers={"X-Payment-Required": "true"},
+        )
+
+    # Payment verified! Mark signature as used (prevent replay)
+    verifier.mark_used(tx_signature)
+
+    # Parse request body for token address
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    token_address = body.get("token_address", "")
+    if not token_address:
+        # Check query params as fallback
+        token_address = request.query_params.get("token_address", "")
+
+    if not token_address:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "token_address required in request body or query params"},
+        )
+
+    # Record payment
+    receipt = PaymentReceipt(
+        tx_signature=tx_signature,
+        payer_wallet=verification["payer"],
+        amount_lamports=verification["amount_lamports"],
+        amount_sol=verification["amount_lamports"] / 1e9,
+        endpoint="/api/x402/quantum/analyze",
+        token_queried=token_address,
+        verified_at=datetime.now().isoformat(),
+        slot=verification.get("slot", 0),
+    )
+    stats.record_verified(receipt)
+
+    # Run the full quantum analysis
+    analysis = await run_premium_quantum_analysis(token_address)
+
+    # Build payment response header
+    response_payload = build_payment_response(receipt)
+    response_encoded = encode_x402_header(response_payload)
+
+    return JSONResponse(
+        content=analysis,
+        headers={
+            "X-PAYMENT-RESPONSE": response_encoded,
+        },
+    )
+
+
+@app.get("/api/x402/quantum/pricing")
+async def x402_quantum_pricing():
+    """Public pricing info for the x402 quantum API."""
+    from farnsworth.integration.x402.solana_gate import (
+        QUERY_PRICE_SOL, QUERY_PRICE_LAMPORTS, ECOSYSTEM_WALLET,
+        SOLANA_NETWORK, SOL_ASSET,
+    )
+    return {
+        "service": "Farnsworth Quantum Trading Intelligence",
+        "price_sol": QUERY_PRICE_SOL,
+        "price_lamports": QUERY_PRICE_LAMPORTS,
+        "pay_to": ECOSYSTEM_WALLET,
+        "network": SOLANA_NETWORK,
+        "asset": SOL_ASSET,
+        "protocol": "x402",
+        "endpoint": "/api/x402/quantum/analyze",
+        "method": "POST",
+        "description": (
+            "Submit any Solana token address, receive quantum-enhanced trading intelligence: "
+            "EMA momentum, quantum simulation, collective AI deliberation, "
+            "signal fusion, scenario analysis, and accuracy stats."
+        ),
+        "how_to_use": {
+            "step_1": "POST to /api/x402/quantum/analyze with {\"token_address\": \"...\"}",
+            "step_2": "Receive 402 with payment requirements",
+            "step_3": f"Send {QUERY_PRICE_SOL} SOL to {ECOSYSTEM_WALLET}",
+            "step_4": "Retry POST with X-PAYMENT header: base64({\"signature\": \"<tx_sig>\"})",
+            "step_5": "Receive full quantum analysis response",
+        },
+    }
+
+
+@app.get("/api/x402/quantum/stats")
+async def x402_quantum_stats():
+    """Public x402 payment stats — proves demand and revenue."""
+    from farnsworth.integration.x402.solana_gate import get_x402_stats
+    stats = get_x402_stats()
+    return stats.to_dict()
+
+
+@app.get("/.well-known/x402.json")
+async def x402_discovery():
+    """
+    x402 discovery endpoint — serves the manifest for hub/bazaar registration.
+    Discoverable by x402 clients, i1l.store, and x402 bazaars.
+    Standard path: /.well-known/x402.json
+    """
+    from farnsworth.integration.x402.solana_gate import get_x402_discovery_manifest
+    return get_x402_discovery_manifest()
+
+
+@app.get("/api/x402/discovery")
+async def x402_discovery_alt():
+    """Alternate discovery endpoint for x402 hub registration."""
+    from farnsworth.integration.x402.solana_gate import get_x402_discovery_manifest
+    return get_x402_discovery_manifest()
+
+
 @app.get("/api/heartbeat")
 async def get_heartbeat_status():
     """Get current swarm health vitals."""
