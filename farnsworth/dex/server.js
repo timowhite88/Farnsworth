@@ -941,86 +941,47 @@ app.post('/api/extended-info/purchase', (req, res) => {
 });
 
 // ============================================================
-// REAL-TIME PRICE ENGINE (Birdeye + Jupiter, batched to avoid rate limits)
+// REAL-TIME PRICE ENGINE — 5-Provider Round-Robin
+// Cycles: Birdeye → Jupiter → DexScreener → GeckoTerminal → Raydium
+// Each provider hit once every ~10s (5 providers × 2s interval)
 // ============================================================
 const livepriceCache = new Map(); // address -> { price, priceNative, ts, source }
 const livePriceWatchers = new Map(); // address -> { lastTouch }
 
-// Rate limit tracking — back off when APIs return 429
-let birdeyeBackoffUntil = 0;   // timestamp — skip Birdeye calls until this time
-let jupiterBackoffUntil = 0;
-let birdeyeConsecutiveFails = 0;
-let jupiterConsecutiveFails = 0;
+// Per-provider backoff tracking
+const providerState = {
+    birdeye:       { backoffUntil: 0, fails: 0 },
+    jupiter:       { backoffUntil: 0, fails: 0 },
+    dexscreener:   { backoffUntil: 0, fails: 0 },
+    geckoterminal: { backoffUntil: 0, fails: 0 },
+    raydium:       { backoffUntil: 0, fails: 0 },
+};
 
-async function fetchBirdeyePrice(address) {
-    if (Date.now() < birdeyeBackoffUntil) return null;
-    try {
-        const res = await fetch(`${BIRDEYE_BASE}/defi/price?address=${address}`, {
-            signal: AbortSignal.timeout(3000),
-            headers: { 'X-API-KEY': BIRDEYE_API_KEY, 'x-chain': 'solana' }
-        });
-        if (res.status === 429) {
-            birdeyeConsecutiveFails++;
-            const backoff = Math.min(2000 * Math.pow(2, birdeyeConsecutiveFails), 60000);
-            birdeyeBackoffUntil = Date.now() + backoff;
-            console.log(`[LIVE] Birdeye rate limited, backing off ${backoff/1000}s (fail #${birdeyeConsecutiveFails})`);
-            return null;
-        }
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data?.data?.value) {
-            birdeyeConsecutiveFails = 0;
-            return { price: data.data.value, source: 'birdeye', ts: Date.now() };
-        }
-        return null;
-    } catch { return null; }
+function markProviderFail(name) {
+    const s = providerState[name];
+    s.fails++;
+    const backoff = Math.min(3000 * Math.pow(2, s.fails), 120000);
+    s.backoffUntil = Date.now() + backoff;
+    console.log(`[LIVE] ${name} failed (#${s.fails}), backoff ${backoff/1000}s`);
 }
+function markProviderOk(name) { providerState[name].fails = 0; providerState[name].backoffUntil = 0; }
+function isProviderReady(name) { return Date.now() >= providerState[name].backoffUntil; }
 
-async function fetchJupiterPrice(address) {
-    if (Date.now() < jupiterBackoffUntil) return null;
-    try {
-        const res = await fetch(`${JUPITER_PRICE_BASE}?ids=${address}`, {
-            signal: AbortSignal.timeout(3000),
-            headers: { 'x-api-key': JUPITER_API_KEY }
-        });
-        if (res.status === 429) {
-            jupiterConsecutiveFails++;
-            const backoff = Math.min(2000 * Math.pow(2, jupiterConsecutiveFails), 60000);
-            jupiterBackoffUntil = Date.now() + backoff;
-            console.log(`[LIVE] Jupiter rate limited, backing off ${backoff/1000}s (fail #${jupiterConsecutiveFails})`);
-            return null;
-        }
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data?.data?.[address]?.price) {
-            jupiterConsecutiveFails = 0;
-            return { price: parseFloat(data.data[address].price), source: 'jupiter', ts: Date.now() };
-        }
-        return null;
-    } catch { return null; }
-}
-
+// ── PROVIDER 1: Birdeye (batch up to 50) ──
 async function fetchBirdeyeMultiPrice(addresses) {
-    if (!addresses.length) return {};
-    if (Date.now() < birdeyeBackoffUntil) return {};
+    if (!addresses.length || !isProviderReady('birdeye')) return {};
     try {
         const list = addresses.slice(0, 50).join(',');
         const res = await fetch(`${BIRDEYE_BASE}/defi/multi_price?list_address=${list}`, {
             signal: AbortSignal.timeout(5000),
             headers: { 'X-API-KEY': BIRDEYE_API_KEY, 'x-chain': 'solana' }
         });
-        if (res.status === 429) {
-            birdeyeConsecutiveFails++;
-            const backoff = Math.min(2000 * Math.pow(2, birdeyeConsecutiveFails), 60000);
-            birdeyeBackoffUntil = Date.now() + backoff;
-            console.log(`[LIVE] Birdeye multi-price rate limited, backing off ${backoff/1000}s`);
-            return {};
-        }
-        if (!res.ok) return {};
+        if (res.status === 429) { markProviderFail('birdeye'); return {}; }
+        if (!res.ok) { markProviderFail('birdeye'); return {}; }
         const data = await res.json();
         const results = {};
         if (data?.data) {
-            birdeyeConsecutiveFails = 0;
+            markProviderOk('birdeye');
             for (const [addr, info] of Object.entries(data.data)) {
                 if (info?.value) results[addr] = { price: info.value, source: 'birdeye', ts: Date.now() };
             }
@@ -1029,27 +990,21 @@ async function fetchBirdeyeMultiPrice(addresses) {
     } catch { return {}; }
 }
 
+// ── PROVIDER 2: Jupiter (batch up to 100) ──
 async function fetchJupiterMultiPrice(addresses) {
-    if (!addresses.length) return {};
-    if (Date.now() < jupiterBackoffUntil) return {};
+    if (!addresses.length || !isProviderReady('jupiter')) return {};
     try {
         const ids = addresses.slice(0, 100).join(',');
         const res = await fetch(`${JUPITER_PRICE_BASE}?ids=${ids}`, {
             signal: AbortSignal.timeout(5000),
             headers: { 'x-api-key': JUPITER_API_KEY }
         });
-        if (res.status === 429) {
-            jupiterConsecutiveFails++;
-            const backoff = Math.min(2000 * Math.pow(2, jupiterConsecutiveFails), 60000);
-            jupiterBackoffUntil = Date.now() + backoff;
-            console.log(`[LIVE] Jupiter multi-price rate limited, backing off ${backoff/1000}s`);
-            return {};
-        }
-        if (!res.ok) return {};
+        if (res.status === 429) { markProviderFail('jupiter'); return {}; }
+        if (!res.ok) { markProviderFail('jupiter'); return {}; }
         const data = await res.json();
         const results = {};
         if (data?.data) {
-            jupiterConsecutiveFails = 0;
+            markProviderOk('jupiter');
             for (const [addr, info] of Object.entries(data.data)) {
                 if (info?.price) results[addr] = { price: parseFloat(info.price), source: 'jupiter', ts: Date.now() };
             }
@@ -1058,62 +1013,185 @@ async function fetchJupiterMultiPrice(addresses) {
     } catch { return {}; }
 }
 
+// ── PROVIDER 3: DexScreener (batch up to 30, no key needed) ──
+async function fetchDexScreenerMultiPrice(addresses) {
+    if (!addresses.length || !isProviderReady('dexscreener')) return {};
+    try {
+        const batch = addresses.slice(0, 30).join(',');
+        const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${batch}`, {
+            signal: AbortSignal.timeout(6000),
+        });
+        if (res.status === 429) { markProviderFail('dexscreener'); return {}; }
+        if (!res.ok) { markProviderFail('dexscreener'); return {}; }
+        const data = await res.json();
+        const results = {};
+        if (data?.pairs) {
+            markProviderOk('dexscreener');
+            // Pick highest-liquidity pair per token
+            const byToken = {};
+            for (const pair of data.pairs) {
+                if (pair.chainId !== 'solana') continue;
+                const addr = pair.baseToken?.address;
+                if (!addr || !pair.priceUsd) continue;
+                const liq = parseFloat(pair.liquidity?.usd) || 0;
+                if (!byToken[addr] || liq > byToken[addr].liq) {
+                    byToken[addr] = { price: parseFloat(pair.priceUsd), liq };
+                }
+            }
+            for (const [addr, info] of Object.entries(byToken)) {
+                results[addr] = { price: info.price, source: 'dexscreener', ts: Date.now() };
+            }
+        }
+        return results;
+    } catch { return {}; }
+}
+
+// ── PROVIDER 4: GeckoTerminal (multi-token, no key needed) ──
+async function fetchGeckoTerminalMultiPrice(addresses) {
+    if (!addresses.length || !isProviderReady('geckoterminal')) return {};
+    try {
+        // GeckoTerminal multi-token endpoint (up to 30)
+        const batch = addresses.slice(0, 30).join(',');
+        const res = await fetch(`https://api.geckoterminal.com/api/v2/networks/solana/tokens/multi/${batch}`, {
+            signal: AbortSignal.timeout(6000),
+            headers: { 'Accept': 'application/json' },
+        });
+        if (res.status === 429) { markProviderFail('geckoterminal'); return {}; }
+        if (!res.ok) { markProviderFail('geckoterminal'); return {}; }
+        const data = await res.json();
+        const results = {};
+        if (data?.data && Array.isArray(data.data)) {
+            markProviderOk('geckoterminal');
+            for (const token of data.data) {
+                const attrs = token.attributes || {};
+                const addr = attrs.address;
+                const price = parseFloat(attrs.price_usd);
+                if (addr && price > 0) {
+                    results[addr] = { price, source: 'geckoterminal', ts: Date.now() };
+                }
+            }
+        }
+        return results;
+    } catch { return {}; }
+}
+
+// ── PROVIDER 5: Raydium (batch mint/price, no key needed) ──
+async function fetchRaydiumMultiPrice(addresses) {
+    if (!addresses.length || !isProviderReady('raydium')) return {};
+    try {
+        const mints = addresses.slice(0, 50).join(',');
+        const res = await fetch(`https://api-v3.raydium.io/mint/price?mints=${mints}`, {
+            signal: AbortSignal.timeout(5000),
+        });
+        if (res.status === 429) { markProviderFail('raydium'); return {}; }
+        if (!res.ok) { markProviderFail('raydium'); return {}; }
+        const data = await res.json();
+        const results = {};
+        // Raydium returns { data: { "mintAddr": "priceString", ... } }
+        const prices = data?.data || data;
+        if (prices && typeof prices === 'object') {
+            markProviderOk('raydium');
+            for (const [addr, priceVal] of Object.entries(prices)) {
+                const p = parseFloat(priceVal);
+                if (p > 0) results[addr] = { price: p, source: 'raydium', ts: Date.now() };
+            }
+        }
+        return results;
+    } catch { return {}; }
+}
+
+// ── ROUND-ROBIN PROVIDER CYCLING ──
+const PROVIDER_ORDER = [
+    { name: 'birdeye',       fn: fetchBirdeyeMultiPrice },
+    { name: 'jupiter',       fn: fetchJupiterMultiPrice },
+    { name: 'dexscreener',   fn: fetchDexScreenerMultiPrice },
+    { name: 'geckoterminal', fn: fetchGeckoTerminalMultiPrice },
+    { name: 'raydium',       fn: fetchRaydiumMultiPrice },
+];
+let currentProviderIdx = 0;
+
+// Kept for the /api/live/:address single-token fallback
 async function fetchLivePrice(address) {
-    // Try Birdeye first (fastest, best Solana coverage)
-    let result = await fetchBirdeyePrice(address);
-    if (result) { livepriceCache.set(address, result); return result; }
-    // Fallback to Jupiter
-    result = await fetchJupiterPrice(address);
-    if (result) { livepriceCache.set(address, result); return result; }
-    // Fallback to last known LIVE price (not DexScreener cache — avoids bounce)
+    // Try all providers in order, skip backed-off ones
+    for (const provider of PROVIDER_ORDER) {
+        if (!isProviderReady(provider.name)) continue;
+        const results = await provider.fn([address]);
+        if (results[address]) {
+            livepriceCache.set(address, results[address]);
+            return results[address];
+        }
+    }
+    // Fallback to last known LIVE price
     const lastLive = livepriceCache.get(address);
     if (lastLive && Date.now() - lastLive.ts < 30000) {
         return { price: lastLive.price, source: lastLive.source.replace(/-cached$/, '') + '-cached', ts: lastLive.ts };
     }
-    // Final fallback to DexScreener token cache
     const token = tokenCache.get(address);
-    if (token?.price) return { price: token.price, source: 'dexscreener', ts: Date.now() };
+    if (token?.price) return { price: token.price, source: 'cache', ts: Date.now() };
     return null;
 }
 
-// ── BATCHED LIVE PRICE LOOP ──
-// Single interval fetches ALL watched tokens in one batch call (max 50),
-// then broadcasts to WebSocket subscribers. Avoids per-token rate limits.
+// ── BATCHED LIVE PRICE LOOP — ROUND-ROBIN ──
+// Every 2s, calls the NEXT provider in rotation.
+// Each provider only gets called once every ~10s (5 providers × 2s).
+// If that provider fails/is backed-off, immediately tries the next ready one.
 let livePollRunning = false;
 
 async function livePricePollCycle() {
-    if (livePollRunning) return; // skip if previous cycle still running
+    if (livePollRunning) return;
     livePollRunning = true;
     try {
         const addresses = [...livePriceWatchers.keys()];
         if (addresses.length === 0) { livePollRunning = false; return; }
 
-        // Try batch Birdeye first (1 API call for up to 50 tokens)
-        const birdeyeResults = await fetchBirdeyeMultiPrice(addresses);
-        const resolved = new Set(Object.keys(birdeyeResults));
+        // Pick next ready provider (round-robin, skip backed-off)
+        let results = {};
+        let providerUsed = null;
+        for (let i = 0; i < PROVIDER_ORDER.length; i++) {
+            const idx = (currentProviderIdx + i) % PROVIDER_ORDER.length;
+            const provider = PROVIDER_ORDER[idx];
+            if (!isProviderReady(provider.name)) continue;
 
-        // Anything Birdeye missed, try Jupiter batch
-        const missing = addresses.filter(a => !resolved.has(a));
-        const jupiterResults = missing.length > 0 ? await fetchJupiterMultiPrice(missing) : {};
+            results = await provider.fn(addresses);
+            providerUsed = provider.name;
+            currentProviderIdx = (idx + 1) % PROVIDER_ORDER.length;
+            break;
+        }
 
-        // Merge results + fallbacks
+        const resolved = new Set(Object.keys(results));
+        const gotCount = resolved.size;
+
+        // For any tokens the primary provider missed, try ONE fallback
+        if (resolved.size < addresses.length) {
+            const missing = addresses.filter(a => !resolved.has(a));
+            // Pick the next ready provider that's different from the one we just used
+            for (const provider of PROVIDER_ORDER) {
+                if (provider.name === providerUsed || !isProviderReady(provider.name)) continue;
+                const fallbackResults = await provider.fn(missing);
+                for (const [addr, result] of Object.entries(fallbackResults)) {
+                    results[addr] = result;
+                    resolved.add(addr);
+                }
+                break; // only one fallback attempt
+            }
+        }
+
+        // Broadcast all results + use cache for anything still missing
         for (const address of addresses) {
-            let result = birdeyeResults[address] || jupiterResults[address] || null;
+            let result = results[address] || null;
             if (!result) {
-                // Fallback to last known LIVE price (30s stale window)
                 const lastLive = livepriceCache.get(address);
                 if (lastLive && Date.now() - lastLive.ts < 30000) {
                     result = { price: lastLive.price, source: lastLive.source.replace(/-cached$/, '') + '-cached', ts: lastLive.ts };
                 } else {
                     const token = tokenCache.get(address);
-                    if (token?.price) result = { price: token.price, source: 'dexscreener', ts: Date.now() };
+                    if (token?.price) result = { price: token.price, source: 'cache', ts: Date.now() };
                 }
             }
             if (!result) continue;
 
             livepriceCache.set(address, result);
 
-            // Push to WebSocket subscribers
             const msg = JSON.stringify({ type: 'price', token: address, price: result.price, source: result.source, ts: result.ts });
             for (const ws of wsClients) {
                 if (ws.readyState === 1 && ws.subs?.has(address)) {
@@ -1121,13 +1199,18 @@ async function livePricePollCycle() {
                 }
             }
         }
+
+        if (providerUsed) {
+            const readyCount = PROVIDER_ORDER.filter(p => isProviderReady(p.name)).length;
+            console.log(`[LIVE] ${providerUsed}: ${gotCount}/${addresses.length} prices | ${readyCount}/5 providers ready`);
+        }
     } catch (e) {
         console.error('[LIVE] Poll cycle error:', e.message);
     }
     livePollRunning = false;
 }
 
-// Poll every 2 seconds — uses batch APIs so 1 call covers all tokens
+// Poll every 2 seconds — round-robin across 5 providers
 const LIVE_POLL_MS = 2000;
 setInterval(livePricePollCycle, LIVE_POLL_MS);
 
