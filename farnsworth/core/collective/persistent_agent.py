@@ -332,7 +332,7 @@ class DialogueBus:
     def register_agent(self, agent_id: str):
         """Register an agent as active."""
         data = self._load()
-        data["active_agents"][agent_id] = datetime.now().isoformat()
+        data.setdefault("active_agents", {})[agent_id] = datetime.now().isoformat()
         self._save(data)
 
     def get_active_agents(self) -> List[str]:
