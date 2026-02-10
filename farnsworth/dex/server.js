@@ -36,11 +36,14 @@ const xOAuthState = new Map();
 const FETCH_INTERVAL = 30000;
 const COLLECTIVE_FETCH_INTERVAL = 60000;
 
-// Real-time price APIs (Birdeye + Jupiter)
+// Real-time price APIs (Birdeye + Jupiter + Helius)
 const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY || 'c9d915af3f1f49ec9c017e89dbb77784';
 const JUPITER_API_KEY = process.env.JUPITER_API_KEY || 'c872736b-676d-4279-a76c-93515999cd70';
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY || '1780e358-9bf5-4115-8234-eab6aafdc85c';
 const BIRDEYE_BASE = 'https://public-api.birdeye.so';
 const JUPITER_PRICE_BASE = 'https://api.jup.ag/price/v2';
+const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+const HELIUS_WSS = `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
 // Platform suffixes for main list filtering
 const ALLOWED_SUFFIXES = ['pump', 'bonk', 'bags'];
@@ -955,6 +958,7 @@ const providerState = {
     dexscreener:   { backoffUntil: 0, fails: 0 },
     geckoterminal: { backoffUntil: 0, fails: 0 },
     raydium:       { backoffUntil: 0, fails: 0 },
+    helius:        { backoffUntil: 0, fails: 0 },
 };
 
 function markProviderFail(name) {
@@ -1100,6 +1104,41 @@ async function fetchRaydiumMultiPrice(addresses) {
     } catch { return {}; }
 }
 
+// ── PROVIDER 6: Helius DAS API (getAssetBatch, returns price_per_token) ──
+async function fetchHeliusMultiPrice(addresses) {
+    if (!addresses.length || !isProviderReady('helius')) return {};
+    try {
+        // getAssetBatch supports up to 1000 assets
+        const batch = addresses.slice(0, 100);
+        const res = await fetch(HELIUS_RPC, {
+            method: 'POST',
+            signal: AbortSignal.timeout(6000),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0', id: 'helius-price',
+                method: 'getAssetBatch',
+                params: { ids: batch },
+            }),
+        });
+        if (res.status === 429) { markProviderFail('helius'); return {}; }
+        if (!res.ok) { markProviderFail('helius'); return {}; }
+        const data = await res.json();
+        const results = {};
+        const assets = data?.result || [];
+        if (Array.isArray(assets) && assets.length > 0) {
+            markProviderOk('helius');
+            for (const asset of assets) {
+                const addr = asset?.id;
+                const priceInfo = asset?.token_info?.price_info;
+                if (addr && priceInfo?.price_per_token > 0) {
+                    results[addr] = { price: priceInfo.price_per_token, source: 'helius', ts: Date.now() };
+                }
+            }
+        }
+        return results;
+    } catch { return {}; }
+}
+
 // ── ROUND-ROBIN PROVIDER CYCLING ──
 const PROVIDER_ORDER = [
     { name: 'birdeye',       fn: fetchBirdeyeMultiPrice },
@@ -1107,6 +1146,7 @@ const PROVIDER_ORDER = [
     { name: 'dexscreener',   fn: fetchDexScreenerMultiPrice },
     { name: 'geckoterminal', fn: fetchGeckoTerminalMultiPrice },
     { name: 'raydium',       fn: fetchRaydiumMultiPrice },
+    { name: 'helius',        fn: fetchHeliusMultiPrice },
 ];
 let currentProviderIdx = 0;
 
@@ -1202,7 +1242,7 @@ async function livePricePollCycle() {
 
         if (providerUsed) {
             const readyCount = PROVIDER_ORDER.filter(p => isProviderReady(p.name)).length;
-            console.log(`[LIVE] ${providerUsed}: ${gotCount}/${addresses.length} prices | ${readyCount}/5 providers ready`);
+            console.log(`[LIVE] ${providerUsed}: ${gotCount}/${addresses.length} prices | ${readyCount}/${PROVIDER_ORDER.length} providers ready`);
         }
     } catch (e) {
         console.error('[LIVE] Poll cycle error:', e.message);
@@ -1248,8 +1288,89 @@ setInterval(() => {
     }
 }, 60000);
 
+// ── HELIUS WEBSOCKET — Real-time trade push notifications ──
+// Subscribes to Jupiter/Raydium program logs. When a swap is detected
+// involving a watched token, we instantly refresh its price from cache
+// and push to frontend WebSocket — fills gaps between poll intervals.
+const WebSocket = require('ws');
+let heliusWs = null;
+let heliusSubId = null;
+let heliusReconnectTimer = null;
+const JUPITER_PROGRAM = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
+const RAYDIUM_AMM_PROGRAM = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
+
+function connectHeliusWs() {
+    if (heliusWs && heliusWs.readyState <= 1) return; // already open/connecting
+    try {
+        heliusWs = new WebSocket(HELIUS_WSS);
+
+        heliusWs.on('open', () => {
+            console.log('[HELIUS-WS] Connected — subscribing to DEX swaps');
+            // Subscribe to Jupiter program logs (covers most Solana swaps)
+            heliusWs.send(JSON.stringify({
+                jsonrpc: '2.0', id: 1, method: 'logsSubscribe',
+                params: [
+                    { mentions: [JUPITER_PROGRAM] },
+                    { commitment: 'confirmed' },
+                ],
+            }));
+        });
+
+        heliusWs.on('message', async (raw) => {
+            try {
+                const msg = JSON.parse(raw);
+                // Subscription confirmation
+                if (msg.result !== undefined && !msg.method) {
+                    heliusSubId = msg.result;
+                    console.log(`[HELIUS-WS] Subscribed (id: ${heliusSubId})`);
+                    return;
+                }
+                // Log notification — a swap happened
+                if (msg.method === 'logsNotification') {
+                    const logs = msg.params?.result?.value?.logs || [];
+                    const logStr = logs.join(' ');
+                    // Check if any of our watched tokens appear in the logs
+                    for (const address of livePriceWatchers.keys()) {
+                        if (logStr.includes(address)) {
+                            // Token involved in a swap — quick-refresh from fastest available provider
+                            const result = await fetchLivePrice(address);
+                            if (result) {
+                                livepriceCache.set(address, result);
+                                const priceMsg = JSON.stringify({ type: 'price', token: address, price: result.price, source: result.source + '+ws', ts: result.ts });
+                                for (const ws of wsClients) {
+                                    if (ws.readyState === 1 && ws.subs?.has(address)) {
+                                        try { ws.send(priceMsg); } catch {}
+                                    }
+                                }
+                            }
+                            break; // one refresh per log batch is enough
+                        }
+                    }
+                }
+            } catch {}
+        });
+
+        heliusWs.on('close', () => {
+            console.log('[HELIUS-WS] Disconnected, reconnecting in 5s...');
+            heliusSubId = null;
+            if (heliusReconnectTimer) clearTimeout(heliusReconnectTimer);
+            heliusReconnectTimer = setTimeout(connectHeliusWs, 5000);
+        });
+
+        heliusWs.on('error', (err) => {
+            console.error('[HELIUS-WS] Error:', err.message);
+        });
+    } catch (e) {
+        console.error('[HELIUS-WS] Connect failed:', e.message);
+        if (heliusReconnectTimer) clearTimeout(heliusReconnectTimer);
+        heliusReconnectTimer = setTimeout(connectHeliusWs, 10000);
+    }
+}
+
+// Start Helius WebSocket after server boots (in START section)
+
 // ============================================================
-// LIVE PRICE (real-time endpoint — Birdeye/Jupiter, 1s resolution)
+// LIVE PRICE (real-time endpoint)
 // ============================================================
 app.get('/api/live/:address', async (req, res) => {
     const address = req.params.address;
@@ -1983,6 +2104,9 @@ server.listen(PORT, () => {
     setInterval(fetchCollectiveData, COLLECTIVE_FETCH_INTERVAL);
     // Quantum scoring for top tokens every 5 minutes
     setTimeout(() => { batchQuantumScore(); setInterval(batchQuantumScore, 300000); }, 60000);
+
+    // Connect Helius WebSocket for real-time swap detection
+    setTimeout(connectHeliusWs, 3000);
 });
 
 module.exports = { app, server, broadcastAll, broadcastQuantum, checkFarnsBalance };

@@ -715,7 +715,10 @@ function detectPumpLevel(price) {
     return 'none';
 }
 
+var lastPumpOverlayLevel = 'none';
 function updatePumpOverlay(level) {
+    if (level === lastPumpOverlayLevel) return; // skip if unchanged — avoids layout thrash
+    lastPumpOverlayLevel = level;
     var overlay = document.getElementById('pumpOverlay');
     if (!overlay) return;
     if (level === 'extreme') {
@@ -1449,6 +1452,8 @@ async function loadLiveChart(address) {
 
     var pollAddress = address;
     var tickCount = 0;
+    var lastPumpLevel = 'none'; // track pump state to avoid expensive applyOptions every tick
+    var lastRainbowUpdate = 0;  // throttle rainbow recolor to max 4fps
 
     // Subscribe via WebSocket for real-time price pushes (no HTTP polling needed)
     if (ws && ws.readyState === 1) {
@@ -1488,24 +1493,22 @@ async function loadLiveChart(address) {
                 liveDataPoints.push({ time: lineTime, value: smoothed });
                 liveSeries.update({ time: lineTime, value: smoothed });
 
-                // Dynamic line color on pump
-                if (pumpLevel === 'extreme') {
-                    var hue = (Date.now() / 5) % 360;
+                // Dynamic line color on pump — only applyOptions on state change (expensive!)
+                var nowMs = Date.now();
+                if (pumpLevel === 'extreme' && nowMs - lastRainbowUpdate > 250) {
+                    var hue = (nowMs / 5) % 360;
                     liveSeries.applyOptions({
                         lineColor: 'hsl(' + hue + ', 100%, 60%)',
                         topColor: 'hsla(' + hue + ', 100%, 50%, 0.25)',
                     });
-                } else if (pumpLevel === 'mild') {
+                    lastRainbowUpdate = nowMs;
+                } else if (pumpLevel !== lastPumpLevel && pumpLevel !== 'extreme') {
                     liveSeries.applyOptions({
                         lineColor: '#00ff88',
-                        topColor: 'rgba(0, 255, 136, 0.3)',
-                    });
-                } else {
-                    liveSeries.applyOptions({
-                        lineColor: '#00ff88',
-                        topColor: 'rgba(0, 255, 136, 0.2)',
+                        topColor: pumpLevel === 'mild' ? 'rgba(0, 255, 136, 0.3)' : 'rgba(0, 255, 136, 0.2)',
                     });
                 }
+                lastPumpLevel = pumpLevel;
             } else if (isBarMode) {
                 // Bar mode: every tick is a bar
                 var barTime = now;
@@ -1544,19 +1547,22 @@ async function loadLiveChart(address) {
                     currentCandle.ticks++;
                 }
 
-                // Dynamic candle colors on pump
-                if (pumpLevel === 'extreme') {
-                    var hue3 = (Date.now() / 5) % 360;
+                // Dynamic candle colors on pump — throttled to avoid stalling
+                var nowMs3 = Date.now();
+                if (pumpLevel === 'extreme' && nowMs3 - lastRainbowUpdate > 250) {
+                    var hue3 = (nowMs3 / 5) % 360;
                     liveCandleSeries.applyOptions({
                         upColor: 'hsl(' + hue3 + ', 100%, 60%)',
                         borderUpColor: 'hsl(' + hue3 + ', 100%, 60%)',
                         wickUpColor: 'hsl(' + hue3 + ', 100%, 40%)',
                     });
-                } else {
+                    lastRainbowUpdate = nowMs3;
+                } else if (pumpLevel !== lastPumpLevel && pumpLevel !== 'extreme') {
                     liveCandleSeries.applyOptions({
                         upColor: '#00ff88', borderUpColor: '#00ff88', wickUpColor: 'rgba(0,255,136,0.5)',
                     });
                 }
+                lastPumpLevel = pumpLevel;
 
                 liveCandleSeries.update({
                     time: currentCandle.time,
