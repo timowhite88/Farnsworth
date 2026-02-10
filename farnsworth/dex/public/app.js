@@ -644,6 +644,10 @@ function renderPairPanel(token) {
 
 function destroyChart() {
     if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
+    // Unsubscribe from WebSocket price feed
+    if (ws && ws.readyState === 1 && window.currentDetailAddress) {
+        try { ws.send(JSON.stringify({ type: 'unsubscribe', token: window.currentDetailAddress })); } catch (e) {}
+    }
     liveSeries = null;
     liveCandleSeries = null;
     liveVolumeSeries = null;
@@ -1191,6 +1195,101 @@ function emaSmooth(price) {
     return liveEmaPrice;
 }
 
+// Called by WebSocket price pushes to update the live chart in real-time
+function updateLiveChartFromPrice(price) {
+    if (!liveSeries || !chartInstance || price <= 0) return;
+
+    var now = Math.floor(Date.now() / 1000);
+    var isLineMode = (chartType === 'line');
+    var isBarMode = (chartType === 'bar');
+
+    if (liveLastPrice !== null) {
+        livePriceDirection = price > liveLastPrice ? 1 : (price < liveLastPrice ? -1 : livePriceDirection);
+    }
+    liveLastPrice = price;
+
+    var pumpLevel = detectPumpLevel(price);
+    updatePumpOverlay(pumpLevel);
+
+    if (isLineMode) {
+        var smoothed = emaSmooth(price);
+        var lineTime = now;
+        if (liveDataPoints.length > 0 && lineTime <= liveDataPoints[liveDataPoints.length - 1].time) {
+            lineTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
+        }
+        liveDataPoints.push({ time: lineTime, value: smoothed });
+        liveSeries.update({ time: lineTime, value: smoothed });
+    } else if (isBarMode) {
+        var barTime = now;
+        if (liveCandles.length > 0 && barTime <= liveCandles[liveCandles.length - 1].time) {
+            barTime = liveCandles[liveCandles.length - 1].time + 1;
+        }
+        var barColor = livePriceDirection >= 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,51,102,0.7)';
+        liveCandles.push({ time: barTime, value: price, color: barColor });
+        if (liveCandleSeries) liveCandleSeries.update({ time: barTime, value: price, color: barColor });
+        var smoothed2 = emaSmooth(price);
+        if (liveDataPoints.length > 0 && barTime <= liveDataPoints[liveDataPoints.length - 1].time) {
+            barTime = liveDataPoints[liveDataPoints.length - 1].time + 1;
+        }
+        liveDataPoints.push({ time: barTime, value: smoothed2 });
+        liveSeries.update({ time: barTime, value: smoothed2 });
+    } else {
+        var candleTime = now - (now % liveCandleInterval);
+        if (!currentCandle || currentCandle.time !== candleTime) {
+            if (currentCandle && liveCandles.length > 0 && candleTime <= liveCandles[liveCandles.length - 1].time) {
+                candleTime = liveCandles[liveCandles.length - 1].time + liveCandleInterval;
+            }
+            currentCandle = { time: candleTime, open: price, high: price, low: price, close: price, ticks: 1 };
+            liveCandles.push(currentCandle);
+        } else {
+            currentCandle.high = Math.max(currentCandle.high, price);
+            currentCandle.low = Math.min(currentCandle.low, price);
+            currentCandle.close = price;
+            currentCandle.ticks++;
+        }
+        if (liveCandleSeries) {
+            liveCandleSeries.update({
+                time: currentCandle.time, open: currentCandle.open,
+                high: currentCandle.high, low: currentCandle.low, close: currentCandle.close,
+            });
+        }
+        var smoothed3 = emaSmooth(price);
+        var lineTime3 = now;
+        if (liveDataPoints.length > 0 && lineTime3 <= liveDataPoints[liveDataPoints.length - 1].time) {
+            lineTime3 = liveDataPoints[liveDataPoints.length - 1].time + 1;
+        }
+        liveDataPoints.push({ time: lineTime3, value: smoothed3 });
+        liveSeries.update({ time: lineTime3, value: smoothed3 });
+        if (liveVolumeSeries) {
+            liveVolumeSeries.update({
+                time: currentCandle.time, value: currentCandle.ticks,
+                color: currentCandle.close >= currentCandle.open ? 'rgba(0,255,136,0.25)' : 'rgba(255,51,102,0.25)',
+            });
+        }
+    }
+
+    // Trim old data
+    if (liveCandles.length > 2000) {
+        liveCandles = liveCandles.slice(-1500);
+        if (liveCandleSeries) liveCandleSeries.setData(liveCandles);
+    }
+    if (liveDataPoints.length > 5000) {
+        liveDataPoints = liveDataPoints.slice(-4000);
+        if (liveSeries) liveSeries.setData(liveDataPoints);
+    }
+
+    chartInstance.timeScale().scrollToRealTime();
+
+    // Price flash
+    var priceEl = document.getElementById('dPrice');
+    if (priceEl) {
+        priceEl.classList.remove('price-flash-up', 'price-flash-down');
+        if (livePriceDirection === 1) priceEl.classList.add('price-flash-up');
+        else if (livePriceDirection === -1) priceEl.classList.add('price-flash-down');
+        setTimeout(function() { priceEl.classList.remove('price-flash-up', 'price-flash-down'); }, 600);
+    }
+}
+
 async function loadLiveChart(address) {
     destroyChart();
     var container = document.getElementById('chartContainer');
@@ -1351,6 +1450,12 @@ async function loadLiveChart(address) {
     var pollAddress = address;
     var tickCount = 0;
 
+    // Subscribe via WebSocket for real-time price pushes (no HTTP polling needed)
+    if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'subscribe', token: pollAddress }));
+    }
+
+    // Fallback HTTP poll at 3s (only fills gaps if WebSocket misses)
     liveInterval = setInterval(async function() {
         try {
             var res = await fetch(API + '/live/' + encodeURIComponent(pollAddress));
@@ -1508,7 +1613,7 @@ async function loadLiveChart(address) {
                 setChg('dChg5m', data.priceChange.m5);
             }
         } catch (e) { /* ignore */ }
-    }, 1000);
+    }, 3000); // 3s HTTP fallback — primary updates come via WebSocket
 
     // Responsive resize — only update width, height is fixed
     chartResizeObserver = new ResizeObserver(function(entries) {
@@ -2296,7 +2401,7 @@ async function confirmBoost() {
    ============================================ */
 
 let wsRetries = 0;
-const WS_MAX_RETRIES = 3;
+const WS_MAX_RETRIES = 10;
 
 function connectWebSocket() {
     if (wsRetries >= WS_MAX_RETRIES) {
@@ -2313,6 +2418,10 @@ function connectWebSocket() {
         ws.onopen = function () {
             console.log('[DEXAI] WebSocket connected');
             wsRetries = 0;
+            // Re-subscribe to live chart token if viewing one
+            if (window.currentDetailAddress && liveSeries) {
+                ws.send(JSON.stringify({ type: 'subscribe', token: window.currentDetailAddress }));
+            }
         };
 
         ws.onmessage = function (event) {
@@ -2361,8 +2470,8 @@ function handleWsMessage(msg) {
             break;
 
         case 'price':
-            // Real-time price update for current token
-            if (currentToken && msg.address === currentToken.address && msg.price) {
+            // Real-time price update for current token — also feeds live chart
+            if (currentToken && msg.token === currentToken.address && msg.price) {
                 setText('dPrice', formatPrice(msg.price));
                 if (msg.priceChange) {
                     const dChg = document.getElementById('dChg');
@@ -2370,6 +2479,10 @@ function handleWsMessage(msg) {
                         dChg.textContent = formatPercent(msg.priceChange);
                         dChg.className = 'price-chg ' + chgClass(msg.priceChange);
                     }
+                }
+                // Feed live chart series if active
+                if (liveSeries && chartInstance) {
+                    updateLiveChartFromPrice(msg.price);
                 }
             }
             break;

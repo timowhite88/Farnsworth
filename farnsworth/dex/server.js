@@ -941,20 +941,35 @@ app.post('/api/extended-info/purchase', (req, res) => {
 });
 
 // ============================================================
-// REAL-TIME PRICE ENGINE (Birdeye + Jupiter, 1-second resolution)
+// REAL-TIME PRICE ENGINE (Birdeye + Jupiter, batched to avoid rate limits)
 // ============================================================
 const livepriceCache = new Map(); // address -> { price, priceNative, ts, source }
-const livePriceWatchers = new Map(); // address -> { clients: Set, interval, lastFetch }
+const livePriceWatchers = new Map(); // address -> { lastTouch }
+
+// Rate limit tracking — back off when APIs return 429
+let birdeyeBackoffUntil = 0;   // timestamp — skip Birdeye calls until this time
+let jupiterBackoffUntil = 0;
+let birdeyeConsecutiveFails = 0;
+let jupiterConsecutiveFails = 0;
 
 async function fetchBirdeyePrice(address) {
+    if (Date.now() < birdeyeBackoffUntil) return null;
     try {
         const res = await fetch(`${BIRDEYE_BASE}/defi/price?address=${address}`, {
             signal: AbortSignal.timeout(3000),
             headers: { 'X-API-KEY': BIRDEYE_API_KEY, 'x-chain': 'solana' }
         });
+        if (res.status === 429) {
+            birdeyeConsecutiveFails++;
+            const backoff = Math.min(2000 * Math.pow(2, birdeyeConsecutiveFails), 60000);
+            birdeyeBackoffUntil = Date.now() + backoff;
+            console.log(`[LIVE] Birdeye rate limited, backing off ${backoff/1000}s (fail #${birdeyeConsecutiveFails})`);
+            return null;
+        }
         if (!res.ok) return null;
         const data = await res.json();
         if (data?.data?.value) {
+            birdeyeConsecutiveFails = 0;
             return { price: data.data.value, source: 'birdeye', ts: Date.now() };
         }
         return null;
@@ -962,14 +977,23 @@ async function fetchBirdeyePrice(address) {
 }
 
 async function fetchJupiterPrice(address) {
+    if (Date.now() < jupiterBackoffUntil) return null;
     try {
         const res = await fetch(`${JUPITER_PRICE_BASE}?ids=${address}`, {
             signal: AbortSignal.timeout(3000),
             headers: { 'x-api-key': JUPITER_API_KEY }
         });
+        if (res.status === 429) {
+            jupiterConsecutiveFails++;
+            const backoff = Math.min(2000 * Math.pow(2, jupiterConsecutiveFails), 60000);
+            jupiterBackoffUntil = Date.now() + backoff;
+            console.log(`[LIVE] Jupiter rate limited, backing off ${backoff/1000}s (fail #${jupiterConsecutiveFails})`);
+            return null;
+        }
         if (!res.ok) return null;
         const data = await res.json();
         if (data?.data?.[address]?.price) {
+            jupiterConsecutiveFails = 0;
             return { price: parseFloat(data.data[address].price), source: 'jupiter', ts: Date.now() };
         }
         return null;
@@ -978,18 +1002,56 @@ async function fetchJupiterPrice(address) {
 
 async function fetchBirdeyeMultiPrice(addresses) {
     if (!addresses.length) return {};
+    if (Date.now() < birdeyeBackoffUntil) return {};
     try {
         const list = addresses.slice(0, 50).join(',');
         const res = await fetch(`${BIRDEYE_BASE}/defi/multi_price?list_address=${list}`, {
             signal: AbortSignal.timeout(5000),
             headers: { 'X-API-KEY': BIRDEYE_API_KEY, 'x-chain': 'solana' }
         });
+        if (res.status === 429) {
+            birdeyeConsecutiveFails++;
+            const backoff = Math.min(2000 * Math.pow(2, birdeyeConsecutiveFails), 60000);
+            birdeyeBackoffUntil = Date.now() + backoff;
+            console.log(`[LIVE] Birdeye multi-price rate limited, backing off ${backoff/1000}s`);
+            return {};
+        }
         if (!res.ok) return {};
         const data = await res.json();
         const results = {};
         if (data?.data) {
+            birdeyeConsecutiveFails = 0;
             for (const [addr, info] of Object.entries(data.data)) {
                 if (info?.value) results[addr] = { price: info.value, source: 'birdeye', ts: Date.now() };
+            }
+        }
+        return results;
+    } catch { return {}; }
+}
+
+async function fetchJupiterMultiPrice(addresses) {
+    if (!addresses.length) return {};
+    if (Date.now() < jupiterBackoffUntil) return {};
+    try {
+        const ids = addresses.slice(0, 100).join(',');
+        const res = await fetch(`${JUPITER_PRICE_BASE}?ids=${ids}`, {
+            signal: AbortSignal.timeout(5000),
+            headers: { 'x-api-key': JUPITER_API_KEY }
+        });
+        if (res.status === 429) {
+            jupiterConsecutiveFails++;
+            const backoff = Math.min(2000 * Math.pow(2, jupiterConsecutiveFails), 60000);
+            jupiterBackoffUntil = Date.now() + backoff;
+            console.log(`[LIVE] Jupiter multi-price rate limited, backing off ${backoff/1000}s`);
+            return {};
+        }
+        if (!res.ok) return {};
+        const data = await res.json();
+        const results = {};
+        if (data?.data) {
+            jupiterConsecutiveFails = 0;
+            for (const [addr, info] of Object.entries(data.data)) {
+                if (info?.price) results[addr] = { price: parseFloat(info.price), source: 'jupiter', ts: Date.now() };
             }
         }
         return results;
@@ -1006,7 +1068,7 @@ async function fetchLivePrice(address) {
     // Fallback to last known LIVE price (not DexScreener cache — avoids bounce)
     const lastLive = livepriceCache.get(address);
     if (lastLive && Date.now() - lastLive.ts < 30000) {
-        return { price: lastLive.price, source: lastLive.source + '-cached', ts: lastLive.ts };
+        return { price: lastLive.price, source: lastLive.source.replace(/-cached$/, '') + '-cached', ts: lastLive.ts };
     }
     // Final fallback to DexScreener token cache
     const token = tokenCache.get(address);
@@ -1014,16 +1076,43 @@ async function fetchLivePrice(address) {
     return null;
 }
 
-// Start watching a token for real-time prices (called when clients subscribe)
-function startLiveWatch(address) {
-    if (livePriceWatchers.has(address)) return;
-    const watcher = {
-        clients: new Set(),
-        lastFetch: 0,
-        interval: setInterval(async () => {
-            const result = await fetchLivePrice(address);
-            if (!result) return;
+// ── BATCHED LIVE PRICE LOOP ──
+// Single interval fetches ALL watched tokens in one batch call (max 50),
+// then broadcasts to WebSocket subscribers. Avoids per-token rate limits.
+let livePollRunning = false;
+
+async function livePricePollCycle() {
+    if (livePollRunning) return; // skip if previous cycle still running
+    livePollRunning = true;
+    try {
+        const addresses = [...livePriceWatchers.keys()];
+        if (addresses.length === 0) { livePollRunning = false; return; }
+
+        // Try batch Birdeye first (1 API call for up to 50 tokens)
+        const birdeyeResults = await fetchBirdeyeMultiPrice(addresses);
+        const resolved = new Set(Object.keys(birdeyeResults));
+
+        // Anything Birdeye missed, try Jupiter batch
+        const missing = addresses.filter(a => !resolved.has(a));
+        const jupiterResults = missing.length > 0 ? await fetchJupiterMultiPrice(missing) : {};
+
+        // Merge results + fallbacks
+        for (const address of addresses) {
+            let result = birdeyeResults[address] || jupiterResults[address] || null;
+            if (!result) {
+                // Fallback to last known LIVE price (30s stale window)
+                const lastLive = livepriceCache.get(address);
+                if (lastLive && Date.now() - lastLive.ts < 30000) {
+                    result = { price: lastLive.price, source: lastLive.source.replace(/-cached$/, '') + '-cached', ts: lastLive.ts };
+                } else {
+                    const token = tokenCache.get(address);
+                    if (token?.price) result = { price: token.price, source: 'dexscreener', ts: Date.now() };
+                }
+            }
+            if (!result) continue;
+
             livepriceCache.set(address, result);
+
             // Push to WebSocket subscribers
             const msg = JSON.stringify({ type: 'price', token: address, price: result.price, source: result.source, ts: result.ts });
             for (const ws of wsClients) {
@@ -1031,30 +1120,50 @@ function startLiveWatch(address) {
                     try { ws.send(msg); } catch {}
                 }
             }
-        }, 1000) // 1-second polling
-    };
-    livePriceWatchers.set(address, watcher);
-    console.log(`[LIVE] Started 1s price watch: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
-    // Auto-stop after 10 minutes of no REST requests
-    watcher.autoStop = setTimeout(() => stopLiveWatch(address), 600000);
+        }
+    } catch (e) {
+        console.error('[LIVE] Poll cycle error:', e.message);
+    }
+    livePollRunning = false;
+}
+
+// Poll every 2 seconds — uses batch APIs so 1 call covers all tokens
+const LIVE_POLL_MS = 2000;
+setInterval(livePricePollCycle, LIVE_POLL_MS);
+
+// Register/unregister tokens for live watching
+function startLiveWatch(address) {
+    if (livePriceWatchers.has(address)) return;
+    livePriceWatchers.set(address, { lastTouch: Date.now() });
+    console.log(`[LIVE] Watching: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
 }
 
 function stopLiveWatch(address) {
-    const watcher = livePriceWatchers.get(address);
-    if (!watcher) return;
-    clearInterval(watcher.interval);
-    if (watcher.autoStop) clearTimeout(watcher.autoStop);
+    if (!livePriceWatchers.has(address)) return;
     livePriceWatchers.delete(address);
-    console.log(`[LIVE] Stopped price watch: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
+    console.log(`[LIVE] Stopped: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
 }
 
 function touchLiveWatch(address) {
     const watcher = livePriceWatchers.get(address);
     if (!watcher) { startLiveWatch(address); return; }
-    // Reset auto-stop timer
-    if (watcher.autoStop) clearTimeout(watcher.autoStop);
-    watcher.autoStop = setTimeout(() => stopLiveWatch(address), 600000);
+    watcher.lastTouch = Date.now();
 }
+
+// Cleanup stale watchers every 60 seconds (no activity for 10 min)
+setInterval(() => {
+    const now = Date.now();
+    for (const [address, watcher] of livePriceWatchers) {
+        // Also count WebSocket subscribers as "active"
+        let hasWsSub = false;
+        for (const ws of wsClients) {
+            if (ws.readyState === 1 && ws.subs?.has(address)) { hasWsSub = true; break; }
+        }
+        if (!hasWsSub && now - watcher.lastTouch > 600000) {
+            stopLiveWatch(address);
+        }
+    }
+}, 60000);
 
 // ============================================================
 // LIVE PRICE (real-time endpoint — Birdeye/Jupiter, 1s resolution)
