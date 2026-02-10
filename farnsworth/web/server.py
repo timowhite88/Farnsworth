@@ -5936,10 +5936,20 @@ def main():
     logger.info(f"Solana Available: {SOLANA_AVAILABLE}")
     logger.info("Features: Memory, Notes, Snippets, Focus, Profiles, Health, Tools, Thinking")
 
+    # Pre-bind socket with SO_REUSEADDR to survive zombie processes in containers
+    import socket as _socket
+    sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+    try:
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
+    except (AttributeError, OSError):
+        pass
+    sock.bind((host, port))
+    sock.listen(2048)
+    sock.set_inheritable(True)
     uvicorn.run(
         "farnsworth.web.server:app",
-        host=host,
-        port=port,
+        fd=sock.fileno(),
         reload=False,
         log_level="info"
     )
