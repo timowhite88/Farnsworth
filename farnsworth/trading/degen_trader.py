@@ -2519,6 +2519,208 @@ class DexPriceFeed:
 
 
 # ============================================================
+# GOLDRUSH STREAMING API (v5.0)
+# ============================================================
+class GoldRushStream:
+    """v5.0: Real-time DEX pair discovery + OHLCV candles via GoldRush GraphQL WebSocket.
+
+    Replaces dead DexPriceFeed polling with true streaming data:
+    - newPairs: instant detection of new Solana DEX pairs (faster than DexScreener)
+    - ohlcvCandlesForToken: real-time OHLCV for tokens we're holding/watching
+    Free during beta. Uses graphql-ws protocol over WebSocket.
+    """
+
+    GQL_WS_URL = "wss://streaming.goldrush.com/graphql"
+    CHAIN = "SOLANA_MAINNET"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.running = False
+        self._ws = None
+        self._tasks: List[asyncio.Task] = []
+        self._next_id = 1
+        # Callbacks
+        self._on_new_pair = None  # async callback(pair_data)
+        self._on_candle = None    # async callback(token_address, candle_data)
+        # State
+        self.new_pairs: asyncio.Queue = asyncio.Queue(maxsize=500)
+        self.live_candles: Dict[str, dict] = {}  # token_address -> latest candle
+        self._candle_subs: Dict[str, str] = {}  # token_address -> sub_id
+        self._reconnect_count = 0
+
+    async def start(self, on_new_pair=None, on_candle=None):
+        self.running = True
+        self._on_new_pair = on_new_pair
+        self._on_candle = on_candle
+        self._tasks.append(asyncio.create_task(self._run_new_pairs_stream()))
+        logger.info(f"GoldRush Stream started (API key: ...{self.api_key[-6:]})")
+
+    async def stop(self):
+        self.running = False
+        for t in self._tasks:
+            t.cancel()
+        self._tasks.clear()
+
+    async def subscribe_token_candles(self, token_address: str):
+        """Subscribe to real-time OHLCV candles for a token."""
+        if token_address in self._candle_subs:
+            return
+        self._candle_subs[token_address] = ""
+        task = asyncio.create_task(self._run_token_candle_stream(token_address))
+        self._tasks.append(task)
+        logger.info(f"GoldRush: subscribed to OHLCV for {token_address[:12]}...")
+
+    async def unsubscribe_token_candles(self, token_address: str):
+        """Unsubscribe from a token's candle feed."""
+        self._candle_subs.pop(token_address, None)
+        self.live_candles.pop(token_address, None)
+
+    def get_latest_candle(self, token_address: str) -> Optional[dict]:
+        return self.live_candles.get(token_address)
+
+    async def _gql_ws_connect(self):
+        """Create a graphql-ws protocol WebSocket connection."""
+        try:
+            import websockets
+        except ImportError:
+            logger.warning("websockets not installed, GoldRush Stream disabled")
+            return None
+
+        ws = await websockets.connect(
+            self.GQL_WS_URL,
+            subprotocols=["graphql-transport-ws"],
+            ping_interval=20,
+            ping_timeout=10,
+            additional_headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+        # Send connection_init
+        await ws.send(json.dumps({"type": "connection_init", "payload": {}}))
+        # Wait for connection_ack
+        ack = json.loads(await ws.recv())
+        if ack.get("type") != "connection_ack":
+            logger.warning(f"GoldRush WS: expected connection_ack, got {ack.get('type')}")
+            await ws.close()
+            return None
+        return ws
+
+    async def _run_new_pairs_stream(self):
+        """Stream new DEX pairs on Solana — instant pair discovery."""
+        while self.running:
+            try:
+                ws = await self._gql_ws_connect()
+                if not ws:
+                    await asyncio.sleep(10)
+                    continue
+
+                self._reconnect_count += 1
+                sub_id = str(self._next_id)
+                self._next_id += 1
+
+                # Subscribe to newPairs
+                query = """
+                subscription {
+                    newPairs(chains: [SOLANA_MAINNET]) {
+                        pairAddress
+                        token0 { address symbol name decimals }
+                        token1 { address symbol name decimals }
+                        dexName
+                        blockHeight
+                        blockTimestamp
+                    }
+                }
+                """
+                await ws.send(json.dumps({
+                    "id": sub_id,
+                    "type": "subscribe",
+                    "payload": {"query": query}
+                }))
+
+                logger.info(f"GoldRush: newPairs subscription active (connect #{self._reconnect_count})")
+
+                async for msg in ws:
+                    if not self.running:
+                        break
+                    try:
+                        data = json.loads(msg)
+                        if data.get("type") == "next" and data.get("id") == sub_id:
+                            pair = data.get("payload", {}).get("data", {}).get("newPairs")
+                            if pair:
+                                try:
+                                    self.new_pairs.put_nowait(pair)
+                                except asyncio.QueueFull:
+                                    self.new_pairs.get_nowait()  # drop oldest
+                                    self.new_pairs.put_nowait(pair)
+                                if self._on_new_pair:
+                                    asyncio.create_task(self._on_new_pair(pair))
+                        elif data.get("type") == "error":
+                            logger.warning(f"GoldRush newPairs error: {data.get('payload')}")
+                    except Exception as e:
+                        logger.debug(f"GoldRush newPairs parse error: {e}")
+
+                await ws.close()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"GoldRush newPairs stream error: {e}, reconnecting in 5s...")
+                await asyncio.sleep(5)
+
+    async def _run_token_candle_stream(self, token_address: str):
+        """Stream OHLCV candles for a specific token."""
+        while self.running and token_address in self._candle_subs:
+            try:
+                ws = await self._gql_ws_connect()
+                if not ws:
+                    await asyncio.sleep(10)
+                    continue
+
+                sub_id = str(self._next_id)
+                self._next_id += 1
+
+                query = """
+                subscription($tokenAddress: String!) {
+                    ohlcvCandlesForToken(
+                        tokenAddress: $tokenAddress
+                        chains: [SOLANA_MAINNET]
+                    ) {
+                        open close high low
+                        volume
+                        timestamp
+                        pairAddress
+                    }
+                }
+                """
+                await ws.send(json.dumps({
+                    "id": sub_id,
+                    "type": "subscribe",
+                    "payload": {
+                        "query": query,
+                        "variables": {"tokenAddress": token_address}
+                    }
+                }))
+
+                async for msg in ws:
+                    if not self.running or token_address not in self._candle_subs:
+                        break
+                    try:
+                        data = json.loads(msg)
+                        if data.get("type") == "next" and data.get("id") == sub_id:
+                            candle = data.get("payload", {}).get("data", {}).get("ohlcvCandlesForToken")
+                            if candle:
+                                self.live_candles[token_address] = candle
+                                if self._on_candle:
+                                    asyncio.create_task(self._on_candle(token_address, candle))
+                    except Exception as e:
+                        logger.debug(f"GoldRush candle parse error: {e}")
+
+                await ws.close()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"GoldRush candle stream error for {token_address[:12]}: {e}")
+                await asyncio.sleep(5)
+
+
+# ============================================================
 # WALLET GRAPH ANALYZER
 # ============================================================
 class WalletAnalyzer:
@@ -2559,18 +2761,24 @@ class WalletAnalyzer:
 
             # Get top 10 holder addresses
             holder_addresses = []
-            total_supply = 0
             top_10_amount = 0
 
             for acc in accounts[:10]:
                 amount = float(acc.get("uiAmount", 0) or 0)
                 top_10_amount += amount
-                total_supply = max(total_supply, top_10_amount * 2)  # rough estimate
 
                 # Resolve owner of token account
                 owner = await self._get_token_account_owner(acc.get("address", ""))
                 if owner:
                     holder_addresses.append({"address": owner, "amount": amount})
+
+            # v5.0: Get real total supply from token mint (was always 0.50 due to loop bug)
+            total_supply = await self._get_token_supply(mint)
+            if total_supply <= 0:
+                # Fallback: estimate from all accounts returned (not just top 10)
+                all_amount = sum(float(a.get("uiAmount", 0) or 0) for a in accounts)
+                # If top 10 is all we have, use that as denominator (conservative)
+                total_supply = all_amount if len(accounts) <= 10 else all_amount * 1.5
 
             if total_supply > 0:
                 result["concentration"] = top_10_amount / total_supply
@@ -2634,6 +2842,22 @@ class WalletAnalyzer:
         except Exception:
             pass
         return None
+
+    async def _get_token_supply(self, mint: str) -> float:
+        """v5.0: Get real total supply for a token mint."""
+        try:
+            payload = {
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTokenSupply",
+                "params": [mint]
+            }
+            async with self.session.post(self.fast_rpc, json=payload) as resp:
+                data = await resp.json()
+                supply_info = data.get("result", {}).get("value", {})
+                return float(supply_info.get("uiAmount", 0) or 0)
+        except Exception:
+            pass
+        return 0
 
     async def _trace_funding_source(self, wallet: str) -> Optional[str]:
         """Trace where a wallet got its initial SOL from."""
@@ -2816,11 +3040,13 @@ class SwarmTradeIntelligence:
         reasons = []
 
         for agent, response in done.items():
-            if "STRONG_BUY" in response:
+            # v5.0: Reject negative sentiment before checking BUY (was matching "DO NOT BUY" as BUY)
+            is_negative = any(neg in response for neg in ("NOT BUY", "DON'T BUY", "DONT BUY", "NO BUY", "SKIP", "AVOID", "REJECT"))
+            if not is_negative and "STRONG_BUY" in response:
                 strong_buy_votes += 1
                 buy_votes += 1
                 reasons.append(f"{agent}: STRONG_BUY")
-            elif "BUY" in response:
+            elif not is_negative and "BUY" in response:
                 buy_votes += 1
                 reasons.append(f"{agent}: BUY")
             else:
@@ -2862,7 +3088,8 @@ class SwarmTradeIntelligence:
                 if resp.status == 200:
                     data = await resp.json()
                     reply = (data.get("response") or "").upper()
-                    if "BUY" in reply:
+                    is_neg = any(neg in reply for neg in ("NOT BUY", "DON'T BUY", "DONT BUY", "NO BUY", "SKIP", "AVOID"))
+                    if not is_neg and "BUY" in reply:
                         return {"verdict": "BUY", "confidence": 60, "reasons": ["swarm_api: BUY"]}
         except Exception:
             pass
@@ -3282,32 +3509,55 @@ class QuantumTradeOracle:
         return result
 
     def _statistical_rug_score(self, token: TokenInfo) -> float:
+        # v5.0: Weighted signals with reduced age penalty (was blocking our entire target market)
         signals = []
+        weights = []
+
+        # Liquidity ratio signal
         if token.fdv > 0:
             liq_ratio = token.liquidity_usd / token.fdv
             signals.append(0.7 if liq_ratio < 0.05 else 0.4 if liq_ratio < 0.1 else 0.1)
+            weights.append(1.5)  # high weight — strong rug indicator
         else:
-            signals.append(0.5)
+            signals.append(0.3 if token.on_bonding_curve else 0.5)
+            weights.append(0.5)
+
+        # Age signal — REDUCED weight for our target market (fresh tokens)
         if token.age_minutes < 5:
-            signals.append(0.8)
+            signals.append(0.5)  # v5.0: was 0.8, too harsh — all our targets are <5min
         elif token.age_minutes < 15:
-            signals.append(0.5)
+            signals.append(0.35)
         elif token.age_minutes < 60:
-            signals.append(0.3)
+            signals.append(0.25)
         else:
             signals.append(0.15)
+        weights.append(0.5)  # v5.0: low weight — age alone doesn't indicate rug
+
+        # Sell pressure signal
         total_txns = token.buy_count_5m + token.sell_count_5m
         if total_txns > 0:
-            signals.append(min(1.0, (token.sell_count_5m / total_txns) * 1.2))
+            sell_ratio = token.sell_count_5m / total_txns
+            signals.append(min(1.0, sell_ratio * 1.2))
+            weights.append(2.0)  # high weight — actual selling is strong rug signal
         else:
-            signals.append(0.5)
+            signals.append(0.3)
+            weights.append(0.5)
+
+        # Price dump signal
         if token.price_change_5m < -30:
             signals.append(0.9)
+            weights.append(2.0)
         elif token.price_change_5m < -15:
             signals.append(0.6)
+            weights.append(1.5)
         else:
             signals.append(0.1)
-        return sum(signals) / len(signals) if signals else 0.5
+            weights.append(1.0)
+
+        total_weight = sum(weights)
+        if total_weight > 0:
+            return sum(s * w for s, w in zip(signals, weights)) / total_weight
+        return 0.3
 
     async def _farsight_analyze(self, token: TokenInfo, session: aiohttp.ClientSession) -> Optional[Dict]:
         try:
@@ -4184,8 +4434,9 @@ class AdaptiveLearner:
                         # Merge collective suggestions into our adjustments
                         for param, val in insight.get("adjustments", {}).items():
                             if param in self._tunable_params:
-                                current = self._tunable_params[param]["default"]
-                                self._adjustments[param] = val - current
+                                # v5.0: Use actual current value, not default (was computing wrong delta)
+                                current = self._tunable_params[param]["default"] + self._adjustments.get(param, 0)
+                                self._adjustments[param] = val - self._tunable_params[param]["default"]
                         logger.info(f"COLLECTIVE INSIGHT: {insight}")
                         return insight
         except Exception as e:
@@ -5000,6 +5251,10 @@ class DegenTrader:
         self._last_collective_query = 0.0  # timestamp of last collective query
         # v4.3: Real-time DEX price feed via Raydium pool vault WebSocket
         self.dex_price_feed: Optional[DexPriceFeed] = None
+        # v5.0: GoldRush streaming API — real-time pair discovery + OHLCV
+        self.goldrush_stream: Optional[GoldRushStream] = None
+        # v5.0: Sell lock — prevents concurrent sells from corrupting balance-diff PnL
+        self._sell_lock = asyncio.Lock()
         # v4.4: Quantum Trading Cortex — fused quantum+EMA+collective signals
         self._quantum_signals: Dict[str, dict] = {}  # token_address -> latest quantum signal
         self._quantum_signal_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -5127,6 +5382,17 @@ class DegenTrader:
         await self.dex_price_feed.start()
         logger.info(f"DexPriceFeed v4.3 enabled — real-time Raydium pool vault subscriptions")
 
+        # v5.0: GoldRush Streaming API — real-time new pair discovery + OHLCV candles
+        goldrush_key = os.environ.get("GOLDRUSH_API_KEY", "")
+        self.goldrush_stream = None
+        if goldrush_key:
+            self.goldrush_stream = GoldRushStream(goldrush_key)
+            await self.goldrush_stream.start(
+                on_new_pair=self._on_goldrush_new_pair,
+                on_candle=self._on_goldrush_candle,
+            )
+            logger.info("GoldRush Stream v5.0 enabled — real-time Solana pair discovery + OHLCV")
+
         # v4.4: Subscribe to Quantum Trading Cortex signals via Nexus
         try:
             from farnsworth.core.nexus import Nexus, SignalType
@@ -5229,6 +5495,8 @@ class DegenTrader:
             await self.whale_hunter.stop()
         if self.dex_price_feed:
             await self.dex_price_feed.stop()
+        if self.goldrush_stream:
+            await self.goldrush_stream.stop()
         if self.session:
             await self.session.close()
         logger.info("Trader shut down cleanly")
@@ -5666,6 +5934,13 @@ class DegenTrader:
             logger.debug(f"Jupiter price error {mint[:12]}: {e}")
         return 0.0
 
+    async def _get_sol_price_usd(self) -> float:
+        """v5.0: Get current SOL price in USD via Jupiter."""
+        try:
+            return await self._get_jupiter_price(SOL_MINT)
+        except Exception:
+            return 150.0  # reasonable fallback
+
     async def _get_fast_price(self, mint: str) -> float:
         """v4.3: Fastest available price — Jupiter first, DexScreener fallback.
 
@@ -5691,9 +5966,11 @@ class DegenTrader:
         """Score a token 0-100 based on multiple degen signals."""
         score = 0.0
 
-        # FDV cap - low cap only
+        # FDV cap - low cap only (v5.0: also handle FDV==0 for non-curve tokens)
         if token.fdv > self.config.max_fdv and token.fdv > 0:
             return 0  # HARD REJECT - not low cap
+        if token.fdv == 0 and not token.on_bonding_curve:
+            return 0  # v5.0: FDV==0 for non-curve token = no data, skip
 
         # Liquidity sweet spot (skip for bonding curve tokens - they have no traditional liquidity)
         if not token.on_bonding_curve:
@@ -5874,7 +6151,8 @@ class DegenTrader:
                     return False
 
             except asyncio.TimeoutError:
-                logger.debug(f"Wallet analysis timeout for {token.symbol}")
+                logger.warning(f"Wallet analysis timeout for {token.symbol} — defaulting to cautious")
+                token.rug_probability = max(token.rug_probability, 0.3)  # v5.0: bump rug risk on timeout
 
         # 2. Quantum oracle (rug probability + pattern matching + QAOA hint)
         if self.quantum_oracle and self.config.use_quantum:
@@ -5901,7 +6179,8 @@ class DegenTrader:
                 if jitter > 0:
                     await asyncio.sleep(jitter / 1000.0)
             except asyncio.TimeoutError:
-                logger.debug(f"Quantum analysis timeout for {token.symbol}")
+                logger.warning(f"Quantum analysis timeout for {token.symbol} — using statistical fallback")
+                token.rug_probability = max(token.rug_probability, self._statistical_rug_score(token))
 
         # 3. Swarm multi-agent analysis
         if self.swarm_intel and self.config.use_swarm:
@@ -5932,6 +6211,12 @@ class DegenTrader:
         if not self.curve_engine or not self.session:
             return None
         if mint in self._sniper_bought or mint in self.positions:
+            return None
+
+        # v5.0: Enforce bonding_curve_min_velocity (was dead code — config existed but never checked)
+        velocity = signal.get("velocity", 0)
+        if velocity < self.config.bonding_curve_min_velocity:
+            logger.info(f"SNIPER SKIP {symbol}: velocity {velocity:.1f}/min < min {self.config.bonding_curve_min_velocity}/min")
             return None
 
         # Quick rug checks (fast, no deep analysis)
@@ -5989,9 +6274,19 @@ class DegenTrader:
             self._sniper_bought.add(mint)
             self.total_invested_sol += amount_sol  # v3.9: track total invested
             entry_vel = signal.get("velocity", 0)
+            # v5.0: Estimate USD entry price from curve state (was storing raw SOL, breaking manage_positions)
+            entry_price_usd = 0
+            if curve_state and curve_state.real_token_reserves > 0:
+                price_per_token_sol = curve_state.virtual_sol_reserves / curve_state.virtual_token_reserves
+                sol_price_usd = 150  # rough SOL/USD estimate (updated at runtime)
+                try:
+                    sol_price_usd = await self._get_sol_price_usd() or 150
+                except Exception:
+                    pass
+                entry_price_usd = price_per_token_sol * sol_price_usd
             self.positions[mint] = Position(
                 token_address=mint, symbol=symbol,
-                entry_price=amount_sol,  # v3.9: use SOL spent as reference (real PnL from balance diff)
+                entry_price=entry_price_usd,  # v5.0: always USD for consistent manage_positions math
                 amount_tokens=0, amount_sol_spent=amount_sol,
                 entry_time=time.time(),
                 take_profit_levels=[1.15, 1.25, 1.5],  # v3.8: micro scalp — pull at 15-25%
@@ -6005,14 +6300,18 @@ class DegenTrader:
             trade = Trade(
                 timestamp=time.time(), action="buy", token_address=mint,
                 symbol=symbol, amount_sol=amount_sol,
-                price_usd=curve_state.progress_pct,  # v3.9: store curve progress for reference
+                price_usd=entry_price_usd,  # v5.0: actual USD price (was storing progress_pct)
                 tx_signature=tx_sig,
                 reason=f"SNIPER curve={curve_state.progress_pct:.0f}% buys={signal.get('buys', 0)} vel={signal.get('velocity', 0):.1f}/min",
             )
             self.trades.append(trade)
-            self.total_trades += 1
+            # v5.0: total_trades only incremented on SELL (completed round-trip) — was double-counting
             self._save_state()
             logger.info(f"SNIPER BUY OK: ${symbol} tx={tx_sig[:20]}...")
+
+            # v5.0: Fetch actual token balance after sniper buy
+            if not self.config.paper_trade:
+                asyncio.create_task(self._update_position_tokens(mint))
 
             # v3.9: Snapshot top holders for rug detection
             if self.holder_watcher:
@@ -6080,6 +6379,16 @@ class DegenTrader:
     async def execute_buy(self, token: TokenInfo, amount_sol: float) -> Optional[Trade]:
         amount_lamports = int(amount_sol * LAMPORTS_PER_SOL)
 
+        # v5.0: Hard gate — reject tokens below minimum score (was missing entirely)
+        if hasattr(token, 'score') and token.score < self.config.min_score - 10:
+            logger.info(f"BUY BLOCKED: {token.symbol} — score {token.score:.0f} below hard minimum {self.config.min_score - 10}")
+            return None
+
+        # v5.0: Hard gate — reject high rug probability
+        if hasattr(token, 'rug_probability') and token.rug_probability > self.config.max_rug_probability:
+            logger.info(f"BUY BLOCKED: {token.symbol} — rug probability {token.rug_probability:.1%} exceeds max {self.config.max_rug_probability:.1%}")
+            return None
+
         # v4.1: Pre-buy safety check — verify token has real liquidity and trading
         if not token.on_bonding_curve and token.liquidity_usd < 2000:
             logger.info(f"BUY BLOCKED: {token.symbol} — liquidity ${token.liquidity_usd:.0f} too low, skipping")
@@ -6122,9 +6431,13 @@ class DegenTrader:
                 reason=f"score={token.score:.0f} rug={token.rug_probability:.0%} swarm={token.swarm_sentiment} src={token.source}",
             )
             self.trades.append(trade)
-            self.total_trades += 1
+            # v5.0: total_trades only incremented on SELL (completed round-trip) — was double-counting
             self._save_state()
             logger.info(f"BUY OK: {token.symbol} tx={tx_sig[:20]}...")
+
+            # v5.0: Fetch actual token balance after buy (was always 0)
+            if not self.config.paper_trade:
+                asyncio.create_task(self._update_position_tokens(token.address))
 
             # v3.9: Snapshot top holders for rug detection
             if self.holder_watcher:
@@ -6133,6 +6446,10 @@ class DegenTrader:
             # v4.3: Subscribe to real-time DEX price feed for this token
             if self.dex_price_feed and token.pair_address and not token.on_bonding_curve:
                 asyncio.create_task(self.dex_price_feed.subscribe(token.address, token.pair_address, self.session))
+
+            # v5.0: Subscribe to GoldRush OHLCV candles for real-time price tracking
+            if self.goldrush_stream and not token.on_bonding_curve:
+                asyncio.create_task(self.goldrush_stream.subscribe_token_candles(token.address))
 
             # v3: Record buy to trading memory
             if self.trading_memory:
@@ -6155,9 +6472,36 @@ class DegenTrader:
             return None
 
         raw_amount = await self._get_raw_token_balance(token_address)
-        if raw_amount <= 0:
-            self.positions.pop(token_address, None)
+        if raw_amount == -1:
+            # v5.0: RPC error — do NOT silently delete position (was losing positions on network glitches)
+            logger.warning(f"SELL DEFERRED: {pos.symbol} — RPC error fetching balance, will retry next cycle")
             return None
+        if raw_amount == 0:
+            # v5.0: Token balance truly zero — record as total loss instead of silently deleting
+            logger.warning(f"SELL LOSS: {pos.symbol} — zero token balance, recording as total loss")
+            real_pnl = -pos.amount_sol_spent
+            self.total_pnl_sol += real_pnl
+            self.total_lost_sol += pos.amount_sol_spent
+            trade = Trade(
+                timestamp=time.time(), action="sell", token_address=token_address,
+                symbol=pos.symbol, amount_sol=pos.amount_sol_spent, price_usd=0,
+                tx_signature="ZERO_BALANCE", reason="zero_balance_loss",
+                pnl_sol=round(real_pnl, 6),
+            )
+            self.trades.append(trade)
+            self.total_trades += 1
+            self.positions.pop(token_address, None)
+            self._save_state()
+            if self.trading_memory:
+                await self.trading_memory.record_trade(TradeMemoryEntry(
+                    token_address=token_address, symbol=pos.symbol, action="sell",
+                    entry_score=0, rug_probability=1.0, swarm_sentiment="",
+                    cabal_score=0, source=pos.source, outcome="rug",
+                    pnl_multiple=0, hold_minutes=round((time.time() - pos.entry_time) / 60, 1),
+                    liquidity_at_entry=0, age_at_entry=0, timestamp=time.time(),
+                    sol_spent=pos.amount_sol_spent, sol_received=0,
+                ))
+            return trade
 
         # v4.3: Paper trade — simulate sell using price data
         if self.config.paper_trade:
@@ -6236,46 +6580,51 @@ class DegenTrader:
             except Exception as e:
                 logger.debug(f"Token safety check error (proceeding with caution): {e}")
 
-            # v3.9: Get SOL balance BEFORE sell to calculate real PnL
-            pre_sell_balance = await self.get_sol_balance()
+            # v5.0: Sell lock — prevents concurrent sells from corrupting balance-diff PnL calculation
+            async with self._sell_lock:
+                # v3.9: Get SOL balance BEFORE sell to calculate real PnL
+                pre_sell_balance = await self.get_sol_balance()
 
-            logger.info(f"SELL {pos.symbol} | reason={reason}")
+                logger.info(f"SELL {pos.symbol} | reason={reason}")
 
-            # v3.9: Smart routing — try PumpPortal first for bonding curve tokens (best price on pump pool)
-            tx_sig = None
-            if pos.on_bonding_curve and self.curve_engine:
-                # Sell directly on the bonding curve via PumpPortal — best route for pre-migration tokens
-                logger.info(f"SELL via PumpPortal (bonding curve): {pos.symbol}")
-                tx_sig = await self.curve_engine.sell_on_curve_pumpportal(
-                    token_address, 1.0, self.pubkey, self.keypair, self.session,
-                )
+                # v3.9: Smart routing — try PumpPortal first for bonding curve tokens (best price on pump pool)
+                tx_sig = None
+                if pos.on_bonding_curve and self.curve_engine:
+                    # Sell directly on the bonding curve via PumpPortal — best route for pre-migration tokens
+                    logger.info(f"SELL via PumpPortal (bonding curve): {pos.symbol}")
+                    tx_sig = await self.curve_engine.sell_on_curve_pumpportal(
+                        token_address, 1.0, self.pubkey, self.keypair, self.session,
+                    )
 
-            if not tx_sig:
-                # v4.0: Smart route — parallel Jupiter + Raydium quotes, pick the better one
-                tx_sig = await self._smart_sell(token_address, raw_amount)
+                if not tx_sig:
+                    # v4.0: Smart route — parallel Jupiter + Raydium quotes, pick the better one
+                    tx_sig = await self._smart_sell(token_address, raw_amount)
 
-            if not tx_sig:
-                logger.warning(f"SELL FAILED: {pos.symbol}")
-                return None
+                if not tx_sig:
+                    logger.warning(f"SELL FAILED: {pos.symbol}")
+                    return None
 
-            # v3.9: Real PnL — measure actual SOL received instead of trusting DexScreener prices
-            await asyncio.sleep(1.5)  # wait for balance to update
-            post_sell_balance = await self.get_sol_balance()
-            sol_received = max(0, post_sell_balance - pre_sell_balance)
+                # v5.0: Wait for tx confirmation before checking balance (was 1.5s blind sleep)
+                confirmed = await self._wait_for_confirmation(tx_sig, timeout=12)
+                if not confirmed:
+                    logger.warning(f"SELL tx not confirmed after 12s: {pos.symbol} tx={tx_sig[:20]}")
+                    await asyncio.sleep(3)  # extra grace period
+                post_sell_balance = await self.get_sol_balance()
+                sol_received = max(0, post_sell_balance - pre_sell_balance)
 
-            # v4.0: SAFETY — detect balance drain (if SOL dropped instead of increasing)
-            if post_sell_balance < pre_sell_balance - 0.001:
-                # Balance DECREASED after sell — possible token drain attack
-                drain_amount = pre_sell_balance - post_sell_balance
-                logger.error(
-                    f"SAFETY ALERT: SOL balance DROPPED by {drain_amount:.6f} after selling {pos.symbol}! "
-                    f"Pre={pre_sell_balance:.6f} Post={post_sell_balance:.6f}. "
-                    f"Possible malicious token interaction. tx={tx_sig}"
-                )
-                # Still record the trade but flag it
-                sol_received = 0  # treat as total loss
+                # v4.0: SAFETY — detect balance drain (if SOL dropped instead of increasing)
+                if post_sell_balance < pre_sell_balance - 0.001:
+                    # Balance DECREASED after sell — possible token drain attack
+                    drain_amount = pre_sell_balance - post_sell_balance
+                    logger.error(
+                        f"SAFETY ALERT: SOL balance DROPPED by {drain_amount:.6f} after selling {pos.symbol}! "
+                        f"Pre={pre_sell_balance:.6f} Post={post_sell_balance:.6f}. "
+                        f"Possible malicious token interaction. tx={tx_sig}"
+                    )
+                    # Still record the trade but flag it
+                    sol_received = 0  # treat as total loss
 
-            real_pnl = sol_received - pos.amount_sol_spent
+                real_pnl = sol_received - pos.amount_sol_spent
 
         # --- Shared path: record trade for both paper and real modes ---
         if real_pnl > 0:
@@ -6302,6 +6651,9 @@ class DegenTrader:
         # v4.3: Unsubscribe from DEX price feed
         if self.dex_price_feed:
             await self.dex_price_feed.unsubscribe(token_address)
+        # v5.0: Unsubscribe from GoldRush candles
+        if self.goldrush_stream:
+            await self.goldrush_stream.unsubscribe_token_candles(token_address)
         self._save_state()
         logger.info(
             f"{'[PAPER] ' if self.config.paper_trade else ''}SELL OK: {pos.symbol} tx={tx_sig[:20]}... | "
@@ -6384,7 +6736,51 @@ class DegenTrader:
                     return int(accounts[0]["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
         except Exception as e:
             logger.error(f"Raw balance error: {e}")
-        return 0
+        return -1  # v5.0: return -1 on error (not 0) to distinguish "no tokens" from "RPC error"
+
+    async def _wait_for_confirmation(self, tx_sig: str, timeout: int = 12) -> bool:
+        """v5.0: Poll for transaction confirmation instead of blind sleep."""
+        if not tx_sig or tx_sig.startswith("PAPER"):
+            return True
+        rpc = self.config.fast_rpc_url or self.config.rpc_url
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                payload = {
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getSignatureStatuses",
+                    "params": [[tx_sig], {"searchTransactionHistory": False}]
+                }
+                async with self.session.post(rpc, json=payload, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    data = await resp.json()
+                    statuses = data.get("result", {}).get("value", [])
+                    if statuses and statuses[0]:
+                        status = statuses[0]
+                        if status.get("confirmationStatus") in ("confirmed", "finalized"):
+                            return True
+                        if status.get("err"):
+                            logger.warning(f"Tx error: {tx_sig[:20]} — {status['err']}")
+                            return False
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+        return False
+
+    async def _update_position_tokens(self, mint: str):
+        """v5.0: Fetch actual token balance after buy and update position."""
+        await asyncio.sleep(3)  # wait for on-chain confirmation
+        for attempt in range(3):
+            raw = await self._get_raw_token_balance(mint)
+            if raw > 0:
+                if mint in self.positions:
+                    self.positions[mint].amount_tokens = raw
+                    logger.info(f"Token balance updated: {self.positions[mint].symbol} = {raw:,} raw tokens")
+                    self._save_state()
+                return
+            if raw == -1:  # RPC error, retry
+                await asyncio.sleep(2)
+                continue
+            break  # raw == 0, no tokens found
 
     async def _smart_sell(self, token_address: str, raw_amount: int) -> Optional[str]:
         """v4.0: Smart routing — parallel Jupiter + Raydium quotes, rate-limit aware.
@@ -6736,6 +7132,64 @@ class DegenTrader:
     # ----------------------------------------------------------
     # POSITION MANAGEMENT
     # ----------------------------------------------------------
+    async def _on_goldrush_new_pair(self, pair_data: dict):
+        """v5.0: Handle new DEX pair from GoldRush stream — faster than DexScreener discovery."""
+        try:
+            token0 = pair_data.get("token0", {})
+            token1 = pair_data.get("token1", {})
+            # Identify the non-SOL token
+            sol_addresses = {SOL_MINT, "So11111111111111111111111111111111111111112"}
+            if token0.get("address") in sol_addresses:
+                new_token = token1
+            elif token1.get("address") in sol_addresses:
+                new_token = token0
+            else:
+                return  # non-SOL pair, skip
+
+            mint = new_token.get("address", "")
+            symbol = new_token.get("symbol", "???")
+            if not mint or mint in self.seen_tokens or mint in self.positions:
+                return
+
+            dex_name = pair_data.get("dexName", "")
+            logger.info(f"GOLDRUSH NEW PAIR: ${symbol} | {mint[:12]}... | DEX: {dex_name} | pair: {pair_data.get('pairAddress', '')[:12]}")
+
+            # Fast-track: if we have available slots, fetch + score this token
+            if len(self.positions) < self.config.max_positions:
+                token = await self._fetch_token_data(mint)
+                if token:
+                    token.source = f"goldrush_{dex_name}"
+                    token.pair_address = pair_data.get("pairAddress", "")
+                    score = self.score_token(token)
+                    if score >= self.config.min_score:
+                        approved = await self.deep_analyze(token)
+                        if approved:
+                            balance = await self.get_sol_balance()
+                            if balance - self.config.reserve_sol >= self.config.max_position_sol:
+                                await self.execute_buy(token, self.config.max_position_sol)
+                    self.seen_tokens.add(mint)
+        except Exception as e:
+            logger.debug(f"GoldRush new pair handler error: {e}")
+
+    async def _on_goldrush_candle(self, token_address: str, candle: dict):
+        """v5.0: Handle real-time OHLCV candle from GoldRush — update position tracking."""
+        try:
+            if token_address in self.positions:
+                close_price = float(candle.get("close", 0) or 0)
+                if close_price > 0:
+                    # Store for manage_positions to use
+                    if not hasattr(self, '_goldrush_prices'):
+                        self._goldrush_prices = {}
+                    self._goldrush_prices[token_address] = {
+                        "price_usd": close_price,
+                        "high": float(candle.get("high", 0) or 0),
+                        "low": float(candle.get("low", 0) or 0),
+                        "volume": float(candle.get("volume", 0) or 0),
+                        "timestamp": candle.get("timestamp", time.time()),
+                    }
+        except Exception as e:
+            logger.debug(f"GoldRush candle handler error: {e}")
+
     async def manage_positions(self):
         if not self.positions:
             return
@@ -6765,6 +7219,9 @@ class DegenTrader:
                 continue
 
             if pos.entry_price <= 0:
+                # v5.0: Legacy position with no USD entry price — sell after timeout to avoid orphans
+                if hold_min > self.config.max_hold_minutes:
+                    await self.execute_sell(addr, reason="no_entry_price_timeout")
                 continue
 
             price_mult = token.price_usd / pos.entry_price
@@ -6852,6 +7309,16 @@ class DegenTrader:
             if curve_state and curve_state.complete:
                 # Token graduated! It now has a Raydium pool. Switch to normal management.
                 pos.on_bonding_curve = False
+                # v5.0: Update entry_price to USD if it was still a curve-era estimate
+                if pos.entry_price <= 0:
+                    # Fetch current USD price from Jupiter for graduated token
+                    jup_price = await self._get_jupiter_price(addr)
+                    if jup_price > 0:
+                        pos.entry_price = jup_price
+                        logger.info(f"GRADUATED: ${pos.symbol} — set entry_price to ${jup_price:.8f} USD")
+                # v5.0: Subscribe to GoldRush OHLCV for graduated token
+                if self.goldrush_stream:
+                    asyncio.create_task(self.goldrush_stream.subscribe_token_candles(addr))
                 logger.info(f"GRADUATED: ${pos.symbol} — switching to DEX price tracking")
                 return  # will be handled normally next cycle
 
@@ -7332,10 +7799,18 @@ class DegenTrader:
 
                     # v3.7: Feed wallet buys to quantum predictor + run predictions
                     if self.wallet_predictor and self.pump_monitor:
-                        # Feed recent buy data from PumpPortal stream
+                        # v5.0: Only feed NEW buys to predictor (was re-feeding ALL buyers every cycle, corrupting data)
+                        if not hasattr(self, '_predictor_fed_buyers'):
+                            self._predictor_fed_buyers = set()
                         for mint, stats in self.pump_monitor.hot_tokens.items():
                             for buyer in stats.get("unique_buyers", set()):
-                                self.wallet_predictor.record_buy(buyer, mint, stats.get("largest_buy_sol", 0))
+                                feed_key = f"{buyer}:{mint}"
+                                if feed_key not in self._predictor_fed_buyers:
+                                    self._predictor_fed_buyers.add(feed_key)
+                                    self.wallet_predictor.record_buy(buyer, mint, stats.get("largest_buy_sol", 0))
+                        # Trim fed set to prevent memory bloat
+                        if len(self._predictor_fed_buyers) > 50000:
+                            self._predictor_fed_buyers = set(list(self._predictor_fed_buyers)[-25000:])
                         # Run quantum predictions
                         predictions = await self.wallet_predictor.predict_next_buys(
                             self.pump_monitor.hot_tokens,
@@ -7387,7 +7862,7 @@ class DegenTrader:
                         logger.info(f"Found {len(fresh)} fresh tokens (all under {self.config.max_age_minutes}m)")
 
                     # Score with dynamic adaptation (v3.8)
-                    effective_min_score = max(25, self.config.min_score + self._adapt_score_offset)
+                    effective_min_score = max(self.config.min_score - 10, self.config.min_score + self._adapt_score_offset)  # v5.0: never drop more than 10 below configured min
                     scored = []
                     for t in fresh:
                         s = self.score_token(t)
@@ -7400,10 +7875,10 @@ class DegenTrader:
                         if len(scored) == 0:
                             self._quiet_cycles += 1
                             self._hot_cycles = 0
-                            if self._quiet_cycles >= self.config.adapt_quiet_cycles:
-                                # Market is quiet — loosen thresholds
+                            if self._quiet_cycles >= self.config.adapt_quiet_cycles * 2:  # v5.0: require 2x more quiet cycles (was too aggressive)
+                                # Market is quiet — loosen thresholds (conservatively)
                                 old_offset = self._adapt_score_offset
-                                self._adapt_score_offset = max(-20, self._adapt_score_offset - 3)
+                                self._adapt_score_offset = max(-10, self._adapt_score_offset - 2)  # v5.0: floor -10 not -20, step -2 not -3
                                 if self._adapt_score_offset != old_offset:
                                     logger.info(
                                         f"ADAPT: {self._quiet_cycles} quiet cycles → loosening score "
@@ -7578,7 +8053,11 @@ class DegenTrader:
             "paper_token_holdings": self._paper_token_holdings,
         }
         try:
-            STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+            # v5.0: Atomic write — write to temp file then rename (prevents corruption on crash)
+            import tempfile
+            tmp_path = STATE_FILE.with_suffix('.tmp')
+            tmp_path.write_text(json.dumps(state, indent=2, default=str))
+            tmp_path.replace(STATE_FILE)
         except Exception as e:
             logger.error(f"State save error: {e}")
 
@@ -7704,7 +8183,17 @@ class DegenTrader:
                 price_usd = live_prices[addr].get("price_usd", 0)
                 pos_data["current_price_usd"] = price_usd
 
-                if price_sol > 0 and p.amount_tokens > 0:
+                if price_usd > 0 and p.entry_price > 0:
+                    # v5.0: Use price ratio for unrealized PnL (works even if amount_tokens is 0)
+                    price_mult = price_usd / p.entry_price
+                    estimated_value_sol = p.amount_sol_spent * price_mult
+                    unrealized = estimated_value_sol - p.amount_sol_spent
+                    pnl_pct = (price_mult - 1) * 100
+                    pos_data["unrealized_pnl_sol"] = round(unrealized, 4)
+                    pos_data["unrealized_pnl_pct"] = round(pnl_pct, 1)
+                    total_unrealized_pnl += unrealized
+                elif price_sol > 0 and p.amount_tokens > 0:
+                    # Fallback: direct token-value calculation if we have token count
                     current_value_sol = p.amount_tokens * price_sol
                     unrealized = current_value_sol - p.amount_sol_spent
                     pnl_pct = ((current_value_sol / p.amount_sol_spent) - 1) * 100 if p.amount_sol_spent > 0 else 0
@@ -7742,6 +8231,7 @@ class DegenTrader:
                 "x_sentinel": self.x_sentinel is not None,
                 "trading_memory": self.trading_memory is not None and self.trading_memory._initialized,
                 "bonding_curve": self.curve_engine is not None,
+                "goldrush_stream": self.goldrush_stream is not None and self.goldrush_stream.running,
                 "sniper_mode": self.config.sniper_mode,
                 "instant_snipe": self.config.instant_snipe,
                 "instant_snipe_min_dev_sol": self.config.instant_snipe_min_dev_sol,
