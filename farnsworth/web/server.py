@@ -4648,8 +4648,8 @@ async def trading_start(request: Request):
         config = TraderConfig(**config_kwargs)
         _trader_instance = DegenTrader(config=config, wallet_name=body.get("wallet_name", "degen_trader"))
         asyncio.create_task(_trader_instance.run())
-        await asyncio.sleep(2)  # let it initialize
-        return {"status": "started", "wallet": _trader_instance.pubkey}
+        # Return immediately — don't wait for init to finish (it blocks the event loop)
+        return {"status": "started", "wallet": _trader_instance.pubkey or "loading..."}
     except Exception as e:
         logger.error(f"Trading start error: {e}")
         return {"status": "error", "message": str(e)}
