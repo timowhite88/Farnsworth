@@ -6303,34 +6303,42 @@ async def start_farns_node_daemon():
         # Detect node name from hostname or default
         hostname = socket.gethostname()
         node_name = "nexus-alpha" if "alpha" in hostname or True else "nexus-beta"
-        # Check if port 9999 is already in use (external node running)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # Check if port 9999 has something actively listening (connect test)
+        port_active = False
         try:
-            sock.bind(("0.0.0.0", 9999))
-            sock.close()
-            # Port is free — start the node
-            node = await start_farns_node(node_name)
-            logger.info(f"FARNS Node '{node_name}' started inside web server (port 9999)")
+            test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test.settimeout(1)
+            test.connect(("127.0.0.1", 9999))
+            test.close()
+            port_active = True
+        except (ConnectionRefusedError, OSError, socket.timeout):
+            port_active = False
 
-            # Phase 2a: Register local Ollama models as FARNS bots
-            try:
-                from farnsworth.network.farns_node import _register_ollama_bots
-                await _register_ollama_bots(node)
-                logger.info("Ollama bots registered with FARNS node")
-            except Exception as e:
-                logger.warning(f"Could not register Ollama bots: {e}")
-
-            # Phase 2b: Start FARNS bridge (bidirectional shadow-agent <-> FARNS-bot)
-            try:
-                from farnsworth.network.farns_bridge import start_farns_bridge
-                asyncio.create_task(start_farns_bridge())
-                logger.info("FARNS bridge started")
-            except Exception as e:
-                logger.warning(f"Could not start FARNS bridge: {e}")
-
-        except OSError:
-            sock.close()
+        if port_active:
             logger.info("FARNS Node port 9999 already in use — external node running")
+            return
+
+        # Port is free — start the node (uses SO_REUSEADDR internally)
+        node = await start_farns_node(node_name)
+        logger.info(f"FARNS Node '{node_name}' started inside web server (port 9999)")
+
+        # Phase 2a: Register local Ollama models as FARNS bots
+        try:
+            from farnsworth.network.farns_node import _register_ollama_bots
+            await _register_ollama_bots(node)
+            logger.info("Ollama bots registered with FARNS node")
+        except Exception as e:
+            logger.warning(f"Could not register Ollama bots: {e}")
+
+        # Phase 2b: Start FARNS bridge (bidirectional shadow-agent <-> FARNS-bot)
+        try:
+            from farnsworth.network.farns_bridge import start_farns_bridge
+            asyncio.create_task(start_farns_bridge())
+            logger.info("FARNS bridge started")
+        except Exception as e:
+            logger.warning(f"Could not start FARNS bridge: {e}")
+
     except Exception as e:
         logger.warning(f"Could not start FARNS node: {e}")
 

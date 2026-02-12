@@ -126,6 +126,7 @@ class FARNSNode:
         # Peers
         self._peers: Dict[str, PeerConnection] = {}
         self._peer_lock = asyncio.Lock()
+        self._connecting: Set[str] = set()  # peers with active connect tasks
 
         # Local bot registry: bot_name → query_function
         self._local_bots: Dict[str, Callable] = {}
@@ -369,6 +370,17 @@ class FARNSNode:
     async def _connect_to_peer(self, peer_name: str, host: str, port: int,
                                max_retries: int = RECONNECT_MAX_RETRIES):
         """Connect to a specific peer with retry. max_retries=0 means infinite."""
+        if peer_name in self._connecting:
+            return  # Another task is already connecting to this peer
+        self._connecting.add(peer_name)
+        try:
+            await self._connect_to_peer_inner(peer_name, host, port, max_retries)
+        finally:
+            self._connecting.discard(peer_name)
+
+    async def _connect_to_peer_inner(self, peer_name: str, host: str, port: int,
+                                     max_retries: int):
+        """Inner connect logic with retry."""
         attempt = 0
         while max_retries == 0 or attempt < max_retries:
             if not self._running:
