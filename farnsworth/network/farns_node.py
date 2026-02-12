@@ -1076,7 +1076,7 @@ class FARNSNode:
 
             while time.time() < deadline:
                 try:
-                    pkt = await asyncio.wait_for(q.get(), timeout=min(30, deadline - time.time()))
+                    pkt = await asyncio.wait_for(q.get(), timeout=min(90, deadline - time.time()))
                     if pkt is None:
                         break  # End of stream
                     if pkt.packet_type == PacketType.ERROR:

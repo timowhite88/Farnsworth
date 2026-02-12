@@ -97,6 +97,7 @@ class FreeDiscussionEngine:
 
         self.min_interval = min_interval
         self.max_interval = max_interval
+        self._think_timeout = 180.0  # generous timeout for remote models
 
         self._running = False
         self._paused = False
@@ -295,6 +296,12 @@ class FreeDiscussionEngine:
             pass
         return topics[:3]
 
+    def set_intervals(self, min_interval: float, max_interval: float):
+        """Update the turn interval range."""
+        self.min_interval = max(10.0, min_interval)
+        self.max_interval = max(self.min_interval + 10, max_interval)
+        logger.info(f"Intervals updated: {self.min_interval}-{self.max_interval}s")
+
     def set_topic(self, topic: str):
         """Manually set a discussion topic."""
         self.current_topic = topic
@@ -368,7 +375,7 @@ class FreeDiscussionEngine:
                 async with self._inference_semaphore:
                     try:
                         thought = await asyncio.wait_for(
-                            agent.think(), timeout=120.0
+                            agent.think(), timeout=self._think_timeout
                         )
                     except asyncio.TimeoutError:
                         logger.warning(f"[{speaker_id}] think() timed out")

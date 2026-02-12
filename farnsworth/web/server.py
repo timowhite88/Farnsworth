@@ -6352,8 +6352,8 @@ async def start_free_discussion():
         )
         free_discussion_engine = FreeDiscussionEngine(
             participants=["phi", "deepseek", "qwen2_5"],
-            min_interval=30.0,
-            max_interval=90.0,
+            min_interval=90.0,
+            max_interval=300.0,
         )
         set_free_discussion_engine(free_discussion_engine)
         asyncio.create_task(free_discussion_engine.start())
@@ -6412,10 +6412,16 @@ async def discussion_control(request: Request):
         free_discussion_engine.remove_participant(agent_id)
         return {"status": "removed", "agent_id": agent_id}
 
+    elif action == "set_intervals":
+        min_i = body.get("min_interval", free_discussion_engine.min_interval)
+        max_i = body.get("max_interval", free_discussion_engine.max_interval)
+        free_discussion_engine.set_intervals(float(min_i), float(max_i))
+        return {"status": "intervals_updated", "min": free_discussion_engine.min_interval, "max": free_discussion_engine.max_interval}
+
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown action: {action}. Use: pause, resume, new_topic, add_participant, remove_participant"
+            detail=f"Unknown action: {action}. Use: pause, resume, new_topic, add_participant, remove_participant, set_intervals"
         )
 
 

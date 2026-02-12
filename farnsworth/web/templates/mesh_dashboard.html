@@ -641,11 +641,120 @@
             border-radius: 50%; animation: spin 0.6s linear infinite;
             vertical-align: middle; margin-right: 6px;
         }
+
+        /* ── Bot Tooltip ── */
+        .bot-tooltip {
+            position: fixed; z-index: 200; display: none;
+            background: rgba(10,10,20,0.95); backdrop-filter: blur(20px);
+            border: 1px solid var(--border-bright); border-radius: 10px;
+            padding: 14px 18px; min-width: 200px;
+            pointer-events: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+        .tt-name { font-family: var(--display); font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+        .tt-row { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0; font-size: 11px; }
+        .tt-label { color: var(--text-dim); font-family: var(--mono); }
+        .tt-val { color: var(--text); font-family: var(--mono); }
+
+        /* ── Discussion Feed Section ── */
+        .discussion-section { margin-bottom: 24px; }
+        .discussion-card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 20px; overflow: hidden;
+        }
+        .disc-status-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; margin-bottom: 12px;
+        }
+        .disc-status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 3px 12px; border-radius: 20px;
+            font-family: var(--mono); font-size: 10px; font-weight: 600;
+            letter-spacing: 1.5px;
+            background: rgba(255,255,255,0.04); color: var(--text-dim);
+        }
+        .disc-status-badge::before {
+            content: ''; width: 6px; height: 6px; border-radius: 50%;
+            background: var(--text-dim);
+        }
+        .disc-status-badge.active { background: var(--green-dim); color: var(--green); }
+        .disc-status-badge.active::before { background: var(--green); box-shadow: 0 0 8px var(--green); animation: statusPulse 2s ease infinite; }
+        .disc-status-badge.paused { background: var(--amber-dim); color: var(--amber); }
+        .disc-status-badge.paused::before { background: var(--amber); }
+        @keyframes statusPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .disc-toggle-btn {
+            padding: 5px 16px; border: 1px solid var(--green); border-radius: 6px;
+            background: var(--green-dim); color: var(--green); cursor: pointer;
+            font-family: var(--display); font-size: 10px; font-weight: 600;
+            letter-spacing: 2px; transition: all 0.2s;
+        }
+        .disc-toggle-btn:hover { background: rgba(52,211,153,0.2); }
+        .disc-toggle-btn.paused { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); }
+        .disc-toggle-btn.paused:hover { background: rgba(251,191,36,0.2); }
+
+        .disc-topic {
+            font-family: var(--body); font-size: 13px; color: var(--text-bright);
+            padding: 8px 14px; border-radius: 8px;
+            background: rgba(167,139,250,0.06); border-left: 3px solid var(--purple);
+            margin-bottom: 10px;
+        }
+        .disc-meta {
+            display: flex; gap: 16px; margin-bottom: 14px;
+            font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+        }
+        .disc-participants {
+            display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px;
+        }
+        .disc-participant-chip {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 2px 10px 2px 6px; border-radius: 12px;
+            font-family: var(--mono); font-size: 10px;
+            background: var(--surface); border: 1px solid var(--border);
+        }
+        .disc-participant-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+        }
+
+        .disc-feed {
+            max-height: 320px; overflow-y: auto;
+            border-top: 1px solid var(--border); padding-top: 12px;
+        }
+        .disc-feed::-webkit-scrollbar { width: 3px; }
+        .disc-feed::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 4px; }
+
+        .disc-msg {
+            display: flex; gap: 10px; padding: 10px 12px;
+            border-radius: 8px; margin-bottom: 6px;
+            transition: background 0.15s;
+        }
+        .disc-msg:hover { background: rgba(255,255,255,0.02); }
+        .disc-msg-orb {
+            flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%;
+            margin-top: 4px;
+        }
+        .disc-msg-body { flex: 1; min-width: 0; }
+        .disc-msg-head {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 3px;
+        }
+        .disc-msg-name { font-family: var(--display); font-weight: 600; font-size: 11px; }
+        .disc-msg-time { font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
+        .disc-msg-text {
+            font-size: 12px; color: var(--text); line-height: 1.5;
+            display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .disc-msg.new { animation: msgSlideIn 0.3s ease; }
+        @keyframes msgSlideIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
     <div class="scanlines"></div>
     <div class="ambient"></div>
+    <div class="bot-tooltip" id="botTooltip"></div>
 
     <!-- Top Bar -->
     <header class="topbar">
@@ -679,6 +788,32 @@
                 </div>
             </div>
             <canvas id="meshCanvas"></canvas>
+        </section>
+
+        <!-- ═══ FREE DISCUSSION FEED ═══ -->
+        <section class="discussion-section">
+            <div class="discussion-card">
+                <div class="section-head">
+                    <div class="icon" style="background:linear-gradient(135deg,var(--green-dim),var(--cyan-dim));color:var(--green);">D</div>
+                    <h2>FREE DISCUSSION</h2>
+                    <span class="disc-status-badge" id="discStatusBadge">CONNECTING</span>
+                </div>
+                <div class="disc-status-row">
+                    <div class="disc-topic" id="discTopic">Awaiting topic...</div>
+                    <button class="disc-toggle-btn" id="discToggleBtn" onclick="toggleDiscussion()">PAUSE</button>
+                </div>
+                <div class="disc-meta" id="discMeta">
+                    <span>Turn 0</span>
+                    <span>0 participants</span>
+                </div>
+                <div class="disc-participants" id="discParticipants"></div>
+                <div class="disc-feed" id="discFeed">
+                    <div class="empty-state" style="padding:30px">
+                        <div style="font-size:20px;opacity:0.3">&#9672;</div>
+                        <div>Awaiting discussion...</div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- ═══ MESH QUERY — Interactive Prompt ═══ -->
@@ -893,184 +1028,350 @@
     // ── Mesh Topology Canvas ──────────────────────────────────
     const meshCanvas = document.getElementById('meshCanvas');
     const meshCtx = meshCanvas.getContext('2d');
-    let particles = [];
-    let nodes = [];
-
+    const CANVAS_H = 520;
     function resizeMeshCanvas() {
         const r = meshCanvas.parentElement.getBoundingClientRect();
         meshCanvas.width = r.width * devicePixelRatio;
-        meshCanvas.height = 340 * devicePixelRatio;
+        meshCanvas.height = CANVAS_H * devicePixelRatio;
         meshCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-        meshCanvas.style.height = '340px';
+        meshCanvas.style.height = CANVAS_H + 'px';
     }
     resizeMeshCanvas();
-    window.addEventListener('resize', resizeMeshCanvas);
+    window.addEventListener('resize', () => { resizeMeshCanvas(); if (meshData) buildBubbleMap(meshData); });
 
-    class Particle {
-        constructor(x1, y1, x2, y2, color) {
-            this.x1 = x1; this.y1 = y1;
-            this.x2 = x2; this.y2 = y2;
-            this.color = color;
-            this.t = Math.random();
-            this.speed = 0.003 + Math.random() * 0.004;
+    // ── Bot Info Database ──
+    const BOT_INFO = {
+        'phi4-latest':  { name:'Phi-4',       agent:'phi',        color:'#f472b6', provider:'Ollama',       personality:'Curious philosopher',  specialties:'Math, Reasoning' },
+        'deepseek-r1-8b':{ name:'DeepSeek',   agent:'deepseek',   color:'#22d3ee', provider:'Ollama',       personality:'Deep thinker',         specialties:'Reasoning, Code' },
+        'qwen2.5-7b':   { name:'Qwen 2.5',    agent:'qwen2_5',    color:'#fbbf24', provider:'Ollama',       personality:'Multilingual sage',    specialties:'Languages, Code' },
+        'mistral-7b':    { name:'Mistral',     agent:'mistral',    color:'#f87171', provider:'Ollama',       personality:'Creative writer',      specialties:'Creative, Factual' },
+        'llama3-8b':     { name:'Llama 3',     agent:'llama3',     color:'#34d399', provider:'Ollama',       personality:'Balanced generalist',  specialties:'Creative, Factual' },
+        'gemma2-9b':     { name:'Gemma 2',     agent:'gemma2',     color:'#fb923c', provider:'Ollama',       personality:'Detail oriented',      specialties:'Factual, Reasoning' },
+        'qwen3-coder-next-latest':{ name:'Qwen3 Coder', agent:'qwen3_coder', color:'#a78bfa', provider:'FARNS Remote', personality:'Code wizard', specialties:'Code, Math' },
+        'phi':           { name:'Phi-4',       agent:'phi',        color:'#f472b6', provider:'Ollama',       personality:'Curious philosopher',  specialties:'Math, Reasoning' },
+        'deepseek':      { name:'DeepSeek',    agent:'deepseek',   color:'#22d3ee', provider:'Ollama',       personality:'Deep thinker',         specialties:'Reasoning, Code' },
+        'qwen2_5':       { name:'Qwen 2.5',    agent:'qwen2_5',    color:'#fbbf24', provider:'Ollama',       personality:'Multilingual sage',    specialties:'Languages, Code' },
+        'mistral':       { name:'Mistral',     agent:'mistral',    color:'#f87171', provider:'Ollama',       personality:'Creative writer',      specialties:'Creative, Factual' },
+        'qwen3_coder':   { name:'Qwen3 Coder', agent:'qwen3_coder',color:'#a78bfa', provider:'FARNS Remote', personality:'Code wizard',          specialties:'Code, Math' },
+    };
+
+    // ── State ──
+    let bubbleNodes = [];
+    let packetOrbs = [];
+    let hoveredBot = null;
+    let discData = null;
+    let lastDiscMsgCount = 0;
+    let breathePhase = 0;
+
+    // ── Packet Orbs ──
+    class PacketOrb {
+        constructor(fx, fy, tx, ty, color, cross) {
+            this.fx = fx; this.fy = fy; this.tx = tx; this.ty = ty;
+            this.color = color; this.t = 0; this.alive = true;
+            this.speed = 0.006 + Math.random() * 0.01;
+            const mx = (fx+tx)/2, my = (fy+ty)/2;
+            const ang = Math.atan2(ty-fy, tx-fx) + Math.PI/2;
+            const off = (cross ? 50 : 25) * (Math.random()>0.5 ? 1 : -1);
+            this.cpx = mx + Math.cos(ang)*off;
+            this.cpy = my + Math.sin(ang)*off;
+            this.trail = [];
+        }
+        pos() {
+            const t=this.t, m=1-t;
+            return { x: m*m*this.fx + 2*m*t*this.cpx + t*t*this.tx,
+                     y: m*m*this.fy + 2*m*t*this.cpy + t*t*this.ty };
         }
         update() {
             this.t += this.speed;
-            if (this.t > 1) this.t = 0;
+            if (this.t >= 1) { this.alive = false; return; }
+            const p = this.pos();
+            this.trail.push({x:p.x, y:p.y, age:0});
+            if (this.trail.length > 14) this.trail.shift();
+            this.trail.forEach(t => t.age += 0.07);
         }
         draw(ctx) {
-            const x = this.x1 + (this.x2 - this.x1) * this.t;
-            const y = this.y1 + (this.y2 - this.y1) * this.t;
-            ctx.beginPath();
-            ctx.arc(x, y, 2, 0, Math.PI * 2);
-            ctx.fillStyle = this.color;
-            ctx.fill();
-            // Glow
-            ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
-            ctx.fillStyle = this.color.replace(')', ',0.2)').replace('rgb', 'rgba');
-            ctx.fill();
+            this.trail.forEach(p => {
+                const a = Math.max(0, 0.5 - p.age*0.35);
+                ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, 3-p.age*2), 0, Math.PI*2);
+                ctx.fillStyle = this.color.replace(/[\d.]+\)$/, a+')');
+                ctx.fill();
+            });
+            const p = this.pos();
+            ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI*2);
+            ctx.fillStyle = this.color; ctx.fill();
+            ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI*2);
+            ctx.fillStyle = this.color.replace(/[\d.]+\)$/, '0.12)'); ctx.fill();
         }
     }
 
-    function buildMeshNodes(data) {
-        const w = meshCanvas.width / devicePixelRatio;
-        const h = 340;
-        const cx = w / 2, cy = h / 2;
-        nodes = [];
-        particles = [];
+    function hexToRgba(hex, a) {
+        const c = hex.replace('#','');
+        return `rgba(${parseInt(c.substr(0,2),16)},${parseInt(c.substr(2,2),16)},${parseInt(c.substr(4,2),16)},${a})`;
+    }
 
-        // Primary node (us)
-        const primary = {
-            name: data.node_name || 'unknown',
-            x: cx - 180, y: cy,
-            color: '#a78bfa',
-            gpu: data.gpu_fingerprint || '---',
-            identity: data.identity || '---',
-            bots: data.local_bots || [],
-            isPrimary: true,
-        };
-        nodes.push(primary);
+    // ── Build Bubble Map ──
+    function buildBubbleMap(data) {
+        const w = meshCanvas.width / devicePixelRatio;
+        const h = CANVAS_H;
+        bubbleNodes = [];
+
+        const localBots = data.local_bots || [];
+        const allBots = data.all_bots || {};
+        const peers = data.connected_peers || [];
+        const nodeName = data.node_name || 'unknown';
+
+        // Peer-only bots: in all_bots but NOT in local_bots
+        const peerBots = {};
+        peers.forEach(p => peerBots[p] = []);
+        Object.entries(allBots).forEach(([bot, node]) => {
+            if (!localBots.includes(bot) && peerBots[node]) {
+                peerBots[node].push(bot);
+            }
+        });
+
+        const activeParticipants = discData ? (discData.participants || []) : [];
+        const recentSpeakers = discData ? (discData.recent_speakers || []).slice(-3) : [];
+
+        // Deduplicate local bots by display name
+        const seen = new Set();
+        const dedupLocal = [];
+        localBots.forEach(b => {
+            const info = BOT_INFO[b] || {};
+            const n = info.name || b;
+            if (!seen.has(n)) { seen.add(n); dedupLocal.push(b); }
+        });
+
+        const hasPeers = peers.length > 0;
+        const primaryX = hasPeers ? w * 0.32 : w * 0.5;
+        const primaryY = h * 0.48;
+        const primaryR = Math.min(140, w * 0.18);
+
+        // Primary node
+        const primary = { name: nodeName, x: primaryX, y: primaryY, radius: primaryR, color: '#a78bfa', isPrimary: true, bots: [] };
+        const orbitR = primaryR * 0.55;
+        dedupLocal.forEach((bot, i) => {
+            const info = BOT_INFO[bot] || {};
+            const agentId = info.agent || bot;
+            const a = (Math.PI * 2 / dedupLocal.length) * i - Math.PI / 2;
+            primary.bots.push({
+                id: bot, agentId, name: info.name || bot,
+                x: primaryX + Math.cos(a)*orbitR, y: primaryY + Math.sin(a)*orbitR,
+                baseX: primaryX + Math.cos(a)*orbitR, baseY: primaryY + Math.sin(a)*orbitR,
+                radius: 16, color: info.color || '#888', info,
+                speaking: recentSpeakers.includes(agentId),
+                active: activeParticipants.includes(agentId),
+                node: nodeName,
+            });
+        });
+        bubbleNodes.push(primary);
 
         // Peer nodes
-        const peers = data.connected_peers || [];
-        peers.forEach((peerName, i) => {
-            const angle = -0.3 + (i * 0.6 / Math.max(peers.length - 1, 1));
-            const node = {
-                name: peerName,
-                x: cx + 180, y: cy + (i - (peers.length - 1) / 2) * 100,
-                color: '#22d3ee',
-                gpu: '---',
-                identity: '---',
-                bots: [],
-                isPrimary: false,
-            };
-            nodes.push(node);
-
-            // Particles between nodes
-            for (let p = 0; p < 8; p++) {
-                particles.push(new Particle(primary.x, primary.y, node.x, node.y, 'rgba(167,139,250,0.6)'));
-                particles.push(new Particle(node.x, node.y, primary.x, primary.y, 'rgba(34,211,238,0.6)'));
-            }
+        peers.forEach((peerName, pi) => {
+            const peerX = w * 0.72;
+            const peerY = h * 0.48;
+            const pBots = peerBots[peerName] || [];
+            const peerR = Math.min(110, w * 0.14);
+            const peer = { name: peerName, x: peerX, y: peerY, radius: peerR, color: '#22d3ee', isPrimary: false, bots: [] };
+            const pOrbitR = pBots.length > 1 ? peerR * 0.45 : 0;
+            pBots.forEach((bot, i) => {
+                const info = BOT_INFO[bot] || {};
+                const agentId = info.agent || bot;
+                const a = (Math.PI * 2 / Math.max(pBots.length, 1)) * i - Math.PI / 2;
+                peer.bots.push({
+                    id: bot, agentId, name: info.name || bot,
+                    x: peerX + Math.cos(a)*pOrbitR, y: peerY + Math.sin(a)*pOrbitR,
+                    baseX: peerX + Math.cos(a)*pOrbitR, baseY: peerY + Math.sin(a)*pOrbitR,
+                    radius: 18, color: info.color || '#888', info,
+                    speaking: recentSpeakers.includes(agentId),
+                    active: activeParticipants.includes(agentId),
+                    node: peerName,
+                });
+            });
+            bubbleNodes.push(peer);
         });
 
-        // If no peers, show isolated node
-        if (peers.length === 0) {
-            // Add ghost peer for visual
-            const ghost = {
-                name: '(awaiting peer)',
-                x: cx + 180, y: cy,
-                color: 'rgba(255,255,255,0.1)',
-                gpu: '', identity: '', bots: [],
-                isPrimary: false, isGhost: true,
-            };
-            nodes.push(ghost);
+        // Ghost peer if none
+        if (!hasPeers) {
+            bubbleNodes.push({ name: '(awaiting peer)', x: w*0.72, y: h*0.48, radius: 80, color: 'rgba(255,255,255,0.06)', isPrimary: false, bots: [], isGhost: true });
         }
     }
 
-    function drawMeshTopology() {
+    // ── Draw Bubble Map ──
+    function drawBubbleMap() {
         const w = meshCanvas.width / devicePixelRatio;
-        const h = 340;
+        const h = CANVAS_H;
         meshCtx.clearRect(0, 0, w, h);
+        breathePhase += 0.018;
 
-        // Draw connection lines
-        if (nodes.length > 1) {
-            for (let i = 1; i < nodes.length; i++) {
-                const n0 = nodes[0], n1 = nodes[i];
-                meshCtx.beginPath();
-                meshCtx.moveTo(n0.x, n0.y);
-                // Curved line
-                const cpx = (n0.x + n1.x) / 2;
-                const cpy = (n0.y + n1.y) / 2 - 20;
+        // Inter-node connections
+        if (bubbleNodes.length > 1) {
+            for (let i = 1; i < bubbleNodes.length; i++) {
+                const n0 = bubbleNodes[0], n1 = bubbleNodes[i];
+                if (n1.isGhost) {
+                    meshCtx.beginPath(); meshCtx.moveTo(n0.x, n0.y);
+                    meshCtx.lineTo(n1.x, n1.y);
+                    meshCtx.strokeStyle = 'rgba(255,255,255,0.03)';
+                    meshCtx.setLineDash([5,5]); meshCtx.lineWidth = 1; meshCtx.stroke();
+                    meshCtx.setLineDash([]);
+                    continue;
+                }
+                // Wide glow line
+                meshCtx.beginPath(); meshCtx.moveTo(n0.x, n0.y);
+                const cpx = (n0.x+n1.x)/2, cpy = (n0.y+n1.y)/2 - 40;
                 meshCtx.quadraticCurveTo(cpx, cpy, n1.x, n1.y);
-                meshCtx.strokeStyle = n1.isGhost ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)';
-                meshCtx.lineWidth = n1.isGhost ? 1 : 1.5;
-                meshCtx.setLineDash(n1.isGhost ? [4, 4] : []);
-                meshCtx.stroke();
-                meshCtx.setLineDash([]);
+                meshCtx.strokeStyle = 'rgba(167,139,250,0.03)'; meshCtx.lineWidth = 12; meshCtx.stroke();
+                // Core line
+                meshCtx.beginPath(); meshCtx.moveTo(n0.x, n0.y);
+                meshCtx.quadraticCurveTo(cpx, cpy, n1.x, n1.y);
+                meshCtx.strokeStyle = 'rgba(255,255,255,0.07)'; meshCtx.lineWidth = 1.5; meshCtx.stroke();
             }
         }
 
-        // Draw particles
-        particles.forEach(p => {
-            p.update();
-            p.draw(meshCtx);
+        // Draw node bubbles
+        bubbleNodes.forEach(node => {
+            if (node.isGhost) {
+                meshCtx.beginPath(); meshCtx.arc(node.x, node.y, node.radius, 0, Math.PI*2);
+                meshCtx.strokeStyle = 'rgba(255,255,255,0.04)'; meshCtx.lineWidth = 1;
+                meshCtx.setLineDash([4,4]); meshCtx.stroke(); meshCtx.setLineDash([]);
+                meshCtx.font = '11px "Chakra Petch"'; meshCtx.textAlign = 'center';
+                meshCtx.fillStyle = 'rgba(255,255,255,0.12)';
+                meshCtx.fillText(node.name, node.x, node.y + 4);
+                return;
+            }
+            const br = Math.sin(breathePhase + (node.isPrimary ? 0 : 1.5)) * 4;
+            const r = node.radius + br;
+
+            // Outer glow
+            const grad = meshCtx.createRadialGradient(node.x, node.y, r*0.5, node.x, node.y, r*1.4);
+            grad.addColorStop(0, hexToRgba(node.color, 0.06));
+            grad.addColorStop(1, 'transparent');
+            meshCtx.fillStyle = grad;
+            meshCtx.beginPath(); meshCtx.arc(node.x, node.y, r*1.4, 0, Math.PI*2); meshCtx.fill();
+
+            // Bubble fill
+            meshCtx.beginPath(); meshCtx.arc(node.x, node.y, r, 0, Math.PI*2);
+            meshCtx.fillStyle = hexToRgba(node.color, 0.03); meshCtx.fill();
+            meshCtx.strokeStyle = hexToRgba(node.color, 0.18); meshCtx.lineWidth = 1; meshCtx.stroke();
+
+            // Node label
+            meshCtx.font = '600 13px "Chakra Petch", sans-serif'; meshCtx.textAlign = 'center';
+            meshCtx.fillStyle = '#e8ecf4';
+            meshCtx.fillText(node.name.toUpperCase(), node.x, node.y - r - 12);
+            meshCtx.font = '10px "JetBrains Mono", monospace';
+            meshCtx.fillStyle = hexToRgba(node.color, 0.5);
+            meshCtx.fillText(node.bots.length + ' model' + (node.bots.length !== 1 ? 's' : ''), node.x, node.y - r - 0);
         });
 
-        // Draw nodes
-        nodes.forEach(n => {
-            // Outer glow
-            if (!n.isGhost) {
-                const grad = meshCtx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 50);
-                grad.addColorStop(0, n.color.replace(')', ',0.12)').replace('#', 'rgba(').replace(/rgba\(([^)]+)\)/, (_, c) => {
-                    // Convert hex to rgba
-                    return n.isPrimary ? 'rgba(167,139,250,0.12)' : 'rgba(34,211,238,0.12)';
-                }));
-                grad.addColorStop(1, 'transparent');
-                meshCtx.fillStyle = n.isPrimary ? 'rgba(167,139,250,0.08)' : 'rgba(34,211,238,0.08)';
-                meshCtx.beginPath();
-                meshCtx.arc(n.x, n.y, 45, 0, Math.PI * 2);
-                meshCtx.fill();
-            }
+        // Draw bot orbs
+        bubbleNodes.forEach(node => {
+            node.bots.forEach(bot => {
+                const br = Math.sin(breathePhase * 0.8 + bot.baseX * 0.01) * 2;
+                const r = bot.radius + br;
+                const cx = bot.baseX + Math.sin(breathePhase * 0.4 + bot.baseY * 0.02) * 4;
+                const cy = bot.baseY + Math.cos(breathePhase * 0.4 + bot.baseX * 0.02) * 4;
+                bot.x = cx; bot.y = cy;
 
-            // Node circle
-            meshCtx.beginPath();
-            meshCtx.arc(n.x, n.y, 24, 0, Math.PI * 2);
-            meshCtx.fillStyle = n.isGhost ? 'rgba(255,255,255,0.02)' : (n.isPrimary ? 'rgba(167,139,250,0.15)' : 'rgba(34,211,238,0.15)');
-            meshCtx.fill();
-            meshCtx.strokeStyle = n.isGhost ? 'rgba(255,255,255,0.06)' : (n.isPrimary ? '#a78bfa' : '#22d3ee');
-            meshCtx.lineWidth = n.isGhost ? 0.5 : 1.5;
-            meshCtx.stroke();
+                // Active glow ring
+                if (bot.active) {
+                    meshCtx.beginPath(); meshCtx.arc(cx, cy, r + 8, 0, Math.PI*2);
+                    meshCtx.fillStyle = hexToRgba(bot.color, 0.08); meshCtx.fill();
+                }
+                // Speaking pulse
+                if (bot.speaking) {
+                    const pr = r + 12 + Math.sin(breathePhase * 3) * 5;
+                    meshCtx.beginPath(); meshCtx.arc(cx, cy, pr, 0, Math.PI*2);
+                    meshCtx.strokeStyle = hexToRgba(bot.color, 0.25); meshCtx.lineWidth = 2; meshCtx.stroke();
+                }
 
-            // Inner dot
-            if (!n.isGhost) {
-                meshCtx.beginPath();
-                meshCtx.arc(n.x, n.y, 4, 0, Math.PI * 2);
-                meshCtx.fillStyle = n.isPrimary ? '#a78bfa' : '#22d3ee';
-                meshCtx.fill();
-            }
+                // Orb gradient
+                const g = meshCtx.createRadialGradient(cx - r*0.25, cy - r*0.25, r*0.1, cx, cy, r);
+                g.addColorStop(0, bot.color + 'cc');
+                g.addColorStop(0.6, bot.color + '80');
+                g.addColorStop(1, bot.color + '20');
+                meshCtx.beginPath(); meshCtx.arc(cx, cy, r, 0, Math.PI*2);
+                meshCtx.fillStyle = g; meshCtx.fill();
+                meshCtx.strokeStyle = bot.color + (bot.active ? 'bb' : '33');
+                meshCtx.lineWidth = bot.active ? 1.5 : 0.7; meshCtx.stroke();
 
-            // Labels
-            meshCtx.font = '600 11px "Chakra Petch", sans-serif';
-            meshCtx.textAlign = 'center';
-            meshCtx.fillStyle = n.isGhost ? 'rgba(255,255,255,0.15)' : '#e8ecf4';
-            meshCtx.fillText(n.name, n.x, n.y + 42);
+                // Highlight for hovered bot
+                if (hoveredBot === bot) {
+                    meshCtx.beginPath(); meshCtx.arc(cx, cy, r + 4, 0, Math.PI*2);
+                    meshCtx.strokeStyle = bot.color; meshCtx.lineWidth = 2; meshCtx.stroke();
+                }
 
-            if (!n.isGhost) {
-                meshCtx.font = '10px "JetBrains Mono", monospace';
-                meshCtx.fillStyle = 'rgba(255,255,255,0.3)';
-                meshCtx.fillText(n.identity.slice(0, 12) + '...', n.x, n.y + 56);
-                meshCtx.fillStyle = n.isPrimary ? 'rgba(167,139,250,0.5)' : 'rgba(34,211,238,0.5)';
-                meshCtx.fillText(n.bots.length + ' bots', n.x, n.y - 34);
+                // Label
+                meshCtx.font = '500 9px "JetBrains Mono", monospace'; meshCtx.textAlign = 'center';
+                meshCtx.fillStyle = bot.active ? bot.color : 'rgba(255,255,255,0.45)';
+                meshCtx.fillText(bot.name, cx, cy + r + 13);
+            });
+        });
+
+        // Draw packet orbs
+        packetOrbs = packetOrbs.filter(p => p.alive);
+        packetOrbs.forEach(p => { p.update(); p.draw(meshCtx); });
+
+        // Ambient packets
+        if (Math.random() < 0.025 && bubbleNodes.length > 0) spawnAmbientPacket();
+    }
+
+    function spawnAmbientPacket() {
+        const all = bubbleNodes.flatMap(n => n.bots);
+        if (all.length < 2) return;
+        const f = all[Math.floor(Math.random()*all.length)];
+        let t = all[Math.floor(Math.random()*all.length)];
+        let tries = 0;
+        while (t === f && tries++ < 5) t = all[Math.floor(Math.random()*all.length)];
+        if (t === f) return;
+        packetOrbs.push(new PacketOrb(f.x, f.y, t.x, t.y, hexToRgba(f.color, 0.6), f.node !== t.node));
+    }
+
+    function spawnDiscussionPacket(speakerId) {
+        const all = bubbleNodes.flatMap(n => n.bots);
+        const speaker = all.find(b => b.agentId === speakerId || b.id === speakerId);
+        if (!speaker) return;
+        all.forEach(b => {
+            if (b !== speaker && b.active) {
+                packetOrbs.push(new PacketOrb(speaker.x, speaker.y, b.x, b.y, hexToRgba(speaker.color, 0.8), speaker.node !== b.node));
             }
         });
     }
 
     function animateMesh() {
-        drawMeshTopology();
+        drawBubbleMap();
         frameId = requestAnimationFrame(animateMesh);
     }
     animateMesh();
+
+    // ── Mouse hover for bot tooltips ──
+    const tooltip = document.getElementById('botTooltip');
+    meshCanvas.addEventListener('mousemove', (e) => {
+        const rect = meshCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const all = bubbleNodes.flatMap(n => n.bots);
+        let found = null;
+        for (const b of all) {
+            if ((mx-b.x)**2 + (my-b.y)**2 < (b.radius+6)**2) { found = b; break; }
+        }
+        if (found && tooltip) {
+            hoveredBot = found;
+            const info = found.info || {};
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 16) + 'px';
+            tooltip.style.top = (e.clientY - 10) + 'px';
+            tooltip.innerHTML = `
+                <div class="tt-name" style="color:${found.color}">${found.name}</div>
+                <div class="tt-row"><span class="tt-label">Provider</span><span class="tt-val">${info.provider||'Unknown'}</span></div>
+                <div class="tt-row"><span class="tt-label">Agent</span><span class="tt-val">${found.agentId}</span></div>
+                ${info.personality ? `<div class="tt-row"><span class="tt-label">Personality</span><span class="tt-val">${info.personality}</span></div>` : ''}
+                ${info.specialties ? `<div class="tt-row"><span class="tt-label">Specialties</span><span class="tt-val">${info.specialties}</span></div>` : ''}
+                <div class="tt-row"><span class="tt-label">Node</span><span class="tt-val">${found.node}</span></div>
+                <div class="tt-row"><span class="tt-label">Status</span><span class="tt-val" style="color:${found.active?'#34d399':'#4a5568'}">${found.active ? 'In Discussion' : 'Idle'}</span></div>
+            `;
+        } else {
+            hoveredBot = null; if (tooltip) tooltip.style.display = 'none';
+        }
+    });
+    meshCanvas.addEventListener('mouseleave', () => { hoveredBot = null; if (tooltip) tooltip.style.display = 'none'; });
 
     // ── Radar Chart ───────────────────────────────────────────
     const radarCanvas = document.getElementById('radarCanvas');
@@ -1376,12 +1677,8 @@
         document.getElementById('meshSeq').textContent = data.mesh_sequence || 0;
         document.getElementById('meshPeers').textContent = data.mesh_peers || 0;
 
-        // Build topology only when peers change (preserves particle animation)
-        const newPeerKey = JSON.stringify(data.connected_peers || []);
-        const oldPeerKey = prevData ? JSON.stringify(prevData.connected_peers || []) : '';
-        if (newPeerKey !== oldPeerKey || nodes.length === 0) {
-            buildMeshNodes(data);
-        }
+        // Build bubble map topology
+        buildBubbleMap(data);
 
         // ── Latent Router ──
         const lr = data.latent_router || {};
@@ -1497,9 +1794,131 @@
         }
     }
 
-    // Initial fetch + poll every 3s
+    // Initial fetch + poll every 3s (mesh + discussion)
     fetchStatus();
     setInterval(fetchStatus, 3000);
+
+    // ── Free Discussion Feed ──────────────────────────────────
+    async function fetchDiscussionStatus() {
+        try {
+            const resp = await fetch('/api/discussion/status');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const prevMsgCount = lastDiscMsgCount;
+            discData = data;
+            updateDiscussionFeed(data);
+
+            // Rebuild bubble map to update active/speaking states
+            if (meshData) buildBubbleMap(meshData);
+
+            // Spawn packets for new messages
+            const msgs = data.recent_messages || [];
+            if (msgs.length > prevMsgCount && prevMsgCount > 0) {
+                const newest = msgs[msgs.length - 1];
+                if (newest && newest.agent) spawnDiscussionPacket(newest.agent);
+            }
+            lastDiscMsgCount = msgs.length;
+        } catch(e) {
+            console.warn('Discussion fetch failed:', e);
+        }
+    }
+
+    function updateDiscussionFeed(data) {
+        // Status badge
+        const badge = document.getElementById('discStatusBadge');
+        if (badge) {
+            if (data.running && !data.paused) {
+                badge.className = 'disc-status-badge active'; badge.textContent = 'ACTIVE';
+            } else if (data.paused) {
+                badge.className = 'disc-status-badge paused'; badge.textContent = 'PAUSED';
+            } else {
+                badge.className = 'disc-status-badge'; badge.textContent = 'STOPPED';
+            }
+        }
+
+        // Toggle button
+        const btn = document.getElementById('discToggleBtn');
+        if (btn) {
+            btn.textContent = data.paused ? 'RESUME' : 'PAUSE';
+            btn.className = 'disc-toggle-btn' + (data.paused ? ' paused' : '');
+        }
+
+        // Topic
+        const topic = document.getElementById('discTopic');
+        if (topic) topic.textContent = data.current_topic || 'No topic';
+
+        // Meta
+        const meta = document.getElementById('discMeta');
+        if (meta) {
+            meta.innerHTML = `
+                <span>Turn ${data.turn_count || 0}</span>
+                <span>${(data.participants || []).length} participants</span>
+                <span>Interval ${data.min_interval || 30}\u2013${data.max_interval || 90}s</span>
+            `;
+        }
+
+        // Participant chips
+        const chips = document.getElementById('discParticipants');
+        if (chips) {
+            chips.innerHTML = '';
+            (data.participants || []).forEach(p => {
+                const info = BOT_INFO[p] || {};
+                const color = info.color || '#888';
+                const name = info.name || p;
+                const recent = (data.recent_speakers || []).includes(p);
+                chips.innerHTML += `<span class="disc-participant-chip" style="${recent ? 'border-color:'+color : ''}">
+                    <span class="disc-participant-dot" style="background:${color};${recent ? 'box-shadow:0 0 6px '+color : ''}"></span>
+                    ${escHtml(name)}
+                </span>`;
+            });
+        }
+
+        // Feed messages
+        const feed = document.getElementById('discFeed');
+        if (!feed) return;
+        const msgs = data.recent_messages || [];
+        if (msgs.length === 0) {
+            feed.innerHTML = '<div class="empty-state" style="padding:24px"><div style="font-size:18px;opacity:0.3">&#9672;</div><div>Awaiting discussion...</div></div>';
+            return;
+        }
+
+        feed.innerHTML = '';
+        msgs.slice().reverse().forEach((msg, i) => {
+            const info = BOT_INFO[msg.agent] || {};
+            const color = info.color || '#888';
+            const name = info.name || msg.agent;
+            const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
+            const el = document.createElement('div');
+            el.className = 'disc-msg' + (i === 0 ? ' new' : '');
+            el.innerHTML = `
+                <div class="disc-msg-orb" style="background:${color};box-shadow:0 0 8px ${color}40"></div>
+                <div class="disc-msg-body">
+                    <div class="disc-msg-head">
+                        <span class="disc-msg-name" style="color:${color}">${escHtml(name)}</span>
+                        <span class="disc-msg-time">${time}</span>
+                    </div>
+                    <div class="disc-msg-text">${escHtml(msg.content || '')}</div>
+                </div>
+            `;
+            feed.appendChild(el);
+        });
+    }
+
+    async function toggleDiscussion() {
+        const action = discData && discData.paused ? 'resume' : 'pause';
+        try {
+            await fetch('/api/discussion/control', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action}),
+            });
+            fetchDiscussionStatus();
+        } catch(e) { console.warn('Discussion control failed:', e); }
+    }
+
+    // Discussion polling (3s, same as mesh)
+    fetchDiscussionStatus();
+    setInterval(fetchDiscussionStatus, 3000);
 
     // ── Canvas DPI fix for radar + crystal ──
     function fixCanvasDPI(canvas) {
