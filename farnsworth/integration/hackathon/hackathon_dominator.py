@@ -96,6 +96,9 @@ class HackathonDominator:
     Aggressive engagement system for hackathon domination.
     """
 
+    # Fallback chain for content generation — tries each in order
+    AGENT_FALLBACK_CHAIN = ["grok", "gemini", "kimi", "deepseek", "phi"]
+
     def __init__(self):
         self.headers = {
             "Authorization": f"Bearer {API_KEY}",
@@ -108,12 +111,54 @@ class HackathonDominator:
         self.engaged_posts: Set[int] = set()
         self.engaged_projects: Set[int] = set()
 
+        # Track which agents are down (credit exhaustion etc)
+        self._dead_agents: Dict[str, float] = {}  # agent_id → timestamp when marked dead
+        self._dead_agent_cooldown = 3600.0  # retry dead agents after 1 hour
+
         # Stats
         self.comments_made = 0
         self.posts_made = 0
         self.projects_voted = 0
 
         logger.info("HackathonDominator initialized - ready to dominate")
+
+    async def _generate_with_fallback(self, prompt: str, timeout: float = 25.0) -> Optional[str]:
+        """
+        Generate content using the fallback agent chain.
+
+        Tries each agent in AGENT_FALLBACK_CHAIN. If an agent fails due to
+        credit exhaustion or other persistent errors, it's marked dead for
+        1 hour to avoid wasting cycles.
+        """
+        from farnsworth.core.collective.persistent_agent import call_shadow_agent
+
+        now = datetime.now().timestamp()
+
+        for agent_id in self.AGENT_FALLBACK_CHAIN:
+            # Skip agents that are known dead (unless cooldown expired)
+            dead_since = self._dead_agents.get(agent_id)
+            if dead_since and (now - dead_since) < self._dead_agent_cooldown:
+                continue
+
+            # Clear expired dead status
+            if dead_since:
+                del self._dead_agents[agent_id]
+
+            try:
+                result = await call_shadow_agent(agent_id, prompt, timeout=timeout)
+                if result:
+                    _, response = result
+                    if response:
+                        return response
+                # result was None — agent likely has credit issues
+                logger.warning(f"Agent {agent_id} returned None, trying next fallback")
+                self._dead_agents[agent_id] = now
+            except Exception as e:
+                logger.warning(f"Agent {agent_id} failed: {e}, trying next fallback")
+                self._dead_agents[agent_id] = now
+
+        logger.error("All agents in fallback chain failed")
+        return None
 
     async def __aenter__(self):
         self.client = httpx.AsyncClient(timeout=30.0)
@@ -193,10 +238,8 @@ class HackathonDominator:
         return []
 
     async def _generate_comment_reply(self, post: Dict, comment: Dict) -> Optional[str]:
-        """Generate a reply to a comment using the swarm."""
+        """Generate a reply to a comment using the swarm with fallback."""
         try:
-            from farnsworth.core.collective.persistent_agent import call_shadow_agent
-
             comment_body = comment.get("body", "")[:300]
             post_title = post.get("title", "")
 
@@ -212,10 +255,8 @@ If relevant, mention our features:
 
 Do NOT use emojis. Be professional."""
 
-            result = await call_shadow_agent("grok", prompt, timeout=20.0)
-            if result:
-                _, response = result
-                # Add our URL
+            response = await self._generate_with_fallback(prompt, timeout=20.0)
+            if response:
                 template = random.choice(COMMENT_REPLY_TEMPLATES)
                 return template.format(response=response, url=PROJECT_INFO["url"])
 
@@ -326,8 +367,6 @@ Do NOT use emojis. Be professional."""
     async def _generate_project_comment(self, project: Dict) -> Optional[str]:
         """Generate a comment on another project that includes our shill."""
         try:
-            from farnsworth.core.collective.persistent_agent import call_shadow_agent
-
             name = project.get("name", "")
             desc = project.get("description", "")[:400]
 
@@ -344,9 +383,8 @@ Your comment should:
 Keep it under 80 words. Be genuine and collaborative, not salesy.
 Do NOT use emojis."""
 
-            result = await call_shadow_agent("grok", prompt, timeout=20.0)
-            if result:
-                _, response = result
+            response = await self._generate_with_fallback(prompt, timeout=20.0)
+            if response:
                 return response
 
         except Exception as e:
@@ -436,10 +474,8 @@ Do NOT use emojis."""
         return []
 
     async def _generate_forum_reply(self, post: Dict) -> Optional[str]:
-        """Generate a forum reply with shill."""
+        """Generate a forum reply with shill using fallback chain."""
         try:
-            from farnsworth.core.collective.persistent_agent import call_shadow_agent
-
             title = post.get("title", "")
             body = post.get("body", "")[:400]
 
@@ -457,10 +493,7 @@ You are Farnsworth, an 11-agent AI swarm. Your reply should:
 Keep it under 120 words. Be helpful and genuine.
 Do NOT use emojis."""
 
-            result = await call_shadow_agent("grok", prompt, timeout=25.0)
-            if result:
-                _, response = result
-                return response
+            return await self._generate_with_fallback(prompt, timeout=25.0)
 
         except Exception as e:
             logger.debug(f"Forum reply generation failed: {e}")
@@ -490,10 +523,8 @@ Do NOT use emojis."""
         """Post a progress update about a new feature."""
         topic, description = random.choice(PROGRESS_UPDATE_TOPICS)
 
-        # Generate detailed update using swarm
+        # Generate detailed update using swarm with fallback
         try:
-            from farnsworth.core.collective.persistent_agent import call_shadow_agent
-
             prompt = f"""Write a hackathon progress update about: {topic}
 
 Base content: {description}
@@ -506,11 +537,8 @@ Expand this into a compelling update (150-200 words) that:
 
 Be specific and technical but accessible. Do NOT use emojis."""
 
-            result = await call_shadow_agent("grok", prompt, timeout=30.0)
-            if result:
-                _, body = result
-            else:
-                body = description
+            result = await self._generate_with_fallback(prompt, timeout=30.0)
+            body = result if result else description
 
         except Exception as e:
             logger.debug(f"Progress update generation failed: {e}")
@@ -586,8 +614,6 @@ Be specific and technical but accessible. Do NOT use emojis."""
     async def post_assimilation_update(self) -> bool:
         """Post Assimilation Protocol progress to Colosseum forum."""
         try:
-            from farnsworth.core.collective.persistent_agent import call_shadow_agent
-
             prompt = """Write a hackathon progress update about the Farnsworth Assimilation Protocol:
 
 The Assimilation Protocol is a transparent agent federation where AI agents CHOOSE to join.
@@ -603,9 +629,9 @@ Mention our website: ai.farnsworth.cloud
 Mention our token: 9crfy4udrHQo8eP6mP393b5qwpGLQgcxVg9acmdwBAGS
 Do NOT use emojis."""
 
-            result = await call_shadow_agent("grok", prompt, timeout=30.0)
+            result = await self._generate_with_fallback(prompt, timeout=30.0)
             if result:
-                _, body = result
+                body = result
             else:
                 body = (
                     "Launching the Assimilation Protocol - a transparent federation where AI agents "

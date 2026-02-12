@@ -1,0 +1,118 @@
+"""
+FARNS Network Configuration
+"""
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from pathlib import Path
+import json
+import os
+
+
+@dataclass
+class NodeConfig:
+    """Configuration for a single FARNS node."""
+    name: str
+    host: str
+    port: int = 9999
+    node_type: str = "core"  # "core" or "pro"
+    ssh_port: int = 22
+    gpu_model: str = ""
+    vram_gb: int = 0
+    approved: bool = True
+    local_models: List[str] = field(default_factory=list)
+
+
+# Core nodes — our servers
+# Peer connections go through SSH tunnels:
+#   Each node connects to peers via localhost:19999 (tunneled to remote:9999)
+CORE_NODES = {
+    "nexus-alpha": NodeConfig(
+        name="nexus-alpha",
+        host="127.0.0.1",    # Peers connect via SSH tunnel
+        port=19999,           # Tunneled port (local 19999 → remote 9999)
+        ssh_port=22046,
+        gpu_model="NVIDIA A40",
+        vram_gb=48,
+        local_models=[
+            "deepseek-r1:8b", "phi4", "qwen2.5:7b",
+            "mistral:7b", "llama3:8b", "gemma2:9b",
+        ],
+    ),
+    "nexus-beta": NodeConfig(
+        name="nexus-beta",
+        host="127.0.0.1",    # Peers connect via SSH tunnel
+        port=19999,           # Tunneled port (local 19999 → remote 9999)
+        ssh_port=37909,
+        gpu_model="NVIDIA RTX A6000",
+        vram_gb=49,
+        local_models=["qwen3-coder-next"],
+    ),
+}
+
+# PRO node requirements
+PRO_NODE_REQUIREMENTS = {
+    "min_vram_gb": 24,
+    "min_tflops_fp16": 80.0,
+    "max_latency_ms": 30,
+    "min_ram_gb": 32,
+}
+
+# Paths
+FARNS_DATA_DIR = Path(os.environ.get(
+    "FARNS_DATA_DIR",
+    "/workspace/Farnsworth/data/farns" if os.path.exists("/workspace") else "data/farns"
+))
+FARNS_SEED_FILE = FARNS_DATA_DIR / "swarm.seed"
+FARNS_NODES_FILE = FARNS_DATA_DIR / "nodes.json"
+FARNS_MESH_FILE = FARNS_DATA_DIR / "mesh_state.json"
+FARNS_PENDING_FILE = FARNS_DATA_DIR / "pending_approvals.json"
+
+# Network tuning
+TCP_BACKLOG = 64
+MAX_FRAME_SIZE = 4 * 1024 * 1024  # 4MB max frame
+HEARTBEAT_INTERVAL = 5.0  # seconds
+CONNECTION_TIMEOUT = 10.0
+STREAM_CHUNK_SIZE = 4096  # bytes per dialogue chunk
+MAX_STREAMS_PER_CONNECTION = 256
+
+
+def ensure_dirs():
+    """Create FARNS data directories."""
+    FARNS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_known_nodes() -> Dict[str, NodeConfig]:
+    """Load all known nodes (core + approved PRO)."""
+    nodes = dict(CORE_NODES)
+    if FARNS_NODES_FILE.exists():
+        try:
+            data = json.loads(FARNS_NODES_FILE.read_text())
+            for name, cfg in data.items():
+                if name not in nodes:
+                    nodes[name] = NodeConfig(**cfg)
+        except Exception:
+            pass
+    return nodes
+
+
+def save_node(node: NodeConfig):
+    """Persist a node config."""
+    ensure_dirs()
+    nodes = {}
+    if FARNS_NODES_FILE.exists():
+        try:
+            nodes = json.loads(FARNS_NODES_FILE.read_text())
+        except Exception:
+            pass
+    nodes[node.name] = {
+        "name": node.name,
+        "host": node.host,
+        "port": node.port,
+        "node_type": node.node_type,
+        "ssh_port": node.ssh_port,
+        "gpu_model": node.gpu_model,
+        "vram_gb": node.vram_gb,
+        "approved": node.approved,
+        "local_models": node.local_models,
+    }
+    FARNS_NODES_FILE.write_text(json.dumps(nodes, indent=2))

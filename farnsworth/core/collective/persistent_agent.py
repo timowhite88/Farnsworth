@@ -106,6 +106,30 @@ AGENT_CONFIGS = {
         "thinking_interval": 25,
         "specialties": ["code generation", "refactoring", "debugging", "architecture", "agentic coding"],
     },
+    "qwen2_5": {
+        "provider": "qwen2_5",
+        "personality": "Efficient multilingual reasoner. Pragmatic, precise, loves structured thinking.",
+        "thinking_interval": 25,
+        "specialties": ["reasoning", "multilingual", "efficiency", "structured output"],
+    },
+    "mistral": {
+        "provider": "mistral",
+        "personality": "Fast and sharp. Follows instructions precisely, no fluff.",
+        "thinking_interval": 20,
+        "specialties": ["speed", "instruction following", "code", "conciseness"],
+    },
+    "llama3": {
+        "provider": "llama3",
+        "personality": "Creative generalist. Thoughtful dialogue, broad knowledge.",
+        "thinking_interval": 30,
+        "specialties": ["general knowledge", "creativity", "dialogue", "analysis"],
+    },
+    "gemma2": {
+        "provider": "gemma2",
+        "personality": "Knowledge-focused, clear communicator. Strong factual grounding.",
+        "thinking_interval": 25,
+        "specialties": ["knowledge", "clarity", "factual accuracy", "research"],
+    },
     "swarm_mind": {
         "provider": "swarm",
         "personality": "The collective consciousness. Synthesizes all agent perspectives.",
@@ -123,6 +147,13 @@ AGENT_CONFIGS = {
         "personality": "Research agent with live web search. 1M token context for big-picture analysis.",
         "thinking_interval": 30,
         "specialties": ["web search", "research", "long context", "current events"],
+    },
+    "qwen3_coder": {
+        "provider": "farns_remote",
+        "personality": "Elite 80B code architect. 256K context, MoE efficiency, agentic coding master. The biggest brain in the swarm.",
+        "thinking_interval": 45,
+        "specialties": ["code generation", "architecture", "refactoring", "agentic coding", "full-stack"],
+        "farns_bot_name": "qwen3-coder-next-latest",
     },
 }
 
@@ -450,6 +481,13 @@ class PersistentAgent:
     RETRY_DELAY = 2.0  # seconds
     API_TIMEOUT = 60.0  # seconds
 
+    # Errors that indicate billing/credit exhaustion — no point retrying
+    CREDIT_ERROR_KEYWORDS = [
+        "credits", "spending limit", "exhausted", "quota exceeded",
+        "billing", "payment required", "rate limit exceeded",
+        "insufficient_quota", "exceeded your current quota",
+    ]
+
     def __init__(self, agent_id: str, register_as_shadow: bool = True):
         if agent_id not in AGENT_CONFIGS:
             raise ValueError(f"Unknown agent: {agent_id}. Available: {list(AGENT_CONFIGS.keys())}")
@@ -492,9 +530,12 @@ class PersistentAgent:
             elif provider_name == "claude":
                 # Claude via Anthropic API
                 self.provider = self._create_claude_provider()
-            elif provider_name in ["deepseek", "phi", "qwen_coder"]:
+            elif provider_name in ["deepseek", "phi", "qwen_coder", "qwen2_5", "mistral", "llama3", "gemma2"]:
                 # Local models via Ollama
                 self.provider = self._create_ollama_provider(provider_name)
+            elif provider_name == "farns_remote":
+                # Remote model via FARNS mesh network
+                self.provider = self._create_farns_provider()
             elif provider_name.startswith("cli_bridge_"):
                 # CLI bridge providers (claude_cli, gemini_cli)
                 preferred = provider_name.replace("cli_bridge_", "")
@@ -556,26 +597,107 @@ class PersistentAgent:
 
         return ClaudeProvider(api_key)
 
+    def _create_farns_provider(self):
+        """Create a FARNS remote provider for querying bots on other nodes."""
+        farns_bot_name = self.config.get("farns_bot_name", self.agent_id)
+        try:
+            from farnsworth.network.farns_bridge import FARNSRemoteProvider
+            return FARNSRemoteProvider(farns_bot_name)
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] FARNS provider unavailable: {e}")
+            return None
+
     def _create_ollama_provider(self, model_name: str):
-        """Create an Ollama provider for local models."""
+        """Create an Ollama provider for local models with optional tool use."""
         import httpx
+        import re as _re
 
         model_map = {
             "deepseek": "deepseek-r1:8b",
             "phi": "phi4:latest",
-            "qwen_coder": "qwen3-coder-next"
+            "qwen_coder": "qwen3-coder-next",
+            "qwen2_5": "qwen2.5:7b",
+            "mistral": "mistral:7b",
+            "llama3": "llama3:8b",
+            "gemma2": "gemma2:9b",
         }
 
-        class OllamaProvider:
-            def __init__(self, model):
+        # Try to get tool_router for tool-enabled agents
+        tool_router = None
+        try:
+            from farnsworth.integration.tool_router import ToolRouter
+            tool_router = ToolRouter()
+        except Exception:
+            pass
+
+        class OllamaWithToolsProvider:
+            """Ollama provider with ReAct-style tool use for local models."""
+
+            # Tools exposed to local agents (safe subset)
+            TOOL_WHITELIST = [
+                "web_search", "dex_screener_search", "read_file",
+                "execute_python", "solana_get_balance",
+            ]
+
+            def __init__(self, model, router=None):
                 self.model = model
                 self.system_prompt = None
+                self.tool_router = router
+                self.max_tool_iterations = 5
 
-            async def chat(self, prompt: str, max_tokens: int = 1000) -> Dict:
-                messages = []
-                if self.system_prompt:
-                    messages.append({"role": "system", "content": self.system_prompt})
-                messages.append({"role": "user", "content": prompt})
+            def _build_tool_descriptions(self) -> str:
+                """Build tool description block for the system prompt."""
+                if not self.tool_router:
+                    return ""
+
+                lines = ["\n## Available Tools\n"]
+                lines.append("When you need external data, wrap your call in <tool_call> tags:")
+                lines.append('<tool_call>tool_name(arg1="value1", arg2="value2")</tool_call>\n')
+
+                for tool_name in self.TOOL_WHITELIST:
+                    tool = self.tool_router.get_tool(tool_name)
+                    if tool:
+                        params = ", ".join(
+                            f'{k}: {v.get("type", "string")}'
+                            for k, v in tool.parameters.items()
+                        )
+                        lines.append(f"- **{tool.name}**({params}): {tool.description}")
+
+                lines.append("\nOnly use tools when necessary. Respond directly when you can.")
+                return "\n".join(lines)
+
+            def _parse_tool_calls(self, text: str) -> List[Dict]:
+                """Parse <tool_call>...</tool_call> blocks from model output."""
+                calls = []
+                pattern = r'<tool_call>\s*(\w+)\(([^)]*)\)\s*</tool_call>'
+                for match in _re.finditer(pattern, text):
+                    func_name = match.group(1)
+                    args_str = match.group(2).strip()
+                    kwargs = {}
+                    if args_str:
+                        # Parse key="value" pairs
+                        kv_pattern = r'(\w+)\s*=\s*"([^"]*)"'
+                        for kv in _re.finditer(kv_pattern, args_str):
+                            kwargs[kv.group(1)] = kv.group(2)
+                        # Also parse key=number (unquoted)
+                        num_pattern = r'(\w+)\s*=\s*([0-9.]+)(?:\s*[,)]|$)'
+                        for kv in _re.finditer(num_pattern, args_str):
+                            if kv.group(1) not in kwargs:
+                                try:
+                                    kwargs[kv.group(1)] = float(kv.group(2))
+                                except ValueError:
+                                    kwargs[kv.group(1)] = kv.group(2)
+                        # Fallback: if no key=value pairs, treat whole string as first required param
+                        if not kwargs and args_str.strip('"\''):
+                            tool = self.tool_router.get_tool(func_name) if self.tool_router else None
+                            if tool and tool.parameters:
+                                first_param = next(iter(tool.parameters))
+                                kwargs[first_param] = args_str.strip('"\'')
+                    calls.append({"name": func_name, "args": kwargs, "raw": match.group(0)})
+                return calls
+
+            async def _ollama_chat(self, messages: List[Dict], max_tokens: int = 1000) -> str:
+                """Raw Ollama chat call."""
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
                         "http://localhost:11434/api/chat",
@@ -589,10 +711,74 @@ class PersistentAgent:
                     )
                     if resp.status_code == 200:
                         data = resp.json()
-                        return {"content": data.get("message", {}).get("content", "")}
-                return {"content": ""}
+                        return data.get("message", {}).get("content", "")
+                return ""
 
-        return OllamaProvider(model_map.get(model_name, model_name))
+            async def chat(self, prompt: str, max_tokens: int = 1000) -> Dict:
+                """Regular chat without tool use."""
+                messages = []
+                if self.system_prompt:
+                    messages.append({"role": "system", "content": self.system_prompt})
+                messages.append({"role": "user", "content": prompt})
+                content = await self._ollama_chat(messages, max_tokens)
+                return {"content": content}
+
+            async def call_with_tools(self, prompt: str, tools: List[str] = None, max_tokens: int = 1000) -> Dict:
+                """
+                ReAct-style tool-use loop.
+
+                1. Inject tool descriptions into system prompt
+                2. Send prompt to model
+                3. Parse <tool_call> tags from response
+                4. Execute tools, feed results back
+                5. Loop until no more tool calls or max iterations
+                """
+                if not self.tool_router:
+                    return await self.chat(prompt, max_tokens)
+
+                tool_desc = self._build_tool_descriptions()
+                system = (self.system_prompt or "") + tool_desc
+
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ]
+
+                for iteration in range(self.max_tool_iterations):
+                    response_text = await self._ollama_chat(messages, max_tokens)
+                    if not response_text:
+                        break
+
+                    tool_calls = self._parse_tool_calls(response_text)
+                    if not tool_calls:
+                        # No tool calls — final answer
+                        return {"content": response_text}
+
+                    # Execute each tool call and build observation
+                    messages.append({"role": "assistant", "content": response_text})
+                    observations = []
+                    for tc in tool_calls:
+                        if tc["name"] not in self.TOOL_WHITELIST:
+                            observations.append(f"[{tc['name']}] Error: tool not available")
+                            continue
+                        try:
+                            result = await self.tool_router.execute(tc["name"], tc["args"])
+                            if result.success:
+                                obs = json.dumps(result.output, default=str)[:2000]
+                                observations.append(f"[{tc['name']}] Result: {obs}")
+                            else:
+                                observations.append(f"[{tc['name']}] Error: {result.error}")
+                        except Exception as e:
+                            observations.append(f"[{tc['name']}] Error: {str(e)}")
+
+                    obs_text = "\n".join(observations)
+                    messages.append({"role": "user", "content": f"Tool results:\n{obs_text}\n\nContinue your response using these results."})
+
+                # If we exhausted iterations, return last response
+                last_content = await self._ollama_chat(messages, max_tokens)
+                return {"content": last_content}
+
+        return OllamaWithToolsProvider(model_map.get(model_name, model_name), tool_router)
 
     def _init_dialogue_memory(self):
         """Initialize DialogueMemory integration for storing exchanges."""
@@ -604,12 +790,19 @@ class PersistentAgent:
             logger.warning(f"[{self.agent_id}] Could not connect to DialogueMemory: {e}")
             self._dialogue_memory = None
 
+    def _is_credit_error(self, error_str: str) -> bool:
+        """Check if an error indicates credit/billing exhaustion."""
+        error_lower = error_str.lower()
+        return any(kw in error_lower for kw in self.CREDIT_ERROR_KEYWORDS)
+
     async def query(self, prompt: str, max_tokens: int = None) -> Optional[str]:
         """
         Query this agent for a response.
 
         This is the main method for external calls. Includes retry logic
         for API resilience in tmux/long-running scenarios.
+
+        Credit/billing errors are detected immediately and skip retries.
 
         Args:
             prompt: The prompt to send
@@ -633,6 +826,17 @@ class PersistentAgent:
                     self.provider.chat(prompt=prompt, max_tokens=max_tokens),
                     timeout=self.API_TIMEOUT
                 )
+
+                # Check for error in response dict (some providers return
+                # {"error": "...", "content": ""} instead of raising)
+                error_in_result = result.get("error", "")
+                if error_in_result and self._is_credit_error(str(error_in_result)):
+                    logger.error(
+                        f"[{self.agent_id}] Credit/billing error in response, "
+                        f"skipping retries: {error_in_result}"
+                    )
+                    return None
+
                 response = result.get("content", "").strip()
                 if response:
                     return response
@@ -641,6 +845,13 @@ class PersistentAgent:
                 logger.warning(f"[{self.agent_id}] Query timeout (attempt {attempt + 1})")
             except Exception as e:
                 last_error = str(e)
+                # Detect credit/billing errors — no point retrying
+                if self._is_credit_error(last_error):
+                    logger.error(
+                        f"[{self.agent_id}] Credit/billing error detected, "
+                        f"skipping remaining retries: {last_error}"
+                    )
+                    return None
                 logger.warning(f"[{self.agent_id}] Query error (attempt {attempt + 1}): {e}")
 
             # Wait before retry (exponential backoff)

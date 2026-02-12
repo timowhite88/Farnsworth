@@ -202,6 +202,14 @@ from farnsworth.memory.recall_memory import RecallMemory, ConversationTurn
 from farnsworth.memory.knowledge_graph import KnowledgeGraph, Entity
 from farnsworth.memory.memory_dreaming import MemoryDreamer
 
+# FARNS Swarm Memory Crystal integration
+try:
+    from farnsworth.network.farns_swarm_memory import SwarmMemory, MemoryCrystal, CRYSTAL_FILE
+    import json as _json
+    CRYSTALS_AVAILABLE = True
+except ImportError:
+    CRYSTALS_AVAILABLE = False
+
 
 @dataclass
 class MemorySearchResult:
@@ -338,6 +346,10 @@ class MemorySystem:
 
         self._initialized = False
 
+        # FARNS crystal memory bridge
+        self._crystal_cache: list = []
+        self._crystal_cache_time: float = 0
+
     def notify_activity(self):
         """
         v1.4: Notify system of user/message activity.
@@ -365,6 +377,86 @@ class MemorySystem:
     def get_idle_seconds(self) -> float:
         """Get seconds since last activity."""
         return (datetime.now() - self._last_activity).total_seconds()
+
+    def _load_crystals(self) -> list:
+        """Load crystallized knowledge from FARNS swarm memory.
+
+        Crystals are consensus-verified knowledge from the mesh.
+        Cache for 60 seconds to avoid repeated disk reads.
+        """
+        if not CRYSTALS_AVAILABLE:
+            return []
+
+        now = time.time()
+        if now - self._crystal_cache_time < 60 and self._crystal_cache:
+            return self._crystal_cache
+
+        try:
+            if CRYSTAL_FILE.exists():
+                data = _json.loads(CRYSTAL_FILE.read_text())
+                crystals = []
+                for entry in data.get("crystals", []):
+                    if entry.get("status") == "crystallized":
+                        crystals.append({
+                            "content": entry.get("content", ""),
+                            "tags": entry.get("tags", []),
+                            "confidence": entry.get("confidence", 0),
+                            "source_model": entry.get("source_model", ""),
+                            "source_node": entry.get("source_node", ""),
+                            "votes_for": entry.get("votes_for", 0),
+                            "crystal_id": entry.get("id", ""),
+                            "crystallized_at": entry.get("crystallized_at", 0),
+                        })
+                self._crystal_cache = crystals
+                self._crystal_cache_time = now
+                return crystals
+        except Exception:
+            pass
+        return []
+
+    def search_crystals(self, query: str, limit: int = 5) -> list:
+        """Search FARNS swarm memory crystals for relevant verified knowledge.
+
+        Returns list of MemorySearchResult from crystallized (consensus-verified) knowledge.
+        """
+        crystals = self._load_crystals()
+        if not crystals:
+            return []
+
+        query_lower = query.lower()
+        query_words = set(query_lower.split())
+
+        scored = []
+        for crystal in crystals:
+            content_lower = crystal["content"].lower()
+            # Score by word overlap + tag match + confidence
+            content_words = set(content_lower.split())
+            overlap = len(query_words & content_words)
+            tag_bonus = sum(1 for t in crystal["tags"] if t.lower() in query_lower) * 2
+            conf_bonus = crystal["confidence"] * 0.5
+            score = overlap + tag_bonus + conf_bonus
+            if score > 0:
+                scored.append((score, crystal))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        results = []
+        for score, crystal in scored[:limit]:
+            results.append(MemorySearchResult(
+                content=crystal["content"],
+                source="crystal",
+                score=min(score / 10.0, 1.0),
+                metadata={
+                    "crystal_id": crystal["crystal_id"],
+                    "confidence": crystal["confidence"],
+                    "source_model": crystal["source_model"],
+                    "source_node": crystal["source_node"],
+                    "votes_for": crystal["votes_for"],
+                    "tags": crystal["tags"],
+                    "verified": True,
+                },
+            ))
+        return results
 
     def _encrypt(self, content: str) -> str:
         """Encrypt content if encryption enabled."""
@@ -655,6 +747,11 @@ class MemorySystem:
             unique_results = self._apply_affective_bias(
                 unique_results, emotion_filter, valence_bias
             )
+
+        # Also search FARNS crystals (consensus-verified knowledge)
+        crystal_results = self.search_crystals(query, limit=3)
+        if crystal_results:
+            unique_results.extend(crystal_results)
 
         final_results = unique_results[:top_k]
 

@@ -92,6 +92,15 @@ async def chat(request: Request):
 
         original_message = chat_request.message
 
+        # Pause free discussion while user is active
+        try:
+            from farnsworth.core.collective.free_discussion import get_free_discussion_engine
+            fde = get_free_discussion_engine()
+            if fde:
+                fde.notify_user_activity()
+        except Exception:
+            pass
+
         # Self-awareness: Check intent BEFORE upgrading
         intent = s.detect_intent(original_message)
 

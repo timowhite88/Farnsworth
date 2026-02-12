@@ -106,6 +106,15 @@ class AgentSpawner:
             "Gemini": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH, TaskType.MCP],  # Google AI - full dev capability
             "HuggingFace": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH],  # Open-source local models (Mistral, Llama, etc)
 
+            # Local Ollama models
+            "Qwen2.5": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH],
+            "Mistral": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH],
+            "Llama3": [TaskType.CHAT, TaskType.MEMORY, TaskType.RESEARCH],
+            "Gemma2": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH],
+
+            # FARNS Remote models (on nexus-beta A6000)
+            "Qwen3Coder": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.RESEARCH, TaskType.AUDIT, TaskType.TESTING],
+
             # Claude variants - the auditors
             "Claude": [TaskType.CHAT, TaskType.DEVELOPMENT, TaskType.MCP, TaskType.RESEARCH, TaskType.AUDIT, TaskType.TESTING],
             "ClaudeOpus": [TaskType.DEVELOPMENT, TaskType.MCP, TaskType.RESEARCH, TaskType.AUDIT, TaskType.TESTING],  # Opus for final audit
@@ -117,7 +126,7 @@ class AgentSpawner:
         # Fallback chains - who to try when original agent fails
         # Format: agent -> [fallback1, fallback2, ...final_auditor]
         self.fallback_chains = {
-            "Grok": ["Gemini", "HuggingFace", "DeepSeek", "ClaudeOpus"],
+            "Grok": ["Qwen2.5", "Mistral", "Gemini", "HuggingFace", "DeepSeek", "ClaudeOpus"],
             "Gemini": ["HuggingFace", "DeepSeek", "Grok", "ClaudeOpus"],
             "DeepSeek": ["HuggingFace", "Gemini", "Phi", "ClaudeOpus"],
             "Phi": ["HuggingFace", "DeepSeek", "Gemini", "ClaudeOpus"],
@@ -125,6 +134,11 @@ class AgentSpawner:
             "Kimi": ["HuggingFace", "Farnsworth", "Claude", "ClaudeOpus"],
             "Farnsworth": ["HuggingFace", "Kimi", "Claude", "ClaudeOpus"],
             "HuggingFace": ["DeepSeek", "Gemini", "ClaudeOpus"],  # HuggingFace fallbacks
+            "Qwen2.5": ["Mistral", "Llama3", "Gemma2", "DeepSeek", "ClaudeOpus"],
+            "Mistral": ["Qwen2.5", "Llama3", "DeepSeek", "Gemma2", "ClaudeOpus"],
+            "Llama3": ["Mistral", "Qwen2.5", "Gemma2", "DeepSeek", "ClaudeOpus"],
+            "Gemma2": ["Llama3", "Mistral", "Qwen2.5", "DeepSeek", "ClaudeOpus"],
+            "Qwen3Coder": ["Qwen2.5", "DeepSeek", "ClaudeOpus"],  # FARNS remote (A6000)
             "Claude": ["Gemini", "DeepSeek", "ClaudeOpus"],
             "ClaudeOpus": [],  # Opus is the final stop - it must handle or fail
         }
@@ -140,6 +154,11 @@ class AgentSpawner:
             "Grok": 3,
             "Gemini": 4,
             "OpenCode": 3,
+            "Qwen2.5": 3,
+            "Mistral": 3,
+            "Llama3": 3,
+            "Gemma2": 2,
+            "Qwen3Coder": 2,  # FARNS remote — keep limited (shared GPU)
         }
 
         logger.info("AgentSpawner initialized with staging dir: %s", staging_dir)

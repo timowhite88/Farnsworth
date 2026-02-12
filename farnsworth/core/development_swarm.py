@@ -25,6 +25,48 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from loguru import logger
 
+# FARNS mesh integration for intelligent model routing
+try:
+    from farnsworth.network.farns_v2_test import V2TestClient
+    FARNS_MESH_AVAILABLE = True
+except ImportError:
+    FARNS_MESH_AVAILABLE = False
+
+_mesh_client = None
+_mesh_connected = False
+
+async def _get_mesh_completion(prompt: str, max_tokens: int = 8000) -> Optional[str]:
+    """Route a completion request through the FARNS mesh via latent routing.
+
+    The latent router auto-selects the best model based on prompt semantics:
+    - Code tasks → qwen3-coder-next (80B) on Server 2
+    - Math/reasoning → deepseek-r1 on Server 1
+    - General → phi4 on Server 1
+    """
+    global _mesh_client, _mesh_connected
+
+    if not FARNS_MESH_AVAILABLE:
+        return None
+
+    try:
+        if not _mesh_connected or _mesh_client is None:
+            _mesh_client = V2TestClient('127.0.0.1')
+            _mesh_connected = await asyncio.wait_for(_mesh_client.connect(), timeout=10)
+            if not _mesh_connected:
+                return None
+
+        # Use latent routing - mesh auto-selects best model
+        result = await _mesh_client.test_latent_route(prompt)
+        if result and len(result.strip()) > 10:
+            logger.info(f"FARNS mesh handled task via latent routing ({len(result)} chars)")
+            return result
+        return None
+    except Exception as e:
+        logger.debug(f"FARNS mesh unavailable: {e}")
+        _mesh_connected = False
+        _mesh_client = None
+        return None
+
 
 def _safe_content(content: Any) -> str:
     """
@@ -57,6 +99,12 @@ async def get_powerful_completion(prompt: str, task_complexity: str = "medium", 
     Complexity levels: "simple", "medium", "complex", "critical"
     prefer_model: "opus" for Claude Opus 4.6, "sonnet" for Claude Sonnet 4.5, None for default routing
     """
+    # FARNS mesh first — latent router selects optimal model across the GPU mesh
+    if not prefer_model:  # Don't override explicit model preferences
+        mesh_result = await _get_mesh_completion(prompt, max_tokens)
+        if mesh_result:
+            return mesh_result
+
     # Model preference routing — Opus for code gen, Sonnet for discussion/planning
     if prefer_model == "opus":
         try:

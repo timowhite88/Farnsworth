@@ -1250,6 +1250,20 @@ try:
 except Exception as e:
     logger.warning(f"Failed to load orchestrator routes: {e}")
 
+try:
+    from farnsworth.web.routes.pro_routes import router as pro_router
+    app.include_router(pro_router, tags=["Farnsworth Pro"])
+    logger.info("Route module loaded: pro (Farnsworth Pro Platform)")
+except Exception as e:
+    logger.warning(f"Failed to load pro routes: {e}")
+
+try:
+    from farnsworth.web.routes.farns_mesh import router as farns_mesh_router
+    app.include_router(farns_mesh_router, tags=["FARNS Mesh"])
+    logger.info("Route module loaded: farns_mesh (FARNS Mesh Dashboard)")
+except Exception as e:
+    logger.warning(f"Failed to load farns_mesh routes: {e}")
+
 
 # ============================================
 # REQUEST MODELS
@@ -4474,6 +4488,12 @@ async def chat_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/hackathon", response_class=HTMLResponse)
+async def hackathon_dashboard(request: Request):
+    """Serve the hackathon live dashboard - real-time swarm building view."""
+    return templates.TemplateResponse("hackathon.html", {"request": request})
+
+
 @app.get("/demo", response_class=HTMLResponse)
 async def hackathon_demo(request: Request):
     """Serve the hackathon demo page - swarm intelligence visualizer."""
@@ -4591,17 +4611,81 @@ async def trading_status(request: Request):
 
 @app.get("/api/trading/dashboard")
 async def trading_dashboard():
-    """Public read-only dashboard view — no auth needed."""
-    if _trader_instance is None:
+    """Public read-only dashboard view — reads state file if trader runs externally."""
+    if _trader_instance is not None:
+        return await _trader_instance.status()
+    # v5.1: Read state file directly when trader runs in separate process (tmux)
+    import json as _json
+    state_path = os.path.join(os.path.dirname(__file__), "..", "trading", ".trader_state.json")
+    try:
+        with open(state_path, "r") as f:
+            s = _json.load(f)
+        positions = []
+        for addr, p in s.get("positions", {}).items():
+            positions.append({
+                "mint": addr, "symbol": p.get("symbol", "?"),
+                "entry_price": p.get("entry_price", 0),
+                "sol_amount": p.get("amount_sol_spent", p.get("sol_amount", 0)),
+                "entry_time": p.get("entry_time", 0),
+                "source": p.get("source", ""),
+            })
+        total = s.get("total_trades", 0)
+        wins = s.get("winning_trades", s.get("wins", 0))
+        return {
+            "running": not s.get("paper_trade", True),
+            "wallet": s.get("wallet", ""),
+            "total_pnl_sol": s.get("total_pnl_sol", 0),
+            "start_balance": s.get("start_balance", 0),
+            "positions": positions,
+            "stats": {
+                "total_trades": total, "wins": wins,
+                "losses": s.get("losses", total - wins),
+                "total_pnl_sol": s.get("total_pnl_sol", 0),
+                "total_invested_sol": s.get("total_invested_sol", 0),
+                "win_rate": round((wins / total * 100) if total > 0 else 0, 1),
+            },
+            "trades": [
+                {"action": t.get("action"), "symbol": t.get("symbol"),
+                 "amount_sol": t.get("sol_amount", t.get("amount_sol", 0)),
+                 "pnl_sol": t.get("pnl_sol", 0), "timestamp": t.get("timestamp", 0),
+                 "reason": t.get("reason", "")}
+                for t in s.get("trades", [])[-50:]
+            ],
+            "intelligence": {},
+            "sniper_feed": [], "cabal_feed": [], "scan_feed": [],
+            "whale_feed": [], "prediction_feed": [], "x_feed": [],
+            "config": {},
+        }
+    except Exception:
         return {"running": False}
-    return await _trader_instance.status()
 
 @app.get("/api/trading/dashboard/wallet")
 async def trading_dashboard_wallet():
-    """Public read-only wallet balance — no auth needed."""
+    """Public read-only wallet balance — reads state file if trader runs externally."""
     if _trader_instance:
         balance = await _trader_instance.get_sol_balance()
         return {"wallet": _trader_instance.pubkey, "balance_sol": balance}
+    # v5.1: Read wallet from state file + RPC balance
+    import json as _json
+    state_path = os.path.join(os.path.dirname(__file__), "..", "trading", ".trader_state.json")
+    wallet_path = os.path.join(os.path.dirname(__file__), "..", "trading", ".wallets", "degen_trader.json")
+    try:
+        pubkey = None
+        try:
+            with open(wallet_path, "r") as f:
+                pubkey = _json.load(f).get("pubkey")
+        except Exception:
+            pass
+        if pubkey:
+            import aiohttp
+            async with aiohttp.ClientSession() as sess:
+                payload = {"jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [pubkey]}
+                async with sess.post("https://api.mainnet-beta.solana.com", json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    data = await resp.json()
+                    balance = data.get("result", {}).get("value", 0) / 1_000_000_000
+                    return {"wallet": pubkey, "balance_sol": balance}
+    except Exception:
+        pass
     return {"wallet": None, "balance_sol": None}
 
 @app.post("/api/trading/start")
@@ -4954,6 +5038,13 @@ async def websocket_swarm(websocket: WebSocket):
                     await websocket.send_json({"type": "pong"})
 
                 elif data.get("type") == "swarm_message":
+                    # Pause free discussion while user is active
+                    try:
+                        if free_discussion_engine:
+                            free_discussion_engine.notify_user_activity()
+                    except Exception:
+                        pass
+
                     # Rate limit check per connection
                     if not ws_rate_limiter.is_allowed(user_id):
                         await websocket.send_json({
@@ -6201,6 +6292,131 @@ async def start_polymarket_predictor():
         await init_polymarket_predictor()
     except Exception as e:
         logger.error(f"Failed to start Polymarket predictor: {e}")
+
+
+@app.on_event("startup")
+async def start_farns_node_daemon():
+    """Start the FARNS mesh node inside the web server process."""
+    try:
+        from farnsworth.network.farns_node import start_farns_node, get_farns_node
+        import socket
+        # Detect node name from hostname or default
+        hostname = socket.gethostname()
+        node_name = "nexus-alpha" if "alpha" in hostname or True else "nexus-beta"
+        # Check if port 9999 is already in use (external node running)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("0.0.0.0", 9999))
+            sock.close()
+            # Port is free — start the node
+            node = await start_farns_node(node_name)
+            logger.info(f"FARNS Node '{node_name}' started inside web server (port 9999)")
+
+            # Phase 2a: Register local Ollama models as FARNS bots
+            try:
+                from farnsworth.network.farns_node import _register_ollama_bots
+                await _register_ollama_bots(node)
+                logger.info("Ollama bots registered with FARNS node")
+            except Exception as e:
+                logger.warning(f"Could not register Ollama bots: {e}")
+
+            # Phase 2b: Start FARNS bridge (bidirectional shadow-agent <-> FARNS-bot)
+            try:
+                from farnsworth.network.farns_bridge import start_farns_bridge
+                asyncio.create_task(start_farns_bridge())
+                logger.info("FARNS bridge started")
+            except Exception as e:
+                logger.warning(f"Could not start FARNS bridge: {e}")
+
+        except OSError:
+            sock.close()
+            logger.info("FARNS Node port 9999 already in use — external node running")
+    except Exception as e:
+        logger.warning(f"Could not start FARNS node: {e}")
+
+
+# =============================================================================
+# FREE DISCUSSION ENGINE — autonomous inter-bot research discussions
+# =============================================================================
+
+free_discussion_engine = None
+
+@app.on_event("startup")
+async def start_free_discussion():
+    """Start the autonomous free discussion engine."""
+    global free_discussion_engine
+    try:
+        from farnsworth.core.collective.free_discussion import (
+            FreeDiscussionEngine,
+            set_free_discussion_engine,
+        )
+        free_discussion_engine = FreeDiscussionEngine(
+            participants=["phi", "deepseek", "qwen2_5"],
+            min_interval=30.0,
+            max_interval=90.0,
+        )
+        set_free_discussion_engine(free_discussion_engine)
+        asyncio.create_task(free_discussion_engine.start())
+        logger.info("Free Discussion Engine started — bots are now researching autonomously")
+    except Exception as e:
+        logger.error(f"Failed to start Free Discussion Engine: {e}")
+
+
+@app.get("/api/discussion/status")
+async def discussion_status():
+    """Get current free discussion status."""
+    if not free_discussion_engine:
+        return {"running": False, "error": "Engine not initialized"}
+    return free_discussion_engine.get_status()
+
+
+@app.post("/api/discussion/control")
+async def discussion_control(request: Request):
+    """Control the free discussion engine.
+
+    Actions: pause, resume, new_topic, add_participant, remove_participant
+    """
+    if not free_discussion_engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    body = await request.json()
+    action = body.get("action", "")
+
+    if action == "pause":
+        free_discussion_engine.pause()
+        return {"status": "paused"}
+
+    elif action == "resume":
+        free_discussion_engine.resume()
+        return {"status": "resumed"}
+
+    elif action == "new_topic":
+        topic = body.get("topic")
+        if topic:
+            free_discussion_engine.set_topic(topic)
+        else:
+            free_discussion_engine._pick_new_topic()
+        return {"status": "topic_changed", "topic": free_discussion_engine.current_topic}
+
+    elif action == "add_participant":
+        agent_id = body.get("agent_id")
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id required")
+        ok = free_discussion_engine.add_participant(agent_id)
+        return {"status": "added" if ok else "failed", "agent_id": agent_id}
+
+    elif action == "remove_participant":
+        agent_id = body.get("agent_id")
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="agent_id required")
+        free_discussion_engine.remove_participant(agent_id)
+        return {"status": "removed", "agent_id": agent_id}
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown action: {action}. Use: pause, resume, new_topic, add_participant, remove_participant"
+        )
 
 
 @app.on_event("startup")

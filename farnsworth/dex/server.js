@@ -229,13 +229,33 @@ async function fetchCollectiveData() {
             }
         }
 
-        // 2. Trader status & positions
-        const traderData = await safeFetch(`${FARNSWORTH_API}/api/trading/status`);
+        // 2. Trader status & positions — read state file directly (fast, no API dependency)
+        let traderData = null;
+        try {
+            const fs = require('fs');
+            const stateRaw = fs.readFileSync('/workspace/Farnsworth/farnsworth/trading/.trader_state.json', 'utf8');
+            const state = JSON.parse(stateRaw);
+            const positions = Object.entries(state.positions || {}).map(([addr, p]) => ({
+                mint: addr, symbol: p.symbol, entry_price: p.entry_price,
+                sol_amount: p.sol_amount, timestamp: p.timestamp,
+            }));
+            const totalTrades = state.total_trades || 0;
+            const wins = state.wins || 0;
+            const winRate = totalTrades > 0 ? Math.round((wins / totalTrades) * 100) : 0;
+            traderData = {
+                running: true,
+                positions,
+                stats: { total_trades: totalTrades, wins, losses: state.losses || 0, total_pnl_sol: state.total_pnl_sol || 0, win_rate: winRate },
+            };
+        } catch (e) {
+            // Fallback to API
+            traderData = await safeFetch(`${FARNSWORTH_API}/api/trading/status`);
+        }
         if (traderData && traderData.running) {
             collectiveData.trader = {
                 running: true,
                 positions: traderData.positions || [],
-                winRate: traderData.win_rate || traderData.stats?.win_rate || 0,
+                winRate: traderData.stats?.win_rate || 0,
                 totalTrades: traderData.stats?.total_trades || 0,
                 pnl: traderData.stats?.total_pnl_sol || 0,
                 lastFetch: Date.now(),
@@ -637,10 +657,23 @@ app.get('/api/search', async (req, res) => {
     res.json({ tokens: cacheResults.slice(0, 30) });
 });
 
-// Chart data via GeckoTerminal
+// Chart data — GoldRush streaming (primary) → GeckoTerminal (fallback)
 app.get('/api/chart/:address', async (req, res) => {
     const { address } = req.params;
     const { timeframe = '15m' } = req.query;
+
+    // v5.0: Try GoldRush streaming candles first (real-time 1m data)
+    if (timeframe === '1m' && goldrushCandles.has(address) && goldrushCandles.get(address).length > 0) {
+        const candles = goldrushCandles.get(address);
+        return res.json({ candles, source: 'goldrush-stream', pair: address });
+    }
+
+    // Subscribe to GoldRush candles for this token if not already
+    if (goldrushClient && !goldrushCandles.has(address)) {
+        subscribeGoldRushCandles(address);
+    }
+
+    // Fallback: GeckoTerminal OHLCV
     const tfMap = { '1m': ['minute', 1], '5m': ['minute', 5], '15m': ['minute', 15], '1h': ['hour', 1], '4h': ['hour', 4], '1d': ['day', 1] };
     const [period, agg] = tfMap[timeframe] || tfMap['15m'];
 
@@ -648,16 +681,20 @@ app.get('/api/chart/:address', async (req, res) => {
     const poolAddr = token?.pairAddress || address;
 
     const data = await safeFetch(`https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddr}/ohlcv/${period}?aggregate=${agg}&limit=300&currency=usd`);
-    if (!data?.data?.attributes?.ohlcv_list) {
-        return res.json({ candles: [], source: 'unavailable' });
+    if (data?.data?.attributes?.ohlcv_list) {
+        const candles = data.data.attributes.ohlcv_list.map(c => ({
+            time: c[0], open: parseFloat(c[1]), high: parseFloat(c[2]),
+            low: parseFloat(c[3]), close: parseFloat(c[4]), volume: parseFloat(c[5]),
+        })).sort((a, b) => a.time - b.time);
+        return res.json({ candles, source: 'geckoterminal', pair: poolAddr });
     }
 
-    const candles = data.data.attributes.ohlcv_list.map(c => ({
-        time: c[0], open: parseFloat(c[1]), high: parseFloat(c[2]),
-        low: parseFloat(c[3]), close: parseFloat(c[4]), volume: parseFloat(c[5]),
-    })).sort((a, b) => a.time - b.time);
+    // v5.0: Last resort — return any GoldRush candles we have even if timeframe doesn't match
+    if (goldrushCandles.has(address) && goldrushCandles.get(address).length > 0) {
+        return res.json({ candles: goldrushCandles.get(address), source: 'goldrush-stream', pair: address });
+    }
 
-    res.json({ candles, source: 'geckoterminal', pair: poolAddr });
+    res.json({ candles: [], source: 'unavailable' });
 });
 
 // AI Prediction
@@ -959,6 +996,7 @@ const providerState = {
     geckoterminal: { backoffUntil: 0, fails: 0 },
     raydium:       { backoffUntil: 0, fails: 0 },
     helius:        { backoffUntil: 0, fails: 0 },
+    goldrush:      { backoffUntil: 0, fails: 0 },
 };
 
 function markProviderFail(name) {
@@ -1139,6 +1177,117 @@ async function fetchHeliusMultiPrice(addresses) {
     } catch { return {}; }
 }
 
+// ── PROVIDER 7: GoldRush Streaming API (real-time OHLCV + new pairs) ──
+const GOLDRUSH_API_KEY = process.env.GOLDRUSH_API_KEY || 'cqt_rQHQf7Jjtdbwchwvf3ctgTQpKTc8';
+const goldrushCandles = new Map(); // address -> [{ time, open, high, low, close, volume }]
+const goldrushPrices = new Map();  // address -> { price, ts }
+let goldrushClient = null;
+let goldrushNewPairsSub = null;
+
+async function initGoldRush() {
+    try {
+        // SDK's StreamingWebSocketClient.connect() calls createClient() without
+        // forwarding webSocketImpl — set global so createClient finds it.
+        if (typeof globalThis.WebSocket === 'undefined') {
+            globalThis.WebSocket = require('ws');
+        }
+        const { GoldRushClient } = require('@covalenthq/client-sdk');
+        goldrushClient = new GoldRushClient(
+            GOLDRUSH_API_KEY,
+            {},
+            {
+                onOpened: () => console.log('[GOLDRUSH] Connected to streaming service'),
+                onClosed: () => console.log('[GOLDRUSH] Disconnected from streaming service'),
+                onError: (err) => console.error('[GOLDRUSH] Error:', err),
+            }
+        );
+
+        // Subscribe to new Solana DEX pairs (raw query — SDK method has schema mismatch)
+        goldrushNewPairsSub = goldrushClient.StreamingService.rawQuery(
+            `subscription { newPairs(chain_name: SOLANA_MAINNET) { chain_name protocol pair_address tx_hash liquidity } }`, {},
+            {
+                next: (data) => {
+                    const pairs = data?.data?.newPairs;
+                    if (!pairs) return;
+                    const arr = Array.isArray(pairs) ? pairs : [pairs];
+                    for (const pair of arr) {
+                        console.log(`[GOLDRUSH] New pair: ${pair.pair_address?.slice(0,8)}... on ${pair.protocol} liq=$${Math.round(pair.liquidity || 0)}`);
+                        const msg = JSON.stringify({ type: 'newPair', pair: {
+                            address: pair.pair_address,
+                            pairAddress: pair.pair_address,
+                            protocol: pair.protocol,
+                            liquidity: pair.liquidity,
+                        }});
+                        for (const ws of wsClients) {
+                            if (ws.readyState === 1) { try { ws.send(msg); } catch {} }
+                        }
+                    }
+                },
+                error: (err) => console.error('[GOLDRUSH] newPairs error:', err),
+            }
+        );
+        console.log('[GOLDRUSH] Streaming initialized — new pairs + OHLCV candles');
+    } catch (e) {
+        console.warn('[GOLDRUSH] SDK not available:', e.message);
+    }
+}
+
+function subscribeGoldRushCandles(tokenAddress) {
+    if (!goldrushClient || goldrushCandles.has(tokenAddress)) return;
+    goldrushCandles.set(tokenAddress, []);
+    try {
+        goldrushClient.StreamingService.rawQuery(
+            `subscription { ohlcvCandlesForToken(chain_name: SOLANA_MAINNET, token_addresses: ["${tokenAddress}"], interval: ONE_MINUTE, timeframe: ONE_HOUR) { timestamp open high low close volume volume_usd } }`, {},
+            {
+                next: (data) => {
+                    const candles = data?.data?.ohlcvCandlesForToken;
+                    if (!candles) return;
+                    const arr2 = Array.isArray(candles) ? candles : [candles];
+                    for (const candle of arr2) {
+                        const entry = {
+                            time: Math.floor(new Date(candle.timestamp).getTime() / 1000),
+                            open: parseFloat(candle.open), high: parseFloat(candle.high),
+                            low: parseFloat(candle.low), close: parseFloat(candle.close),
+                            volume: parseFloat(candle.volume_usd || candle.volume || 0),
+                        };
+                        const arr = goldrushCandles.get(tokenAddress) || [];
+                        arr.push(entry);
+                        if (arr.length > 300) arr.shift();
+                        goldrushCandles.set(tokenAddress, arr);
+                        if (entry.close > 0) {
+                            goldrushPrices.set(tokenAddress, { price: entry.close, ts: Date.now() });
+                            livepriceCache.set(tokenAddress, { price: entry.close, source: 'goldrush-stream', ts: Date.now() });
+                        }
+                        const msg = JSON.stringify({ type: 'candle', token: tokenAddress, candle: entry, source: 'goldrush' });
+                        for (const ws of wsClients) {
+                            if (ws.readyState === 1 && ws.subs?.has(tokenAddress)) {
+                                try { ws.send(msg); } catch {}
+                            }
+                        }
+                    }
+                },
+                error: (err) => console.error(`[GOLDRUSH] candle error for ${tokenAddress.slice(0,8)}:`, err),
+            }
+        );
+        console.log(`[GOLDRUSH] Subscribed to OHLCV: ${tokenAddress.slice(0, 12)}...`);
+    } catch (e) {
+        console.warn(`[GOLDRUSH] Candle subscribe failed for ${tokenAddress.slice(0,8)}:`, e.message);
+    }
+}
+
+// GoldRush as batch price provider (uses cached stream prices)
+async function fetchGoldRushMultiPrice(addresses) {
+    const results = {};
+    for (const addr of addresses) {
+        const cached = goldrushPrices.get(addr);
+        if (cached && Date.now() - cached.ts < 10000) {
+            results[addr] = { price: cached.price, source: 'goldrush', ts: cached.ts };
+        }
+    }
+    if (Object.keys(results).length > 0) markProviderOk('goldrush');
+    return results;
+}
+
 // ── ROUND-ROBIN PROVIDER CYCLING ──
 const PROVIDER_ORDER = [
     { name: 'birdeye',       fn: fetchBirdeyeMultiPrice },
@@ -1147,6 +1296,7 @@ const PROVIDER_ORDER = [
     { name: 'geckoterminal', fn: fetchGeckoTerminalMultiPrice },
     { name: 'raydium',       fn: fetchRaydiumMultiPrice },
     { name: 'helius',        fn: fetchHeliusMultiPrice },
+    { name: 'goldrush',      fn: fetchGoldRushMultiPrice },
 ];
 let currentProviderIdx = 0;
 
@@ -1258,6 +1408,8 @@ setInterval(livePricePollCycle, LIVE_POLL_MS);
 function startLiveWatch(address) {
     if (livePriceWatchers.has(address)) return;
     livePriceWatchers.set(address, { lastTouch: Date.now() });
+    // v5.0: Auto-subscribe to GoldRush 1m candles for real-time chart data
+    if (goldrushClient) subscribeGoldRushCandles(address);
     console.log(`[LIVE] Watching: ${address.slice(0, 8)}... (${livePriceWatchers.size} active)`);
 }
 
@@ -2107,6 +2259,9 @@ server.listen(PORT, () => {
 
     // Connect Helius WebSocket for real-time swap detection
     setTimeout(connectHeliusWs, 3000);
+
+    // v5.0: Initialize GoldRush streaming (new pairs + OHLCV candles)
+    setTimeout(initGoldRush, 5000);
 });
 
 module.exports = { app, server, broadcastAll, broadcastQuantum, checkFarnsBalance };
