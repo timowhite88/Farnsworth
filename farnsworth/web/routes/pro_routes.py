@@ -362,11 +362,77 @@ async def auth_select_plan(request: Request):
 
 
 # ============================================================
-# CHAT API
+# CHAT API — Routes through FARNS Mesh with Latent Routing
 # ============================================================
+
+def _get_farns_node():
+    """Get the running FARNS node."""
+    try:
+        from farnsworth.network.farns_node import get_farns_node
+        return get_farns_node()
+    except Exception:
+        return None
+
+
+async def _mesh_query(prompt: str, model: str = "", timeout: float = 90.0):
+    """
+    Route a query through the FARNS mesh.
+    If model is specified, routes directly. Otherwise uses latent routing.
+    Returns (response_text, routing_metadata).
+    """
+    node = _get_farns_node()
+    if not node:
+        return None, {}
+
+    available = list(node.get_all_bots().keys())
+    if not available:
+        return None, {}
+
+    # Latent route or direct model selection
+    routing_meta = {}
+    bot_name = model
+    if node._latent_router and (not model or model == "farnsworth" or model not in available):
+        decision = node._latent_router.route(prompt, available)
+        bot_name = decision.selected_bot
+        routing_meta = {
+            "routed_to": decision.selected_bot,
+            "confidence": round(decision.confidence, 4),
+            "method": decision.method,
+            "mesh_routed": True,
+        }
+    else:
+        routing_meta = {"routed_to": bot_name, "mesh_routed": True, "method": "direct"}
+
+    # Execute through mesh
+    t0 = time.time()
+    try:
+        local_bots = node.get_local_bots()
+        if bot_name in local_bots:
+            resp = await asyncio.wait_for(
+                node._local_bots[bot_name](prompt, 2000), timeout=timeout
+            )
+        else:
+            resp = await asyncio.wait_for(
+                node.query_remote_bot(bot_name, prompt, 2000, timeout), timeout=timeout
+            )
+        routing_meta["inference_ms"] = round((time.time() - t0) * 1000)
+
+        # Feed back to latent router for learning
+        if node._latent_router and resp and "decision" in dir():
+            quality = min(1.0, len(resp) / 200)
+            node._latent_router.record_outcome(decision, quality, routing_meta["inference_ms"])
+
+        return resp, routing_meta
+    except Exception as e:
+        logger.warning(f"Mesh query to {bot_name} failed: {e}")
+        routing_meta["error"] = str(e)
+        routing_meta["inference_ms"] = round((time.time() - t0) * 1000)
+        return None, routing_meta
+
+
 @router.post("/api/pro/chat")
 async def pro_chat_api(request: Request):
-    """Send a chat message and get AI response."""
+    """Send a chat message — routes through FARNS mesh with latent routing."""
     try:
         body = await request.json()
         message = body.get("message", "").strip()
@@ -378,44 +444,55 @@ async def pro_chat_api(request: Request):
         if not message:
             return JSONResponse({"error": "Message required"}, status_code=400)
 
-        # Try to get response from the actual agent system
+        # Build prompt with mode context
+        prompt = message
+        if mode == "research":
+            prompt = f"[RESEARCH MODE - be thorough, cite sources, provide detailed analysis]\n\n{message}"
+        elif mode == "creative":
+            prompt = f"[CREATIVE MODE - be inventive, think outside the box]\n\n{message}"
+
         response_text = ""
-        try:
-            from farnsworth.core.agent_spawner import get_agent_spawner
-            spawner = get_agent_spawner()
+        routing_meta = {}
 
-            # Build prompt
-            prompt = message
-            if mode == "research":
-                prompt = f"[RESEARCH MODE - be thorough, cite sources, provide detailed analysis]\n\n{message}"
-            elif mode == "creative":
-                prompt = f"[CREATIVE MODE - be inventive, think outside the box]\n\n{message}"
+        # PRIMARY: Route through FARNS mesh with latent routing
+        mesh_resp, routing_meta = await _mesh_query(prompt, model)
+        if mesh_resp:
+            response_text = mesh_resp
 
-            result = await spawner.call_agent(model, prompt)
-            if result and isinstance(result, dict):
-                response_text = result.get("response", result.get("text", str(result)))
-            elif result:
-                response_text = str(result)
-        except Exception as e:
-            logger.warning(f"Agent call failed for {model}: {e}")
+        # FALLBACK 1: Agent spawner (if mesh unavailable)
+        if not response_text:
+            try:
+                from farnsworth.core.agent_spawner import get_agent_spawner
+                spawner = get_agent_spawner()
+                result = await spawner.call_agent(model, prompt)
+                if result and isinstance(result, dict):
+                    response_text = result.get("response", result.get("text", str(result)))
+                elif result:
+                    response_text = str(result)
+                routing_meta["fallback"] = "agent_spawner"
+            except Exception as e:
+                logger.warning(f"Agent spawner fallback failed for {model}: {e}")
 
-        # Fallback if agent didn't respond
+        # FALLBACK 2: Model swarm
         if not response_text:
             try:
                 from farnsworth.core.model_swarm import get_model_swarm
                 swarm = get_model_swarm()
                 result = await swarm.query(message, preferred_model=model)
                 response_text = result if isinstance(result, str) else str(result)
+                routing_meta["fallback"] = "model_swarm"
             except Exception as e2:
                 logger.warning(f"Swarm fallback failed: {e2}")
-                response_text = f"I received your message about: {message[:100]}... I'm currently processing through the swarm. The {model} agent is being initialized. Please try again in a moment."
+                response_text = f"I received your message. The swarm is initializing. Please try again in a moment."
+                routing_meta["fallback"] = "placeholder"
 
         return JSONResponse({
             "response": response_text,
-            "model": model,
+            "model": routing_meta.get("routed_to", model),
             "mode": mode,
             "conversation_id": conversation_id or str(uuid.uuid4())[:8],
             "timestamp": datetime.utcnow().isoformat(),
+            "routing": routing_meta,
         })
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -424,7 +501,7 @@ async def pro_chat_api(request: Request):
 
 @router.post("/api/pro/chat/stream")
 async def pro_chat_stream(request: Request):
-    """Stream a chat response using SSE."""
+    """Stream a chat response via FARNS mesh with latent routing."""
     try:
         body = await request.json()
         message = body.get("message", "").strip()
@@ -435,20 +512,31 @@ async def pro_chat_stream(request: Request):
 
         async def generate():
             try:
-                # Try to get response from agent
                 response_text = ""
-                try:
-                    from farnsworth.core.agent_spawner import get_agent_spawner
-                    spawner = get_agent_spawner()
-                    result = await spawner.call_agent(model, message)
-                    if result and isinstance(result, dict):
-                        response_text = result.get("response", result.get("text", str(result)))
-                    elif result:
-                        response_text = str(result)
-                except Exception:
-                    response_text = f"The {model} agent is processing your request. The swarm is deliberating on: {message[:200]}"
+                routing_meta = {}
 
-                # Stream character by character with small delays
+                # PRIMARY: FARNS mesh query
+                mesh_resp, routing_meta = await _mesh_query(message, model)
+                if mesh_resp:
+                    response_text = mesh_resp
+                else:
+                    # Fallback to agent spawner
+                    try:
+                        from farnsworth.core.agent_spawner import get_agent_spawner
+                        spawner = get_agent_spawner()
+                        result = await spawner.call_agent(model, message)
+                        if result and isinstance(result, dict):
+                            response_text = result.get("response", result.get("text", str(result)))
+                        elif result:
+                            response_text = str(result)
+                    except Exception:
+                        response_text = f"The swarm is processing your request. Deliberating on: {message[:200]}"
+
+                # Send routing metadata first
+                if routing_meta:
+                    yield f"data: {json.dumps({'routing': routing_meta})}\n\n"
+
+                # Stream response in chunks
                 for i in range(0, len(response_text), 3):
                     chunk = response_text[i:i+3]
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"

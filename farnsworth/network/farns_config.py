@@ -70,10 +70,18 @@ FARNS_PENDING_FILE = FARNS_DATA_DIR / "pending_approvals.json"
 # Network tuning
 TCP_BACKLOG = 64
 MAX_FRAME_SIZE = 4 * 1024 * 1024  # 4MB max frame
-HEARTBEAT_INTERVAL = 5.0  # seconds
-CONNECTION_TIMEOUT = 10.0
+HEARTBEAT_INTERVAL = 10.0  # seconds between heartbeats
+HEARTBEAT_TIMEOUT_MULT = 5  # miss 5 heartbeats before declaring dead (50s)
+CONNECTION_TIMEOUT = 15.0  # allow for SSH tunnel handshake overhead
+RECONNECT_INTERVAL = 10.0  # check for missing peers every 10s
+RECONNECT_MAX_RETRIES = 0  # 0 = infinite retries (never give up on core peers)
 STREAM_CHUNK_SIZE = 4096  # bytes per dialogue chunk
 MAX_STREAMS_PER_CONNECTION = 256
+
+# TCP keepalive tuning (critical for SSH tunnel connections)
+TCP_KEEPIDLE = 60   # start probes after 60s idle
+TCP_KEEPINTVL = 10  # probe every 10s
+TCP_KEEPCNT = 5     # 5 missed probes = dead
 
 
 def ensure_dirs():

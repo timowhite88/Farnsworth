@@ -55,9 +55,32 @@ from .farns_swarm_memory import (
 )
 from .farns_config import (
     CORE_NODES, NodeConfig, load_known_nodes, save_node,
-    HEARTBEAT_INTERVAL, CONNECTION_TIMEOUT, STREAM_CHUNK_SIZE,
-    MAX_STREAMS_PER_CONNECTION, FARNS_PENDING_FILE, ensure_dirs,
+    HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT_MULT, CONNECTION_TIMEOUT,
+    RECONNECT_INTERVAL, RECONNECT_MAX_RETRIES,
+    STREAM_CHUNK_SIZE, MAX_STREAMS_PER_CONNECTION,
+    FARNS_PENDING_FILE, ensure_dirs,
+    TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT,
 )
+
+import random  # for jitter in reconnect backoff
+
+
+def _tune_keepalive(sock):
+    """Apply aggressive TCP keepalive settings for SSH tunnel reliability."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # Platform-specific keepalive tuning
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, TCP_KEEPIDLE)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, TCP_KEEPINTVL)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, TCP_KEEPCNT)
+        elif sys.platform == "darwin":
+            # macOS uses TCP_KEEPALIVE instead of TCP_KEEPIDLE
+            TCP_KEEPALIVE_MAC = 0x10
+            sock.setsockopt(socket.IPPROTO_TCP, TCP_KEEPALIVE_MAC, TCP_KEEPIDLE)
+    except Exception as e:
+        logger.debug(f"Could not tune TCP keepalive: {e}")
 
 
 @dataclass
@@ -200,10 +223,9 @@ class FARNSNode:
             self.host, self.port,
             reuse_address=True,
         )
-        # Set TCP_NODELAY on server socket
+        # Tune TCP keepalive on server socket for SSH tunnel reliability
         for sock in self._server.sockets:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            _tune_keepalive(sock)
 
         logger.info(f"FARNS Node listening on {self.host}:{self.port}")
 
@@ -239,10 +261,10 @@ class FARNSNode:
         addr = writer.get_extra_info("peername")
         logger.info(f"Incoming connection from {addr}")
 
-        # Set TCP_NODELAY
+        # Tune TCP for SSH tunnel reliability
         sock = writer.get_extra_info("socket")
         if sock:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            _tune_keepalive(sock)
 
         try:
             # Expect HELLO packet first
@@ -345,9 +367,10 @@ class FARNSNode:
             asyncio.create_task(self._connect_to_peer(name, cfg.host, cfg.port))
 
     async def _connect_to_peer(self, peer_name: str, host: str, port: int,
-                               max_retries: int = 5):
-        """Connect to a specific peer with retry."""
-        for attempt in range(max_retries):
+                               max_retries: int = RECONNECT_MAX_RETRIES):
+        """Connect to a specific peer with retry. max_retries=0 means infinite."""
+        attempt = 0
+        while max_retries == 0 or attempt < max_retries:
             if not self._running:
                 return
             if peer_name in self._peers:
@@ -360,10 +383,10 @@ class FARNSNode:
                     timeout=CONNECTION_TIMEOUT,
                 )
 
-                # Set TCP_NODELAY
+                # Tune TCP for SSH tunnel reliability
                 sock = writer.get_extra_info("socket")
                 if sock:
-                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    _tune_keepalive(sock)
 
                 # Send HELLO
                 await write_frame(writer, make_hello(
@@ -430,9 +453,12 @@ class FARNSNode:
 
             except (ConnectionError, asyncio.TimeoutError, OSError) as e:
                 logger.debug(f"Failed to connect to {peer_name}: {e}")
-                await asyncio.sleep(min(2 ** attempt, 30))
+                # Exponential backoff with jitter (cap at 30s)
+                delay = min(2 ** attempt, 30) + random.uniform(0, 2)
+                await asyncio.sleep(delay)
+                attempt += 1
 
-        logger.warning(f"Could not connect to peer {peer_name} after {max_retries} attempts")
+        logger.warning(f"Could not connect to peer {peer_name} after {attempt} attempts")
 
     # ── Packet Handler ────────────────────────────────────────
 
@@ -442,15 +468,18 @@ class FARNSNode:
             while self._running:
                 packet = await asyncio.wait_for(
                     read_frame(peer.reader),
-                    timeout=HEARTBEAT_INTERVAL * 3,  # 3 missed heartbeats = dead
+                    timeout=HEARTBEAT_INTERVAL * HEARTBEAT_TIMEOUT_MULT,
                 )
                 if packet is None:
                     break
 
+                peer.last_heartbeat = time.time()
                 await self._dispatch_packet(peer, packet)
 
-        except (asyncio.TimeoutError, ConnectionError, asyncio.IncompleteReadError):
-            logger.info(f"Peer {peer.node_name} disconnected")
+        except asyncio.TimeoutError:
+            logger.warning(f"Peer {peer.node_name} timed out after {HEARTBEAT_INTERVAL * HEARTBEAT_TIMEOUT_MULT}s — will reconnect")
+        except (ConnectionError, asyncio.IncompleteReadError) as e:
+            logger.info(f"Peer {peer.node_name} disconnected: {e}")
         finally:
             async with self._peer_lock:
                 self._peers.pop(peer.node_name, None)
@@ -1177,7 +1206,7 @@ class FARNSNode:
     async def _reconnect_loop(self):
         """Periodically check for missing peers and reconnect."""
         while self._running:
-            await asyncio.sleep(30)  # Check every 30 seconds
+            await asyncio.sleep(RECONNECT_INTERVAL)
 
             nodes = load_known_nodes()
             for name, cfg in nodes.items():
@@ -1185,8 +1214,10 @@ class FARNSNode:
                     continue
                 if name not in self._peers:
                     logger.info(f"Peer {name} missing, attempting reconnect...")
+                    # Core peers get infinite retries, PRO peers get limited
+                    retries = 0 if cfg.node_type == "core" else 5
                     asyncio.create_task(
-                        self._connect_to_peer(name, cfg.host, cfg.port, max_retries=3)
+                        self._connect_to_peer(name, cfg.host, cfg.port, max_retries=retries)
                     )
 
     async def _memory_sync_loop(self):
