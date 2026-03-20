@@ -5,7 +5,7 @@
 3ZjQUACZ2qBqPDLmaksGQf12jsLbT1BJ9o4JnzZbpump
 
 
-LAUNCHING ON PUMPFUN 3/4/2026
+
 
 ```
       ___           ___                       ___           ___           ___           ___
